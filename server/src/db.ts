@@ -331,6 +331,45 @@ export function patchDocumentFields(
   return rowToDocumentWithProvenance(db, updated);
 }
 
+interface SectionRow {
+  id: string;
+  document_id: string;
+  parent_id: string | null;
+  order: number;
+  level: number;
+  type: string;
+  n: string | null;
+  heading: string | null;
+  text: string;
+  xml_fragment: string;
+}
+
+export function getSectionsByDocumentId(
+  db: DatabaseT,
+  documentId: string,
+): DocumentSection[] {
+  const rows = db
+    .prepare(
+      `SELECT id, document_id, parent_id, "order", level, type, n, heading, text, xml_fragment
+       FROM document_sections
+       WHERE document_id = ?
+       ORDER BY "order"`,
+    )
+    .all(documentId) as SectionRow[];
+  return rows.map((row) => ({
+    id: row.id,
+    documentId: row.document_id,
+    parentId: row.parent_id,
+    order: row.order,
+    level: row.level,
+    type: row.type as DocumentSection['type'],
+    n: row.n,
+    heading: row.heading,
+    text: row.text,
+    xmlFragment: row.xml_fragment,
+  }));
+}
+
 export function replaceSections(
   db: DatabaseT,
   documentId: string,

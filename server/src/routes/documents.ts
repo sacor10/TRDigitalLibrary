@@ -4,11 +4,14 @@ import type { Database as DatabaseT } from 'better-sqlite3';
 import { DocumentListQuerySchema, DocumentPatchSchema } from '@tr/shared';
 
 import {
+  getSectionsByDocumentId,
   patchDocumentFields,
+  rowToDocument,
   rowToDocumentWithProvenance,
   type DocumentRow,
   type ProvenanceContext,
 } from '../db.js';
+import { FORMAT_BY_EXT, generateExport } from '../export/index.js';
 
 export function createDocumentsRouter(db: DatabaseT): Router {
   const router = Router();
@@ -55,6 +58,35 @@ export function createDocumentsRouter(db: DatabaseT): Router {
       items: rows.map((row) => rowToDocumentWithProvenance(db, row)),
       total: totalRow.c,
     });
+  });
+
+  router.get('/:id/export.:ext', async (req, res) => {
+    const { id, ext } = req.params;
+    const format = FORMAT_BY_EXT[ext];
+    if (!format) {
+      return res.status(404).json({ error: `Unsupported export extension: ${ext}` });
+    }
+    const row = db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as
+      | DocumentRow
+      | undefined;
+    if (!row) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    const doc = rowToDocument(row);
+    const sections = getSectionsByDocumentId(db, id);
+    try {
+      const artifact = await generateExport(doc, sections, format);
+      res.setHeader('Content-Type', artifact.contentType);
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${artifact.filename}"`,
+      );
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.status(200).send(artifact.body);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Export failed';
+      return res.status(500).json({ error: 'Export failed', details: message });
+    }
   });
 
   router.get('/:id', (req, res) => {

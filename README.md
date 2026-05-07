@@ -92,6 +92,28 @@ TEI preserved in `tei_xml`) and their structural hierarchy — `div`, `p`, `lg`,
 FTS5-searchable. The CLI prints a per-file report and exits non-zero if any
 file fails validation.
 
+### Exporting documents
+
+Every document is downloadable as PDF, EPUB, or TEI/XML directly from the API,
+and from the **Export** panel in the document sidebar of the reader UI:
+
+```bash
+curl -OJ http://localhost:3001/api/documents/man-in-the-arena/export.pdf
+curl -OJ http://localhost:3001/api/documents/man-in-the-arena/export.epub
+curl -OJ http://localhost:3001/api/documents/man-in-the-arena/export.xml
+```
+
+To run the spec validators (CI-friendly; both skip if the tool is absent):
+
+```bash
+# Requires libxml2-utils (apt) or libxml2 (brew). Fetches tei_all.rng on first run.
+npm run validate-tei -w server
+
+# Requires epubcheck on PATH (`brew install epubcheck`) or
+# EPUBCHECK_JAR=/path/to/epubcheck.jar with java on PATH.
+npm run validate-epub -w server
+```
+
 ---
 
 ## 3. Architecture
@@ -208,7 +230,7 @@ Legend: **S** = small (≤1 day) · **M** = medium (1–3 days) · **L** = large
 - [x] **IIIF image server integration** — L — Internet Archive IIIF ($0, public-domain content only). Upload facsimiles to archive.org; endpoints auto-generated at `iiif.archive.org`; no server, no config, no egress cost; full IIIF Image API 3.0; no SLA or manifest control. Implemented as `iiifManifestUrl` (Presentation 3.0) on every document, parsed by `client/src/lib/iiif.ts`, rendered by `IIIFFacsimilePane` via OpenSeadragon for deep-zoom + multi-page navigation; legacy `facsimileUrl` retained as fallback.
 - [ ] **OCR pipeline (Tesseract → Transkribus)** — XL — Tesseract free; Transkribus credits ~€0.05/page for handwriting. Acceptance: a typewritten page yields ≥98% character accuracy; a handwritten letter yields ≥90% via Transkribus.
 - [x] **Provenance tracking** — M — implemented: every scalar field on every document carries `{sourceUrl, fetchedAt, editor}` recorded at seed/ingest time in `document_field_provenance`, with an append-only `document_field_provenance_history` audit trail. Corrections go through `PATCH /api/documents/:id` (requires `X-Editor` header) until the auth pillar lands. Migration `004_provenance.sql`; schemas `FieldProvenance` / `DocumentPatch` in `shared/src/schemas/document.ts`; seed/ingest editor defaults to `seed` / `tei-ingest` and is overridable via `TR_EDITOR` env var or `--editor` flag.
-- [ ] **Multi-format exports (PDF / EPUB / TEI)** — L — Acceptance: per-document export buttons; PDF preserves typography; EPUB validates with `epubcheck`; TEI validates against P5.
+- [x] **Multi-format exports (PDF / EPUB / TEI)** — L — implemented: per-document Export panel in the sidebar; server endpoints `GET /api/documents/:id/export.{pdf,epub,xml}` stream downloads with `Content-Disposition` filenames slugged from author/date/title. PDF rendered via `pdfkit` with a serif type pairing (Times-Roman body, Times-Italic emphasis, Helvetica labels) and structured rendering of TEI sections; EPUB 3 hand-built with `jszip` (mimetype-first, container.xml, OPF with Dublin Core, nav.xhtml, single XHTML document, embedded CSS); TEI passes through `documents.tei_xml` byte-for-byte when present and otherwise synthesises a minimal P5-conformant document from metadata + transcription. Structural invariants are unit-tested in `server/src/__tests__/export.test.ts`. Optional `npm run validate-tei -w server` shells out to `xmllint --relaxng tei_all.rng`; `npm run validate-epub -w server` shells out to `epubcheck` (or `java -jar $EPUBCHECK_JAR`); both skip cleanly when the tool is absent.
 - [ ] **Letters of Theodore Roosevelt corpus (~150,000 items)** — XL — depends on partnership with the Theodore Roosevelt Center. Acceptance: ingestion of the full Morison/Blum Harvard edition with structured recipients and dates.
 
 ### Pillar 2 — Intelligent Search
