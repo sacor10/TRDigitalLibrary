@@ -239,7 +239,7 @@ Legend: **S** = small (≤1 day) · **M** = medium (1–3 days) · **L** = large
 - [ ] **Migrate search to Meilisearch** — M — self-hosted free, or Meilisearch Cloud ($30+/mo). Acceptance: same `/api/search` contract, typo tolerance, faceted filters return in <100ms at p99 over the full corpus.
 - [ ] **Semantic search via embeddings** — L — OpenAI `text-embedding-3-small` (~$0.02/1M tokens) or local `bge-small-en` + pgvector. Acceptance: `/api/search?semantic=1` returns conceptually-related results not lexically matched.
 - [x] **Network graph of correspondents** — L — implemented with Cytoscape.js: new `/network` page renders an undirected co-occurrence graph derived from each letter's `recipient` plus a curated `mentions: string[]` field on documents (migration `005_mentions.sql`, mirrors the `tags` JSON-array convention). Server endpoint `GET /api/correspondents/graph` returns `{nodes, edges, letters}`; the client filters those locally to show, on node click, that person's letters (linked to `/documents/:id`) and a focused subgraph of their direct neighbors. TR appears as a highlighted hub; node size scales with letter count, edge width with co-occurrence weight.
-- [ ] **Topic modeling (BERTopic)** — L — Acceptance: cluster the corpus into 30–60 themes; surface drift over time.
+- [x] **Topic modeling (BERTopic)** — L — Acceptance: cluster the corpus into 30–60 themes; surface drift over time.
 - [ ] **Sentiment analysis** — M — Acceptance: per-document polarity score; "TR's mood across the 1912 campaign" as a demo chart.
 
 ### Pillar 3 — Scholarly Apparatus
