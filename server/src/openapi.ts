@@ -8,8 +8,10 @@ import { z } from 'zod';
 import {
   DocumentListQuerySchema,
   DocumentListResponseSchema,
+  DocumentPatchSchema,
   DocumentSchema,
   ErrorResponseSchema,
+  FieldProvenanceSchema,
   SearchQuerySchema,
   SearchResponseSchema,
 } from '@tr/shared';
@@ -21,6 +23,8 @@ export function buildOpenApiDocument(): object {
 
   registry.register('Document', DocumentSchema);
   registry.register('DocumentListResponse', DocumentListResponseSchema);
+  registry.register('DocumentPatch', DocumentPatchSchema);
+  registry.register('FieldProvenance', FieldProvenanceSchema);
   registry.register('SearchResponse', SearchResponseSchema);
   registry.register('Error', ErrorResponseSchema);
 
@@ -51,6 +55,36 @@ export function buildOpenApiDocument(): object {
       },
       404: {
         description: 'Not found',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'patch',
+    path: '/api/documents/{id}',
+    summary: 'Apply a per-field correction to a document; records editor identity in provenance.',
+    request: {
+      params: z.object({ id: z.string() }),
+      headers: z.object({
+        'x-editor': z
+          .string()
+          .min(1)
+          .describe('Editor identity recorded in field-level provenance.'),
+      }),
+      body: { content: { 'application/json': { schema: DocumentPatchSchema } } },
+    },
+    responses: {
+      200: {
+        description: 'Updated document with refreshed fieldProvenance.',
+        content: { 'application/json': { schema: DocumentSchema } },
+      },
+      400: {
+        description: 'Missing X-Editor header or invalid body.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      404: {
+        description: 'Document not found.',
         content: { 'application/json': { schema: ErrorResponseSchema } },
       },
     },

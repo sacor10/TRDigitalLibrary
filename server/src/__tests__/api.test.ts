@@ -160,7 +160,123 @@ describe('TR Digital Library API', () => {
       expect(res.body.info.title).toBe('TR Digital Library API');
       expect(res.body.paths['/api/documents']).toBeDefined();
       expect(res.body.paths['/api/documents/{id}']).toBeDefined();
+      expect(res.body.paths['/api/documents/{id}'].patch).toBeDefined();
       expect(res.body.paths['/api/search']).toBeDefined();
+    });
+  });
+
+  describe('Provenance tracking', () => {
+    const fixtureId = 'provenance-fixture';
+    const fetchedAt = '2024-01-15T10:30:00.000Z';
+    const sourceUrl = 'https://example.org/source';
+
+    beforeAll(() => {
+      const seed = loadSeed()[0]!;
+      upsertDocument(
+        db,
+        { ...seed, id: fixtureId, transcription: 'original transcription text' },
+        { sourceUrl, fetchedAt, editor: 'seed' },
+      );
+    });
+
+    it('records origin URL, fetched-at, and editor for every tracked field on seed', async () => {
+      const res = await request(app).get(`/api/documents/${fixtureId}`);
+      expect(res.status).toBe(200);
+      expect(res.body.fieldProvenance).toBeDefined();
+      const fp = res.body.fieldProvenance as Record<
+        string,
+        { sourceUrl: string | null; fetchedAt: string; editor: string }
+      >;
+      for (const field of [
+        'title',
+        'transcription',
+        'source',
+        'sourceUrl',
+        'tags',
+        'iiifManifestUrl',
+      ]) {
+        expect(fp[field]).toEqual({ sourceUrl, fetchedAt, editor: 'seed' });
+      }
+    });
+
+    it('rejects PATCH without X-Editor header', async () => {
+      const res = await request(app)
+        .patch(`/api/documents/${fixtureId}`)
+        .send({ location: 'New location' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/X-Editor/i);
+    });
+
+    it('rejects PATCH with empty body', async () => {
+      const res = await request(app)
+        .patch(`/api/documents/${fixtureId}`)
+        .set('X-Editor', 'jane.doe@example.org')
+        .send({});
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 404 for PATCH on unknown id', async () => {
+      const res = await request(app)
+        .patch('/api/documents/does-not-exist')
+        .set('X-Editor', 'jane.doe@example.org')
+        .send({ location: 'Anywhere' });
+      expect(res.status).toBe(404);
+    });
+
+    it('updates field, records editor in provenance, and appends history', async () => {
+      const editor = 'jane.doe@example.org';
+      const res = await request(app)
+        .patch(`/api/documents/${fixtureId}`)
+        .set('X-Editor', editor)
+        .send({ location: 'Sorbonne, Paris' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.location).toBe('Sorbonne, Paris');
+      expect(res.body.fieldProvenance.location.editor).toBe(editor);
+      expect(res.body.fieldProvenance.location.sourceUrl).toBeNull();
+      expect(typeof res.body.fieldProvenance.location.fetchedAt).toBe('string');
+      // Untouched fields keep their seed-time provenance.
+      expect(res.body.fieldProvenance.title.editor).toBe('seed');
+      expect(() => DocumentSchema.parse(res.body)).not.toThrow();
+
+      const historyRows = db
+        .prepare(
+          `SELECT field, previous_value, new_value, editor
+           FROM document_field_provenance_history
+           WHERE document_id = ? AND field = 'location'
+           ORDER BY recorded_at DESC`,
+        )
+        .all(fixtureId) as Array<{
+        field: string;
+        previous_value: string;
+        new_value: string;
+        editor: string;
+      }>;
+      expect(historyRows.length).toBeGreaterThanOrEqual(1);
+      const latest = historyRows[0]!;
+      expect(latest.editor).toBe(editor);
+      expect(JSON.parse(latest.new_value)).toBe('Sorbonne, Paris');
+    });
+
+    it('does not append history when the value is unchanged', async () => {
+      const beforeRows = db
+        .prepare(
+          'SELECT COUNT(*) AS c FROM document_field_provenance_history WHERE document_id = ? AND field = ?',
+        )
+        .get(fixtureId, 'location') as { c: number };
+
+      const res = await request(app)
+        .patch(`/api/documents/${fixtureId}`)
+        .set('X-Editor', 'jane.doe@example.org')
+        .send({ location: 'Sorbonne, Paris' });
+      expect(res.status).toBe(200);
+
+      const afterRows = db
+        .prepare(
+          'SELECT COUNT(*) AS c FROM document_field_provenance_history WHERE document_id = ? AND field = ?',
+        )
+        .get(fixtureId, 'location') as { c: number };
+      expect(afterRows.c).toBe(beforeRows.c);
     });
   });
 });

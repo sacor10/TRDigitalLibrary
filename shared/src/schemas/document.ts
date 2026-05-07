@@ -22,6 +22,14 @@ export const TranscriptionFormatSchema = z.enum([
 
 export type TranscriptionFormat = z.infer<typeof TranscriptionFormatSchema>;
 
+export const FieldProvenanceSchema = z.object({
+  sourceUrl: z.string().url().nullable(),
+  fetchedAt: z.string().datetime({ offset: true }),
+  editor: z.string().min(1),
+});
+
+export type FieldProvenance = z.infer<typeof FieldProvenanceSchema>;
+
 export const DocumentSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -40,9 +48,36 @@ export const DocumentSchema = z.object({
   sourceUrl: z.string().url().nullable(),
   tags: z.array(z.string()).default([]),
   teiXml: z.string().nullable().default(null),
+  fieldProvenance: z.record(FieldProvenanceSchema).optional(),
 });
 
 export type Document = z.infer<typeof DocumentSchema>;
+
+export const DocumentPatchSchema = z
+  .object({
+    title: z.string().min(1),
+    type: DocumentTypeSchema,
+    date: isoDate,
+    recipient: z.string().nullable(),
+    location: z.string().nullable(),
+    author: z.string().min(1),
+    transcription: z.string(),
+    transcriptionUrl: z.string().url().nullable(),
+    transcriptionFormat: TranscriptionFormatSchema,
+    facsimileUrl: z.string().url().nullable(),
+    iiifManifestUrl: z.string().url().nullable(),
+    provenance: z.string().nullable(),
+    source: z.string().min(1),
+    sourceUrl: z.string().url().nullable(),
+    tags: z.array(z.string()),
+    teiXml: z.string().nullable(),
+  })
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, {
+    message: 'PATCH body must include at least one field',
+  });
+
+export type DocumentPatch = z.infer<typeof DocumentPatchSchema>;
 
 export const DocumentSectionTypeSchema = z.enum([
   'div',
