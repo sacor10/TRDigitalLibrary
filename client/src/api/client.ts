@@ -50,6 +50,13 @@ export async function fetchDocument(id: string): Promise<Document> {
   return getJson(`/api/documents/${encodeURIComponent(id)}`, (raw) => DocumentSchema.parse(raw));
 }
 
+export type ExportFormat = 'pdf' | 'epub' | 'tei';
+
+export function documentExportUrl(id: string, format: ExportFormat): string {
+  const ext = format === 'tei' ? 'xml' : format;
+  return `${API_BASE}/api/documents/${encodeURIComponent(id)}/export.${ext}`;
+}
+
 export async function searchDocuments(query: SearchQuery): Promise<SearchResponse> {
   const qs = buildQuery({
     q: query.q,

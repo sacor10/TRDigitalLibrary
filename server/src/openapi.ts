@@ -92,6 +92,33 @@ export function buildOpenApiDocument(): object {
 
   registry.registerPath({
     method: 'get',
+    path: '/api/documents/{id}/export.{ext}',
+    summary:
+      'Download a document as PDF, EPUB, or TEI/XML. The TEI variant returns the original `tei_xml` when present and otherwise synthesizes a minimal P5 document.',
+    request: {
+      params: z.object({
+        id: z.string(),
+        ext: z.enum(['pdf', 'epub', 'xml']).describe('pdf, epub, or xml (TEI P5)'),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Binary export with Content-Disposition: attachment',
+        content: {
+          'application/pdf': { schema: { type: 'string', format: 'binary' } },
+          'application/epub+zip': { schema: { type: 'string', format: 'binary' } },
+          'application/tei+xml': { schema: { type: 'string', format: 'binary' } },
+        },
+      },
+      404: {
+        description: 'Document not found or unsupported extension',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
     path: '/api/search',
     summary: 'Full-text search across documents',
     request: { query: SearchQuerySchema },
