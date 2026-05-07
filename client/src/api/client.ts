@@ -1,7 +1,9 @@
 import {
+  CorrespondentGraphResponseSchema,
   DocumentListResponseSchema,
   DocumentSchema,
   SearchResponseSchema,
+  type CorrespondentGraphResponse,
   type Document,
   type DocumentListQuery,
   type DocumentListResponse,
@@ -55,6 +57,12 @@ export type ExportFormat = 'pdf' | 'epub' | 'tei';
 export function documentExportUrl(id: string, format: ExportFormat): string {
   const ext = format === 'tei' ? 'xml' : format;
   return `${API_BASE}/api/documents/${encodeURIComponent(id)}/export.${ext}`;
+}
+
+export async function fetchCorrespondentGraph(): Promise<CorrespondentGraphResponse> {
+  return getJson('/api/correspondents/graph', (raw) =>
+    CorrespondentGraphResponseSchema.parse(raw),
+  );
 }
 
 export async function searchDocuments(query: SearchQuery): Promise<SearchResponse> {

@@ -6,6 +6,7 @@ import { ThemeProvider } from './context/ThemeContext';
 import { BrowsePage } from './pages/BrowsePage';
 import { DocumentPage } from './pages/DocumentPage';
 import { HomePage } from './pages/HomePage';
+import { NetworkPage } from './pages/NetworkPage';
 import { SearchPage } from './pages/SearchPage';
 import { TimelinePage } from './pages/TimelinePage';
 
@@ -25,6 +26,7 @@ export function App() {
             <Route path="/browse" element={<BrowsePage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/timeline" element={<TimelinePage />} />
+            <Route path="/network" element={<NetworkPage />} />
             <Route path="/documents/:id" element={<DocumentPage />} />
             <Route
               path="*"

@@ -28,6 +28,7 @@ export interface DocumentRow {
   source: string;
   source_url: string | null;
   tags: string;
+  mentions: string;
   tei_xml: string | null;
 }
 
@@ -47,6 +48,7 @@ export const PROVENANCE_FIELDS = [
   'source',
   'sourceUrl',
   'tags',
+  'mentions',
   'teiXml',
 ] as const;
 
@@ -74,6 +76,7 @@ const FIELD_TO_COLUMN: Record<ProvenanceField, string> = {
   source: 'source',
   sourceUrl: 'source_url',
   tags: 'tags',
+  mentions: 'mentions',
   teiXml: 'tei_xml',
 };
 
@@ -99,6 +102,7 @@ export function rowToDocument(row: DocumentRow): Document {
     source: row.source,
     sourceUrl: row.source_url,
     tags: JSON.parse(row.tags) as string[],
+    mentions: JSON.parse(row.mentions ?? '[]') as string[],
     teiXml: row.tei_xml,
   };
 }
@@ -153,11 +157,11 @@ export function upsertDocument(
     INSERT INTO documents (
       id, title, type, date, recipient, location, author,
       transcription, transcription_url, transcription_format,
-      facsimile_url, iiif_manifest_url, provenance, source, source_url, tags, tei_xml
+      facsimile_url, iiif_manifest_url, provenance, source, source_url, tags, mentions, tei_xml
     ) VALUES (
       @id, @title, @type, @date, @recipient, @location, @author,
       @transcription, @transcription_url, @transcription_format,
-      @facsimile_url, @iiif_manifest_url, @provenance, @source, @source_url, @tags, @tei_xml
+      @facsimile_url, @iiif_manifest_url, @provenance, @source, @source_url, @tags, @mentions, @tei_xml
     )
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
@@ -175,6 +179,7 @@ export function upsertDocument(
       source = excluded.source,
       source_url = excluded.source_url,
       tags = excluded.tags,
+      mentions = excluded.mentions,
       tei_xml = excluded.tei_xml
   `);
 
@@ -196,6 +201,7 @@ export function upsertDocument(
       source: doc.source,
       source_url: doc.sourceUrl,
       tags: JSON.stringify(doc.tags),
+      mentions: JSON.stringify(doc.mentions ?? []),
       tei_xml: doc.teiXml ?? null,
     });
     if (ctx) {
@@ -292,7 +298,10 @@ export function patchDocumentFields(
   for (const [field, nextValue] of entries) {
     const column = FIELD_TO_COLUMN[field];
     setClauses.push(`${column} = @${column}`);
-    params[column] = field === 'tags' ? JSON.stringify(nextValue ?? []) : (nextValue ?? null);
+    params[column] =
+      field === 'tags' || field === 'mentions'
+        ? JSON.stringify(nextValue ?? [])
+        : (nextValue ?? null);
     const previous = fieldValueFromDocument(current, field);
     if (JSON.stringify(previous) !== JSON.stringify(nextValue)) {
       changed.push({ field, previous, next: nextValue });

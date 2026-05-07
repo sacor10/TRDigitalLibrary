@@ -12,6 +12,10 @@ export {
   SearchResultSchema,
   SearchResponseSchema,
   ErrorResponseSchema,
+  CorrespondentNodeSchema,
+  CorrespondentEdgeSchema,
+  CorrespondentLetterSchema,
+  CorrespondentGraphResponseSchema,
 } from './schemas/document.js';
 
 export type {
@@ -28,4 +32,8 @@ export type {
   SearchResult,
   SearchResponse,
   ErrorResponse,
+  CorrespondentNode,
+  CorrespondentEdge,
+  CorrespondentLetter,
+  CorrespondentGraphResponse,
 } from './schemas/document.js';
