@@ -97,6 +97,25 @@ describe('TR Digital Library API', () => {
       expect(res.body.id).toBe('man-in-the-arena');
       expect(() => DocumentSchema.parse(res.body)).not.toThrow();
     });
+
+    it('round-trips iiifManifestUrl through the database', async () => {
+      const manifest = 'https://iiif.archive.org/iiif/3/theroughriders00roosrich/manifest.json';
+      upsertDocument(db, {
+        ...loadSeed()[0]!,
+        id: 'iiif-fixture',
+        iiifManifestUrl: manifest,
+        transcription: 'fixture',
+      });
+      const res = await request(app).get('/api/documents/iiif-fixture');
+      expect(res.status).toBe(200);
+      expect(res.body.iiifManifestUrl).toBe(manifest);
+    });
+
+    it('returns null iiifManifestUrl when not set', async () => {
+      const res = await request(app).get('/api/documents/man-in-the-arena');
+      expect(res.status).toBe(200);
+      expect(res.body.iiifManifestUrl).toBeNull();
+    });
   });
 
   describe('GET /api/search', () => {

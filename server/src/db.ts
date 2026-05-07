@@ -23,6 +23,7 @@ export interface DocumentRow {
   transcription_url: string | null;
   transcription_format: string;
   facsimile_url: string | null;
+  iiif_manifest_url: string | null;
   provenance: string | null;
   source: string;
   source_url: string | null;
@@ -43,6 +44,7 @@ export function rowToDocument(row: DocumentRow): Document {
     transcriptionUrl: row.transcription_url,
     transcriptionFormat: row.transcription_format as Document['transcriptionFormat'],
     facsimileUrl: row.facsimile_url,
+    iiifManifestUrl: row.iiif_manifest_url,
     provenance: row.provenance,
     source: row.source,
     sourceUrl: row.source_url,
@@ -97,11 +99,11 @@ export function upsertDocument(db: DatabaseT, doc: Document): void {
     INSERT INTO documents (
       id, title, type, date, recipient, location, author,
       transcription, transcription_url, transcription_format,
-      facsimile_url, provenance, source, source_url, tags, tei_xml
+      facsimile_url, iiif_manifest_url, provenance, source, source_url, tags, tei_xml
     ) VALUES (
       @id, @title, @type, @date, @recipient, @location, @author,
       @transcription, @transcription_url, @transcription_format,
-      @facsimile_url, @provenance, @source, @source_url, @tags, @tei_xml
+      @facsimile_url, @iiif_manifest_url, @provenance, @source, @source_url, @tags, @tei_xml
     )
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
@@ -114,6 +116,7 @@ export function upsertDocument(db: DatabaseT, doc: Document): void {
       transcription_url = excluded.transcription_url,
       transcription_format = excluded.transcription_format,
       facsimile_url = excluded.facsimile_url,
+      iiif_manifest_url = excluded.iiif_manifest_url,
       provenance = excluded.provenance,
       source = excluded.source,
       source_url = excluded.source_url,
@@ -133,6 +136,7 @@ export function upsertDocument(db: DatabaseT, doc: Document): void {
     transcription_url: doc.transcriptionUrl,
     transcription_format: doc.transcriptionFormat,
     facsimile_url: doc.facsimileUrl,
+    iiif_manifest_url: doc.iiifManifestUrl ?? null,
     provenance: doc.provenance,
     source: doc.source,
     source_url: doc.sourceUrl,

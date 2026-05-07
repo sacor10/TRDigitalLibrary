@@ -16,10 +16,12 @@ const sample: Document = {
   transcriptionUrl: null,
   transcriptionFormat: 'wikisource-html',
   facsimileUrl: null,
+  iiifManifestUrl: null,
   provenance: null,
   source: 'Wikisource',
   sourceUrl: 'https://en.wikisource.org/wiki/Sample',
   tags: [],
+  teiXml: null,
 };
 
 describe('buildCitation', () => {

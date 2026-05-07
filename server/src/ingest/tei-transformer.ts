@@ -99,6 +99,7 @@ export function transformToDocument(
     transcriptionUrl: null,
     transcriptionFormat: 'tei-xml',
     facsimileUrl: null,
+    iiifManifestUrl: null,
     provenance: metadata.publicationStmt || null,
     source: metadata.sourceDesc || options.defaultSource || basename(options.filename),
     sourceUrl: null,

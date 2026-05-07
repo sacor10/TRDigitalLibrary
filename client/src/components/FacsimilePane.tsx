@@ -1,11 +1,17 @@
 import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch';
 
+import { IIIFFacsimilePane } from './IIIFFacsimilePane';
+
 interface FacsimilePaneProps {
+  iiifManifestUrl: string | null;
   url: string | null;
   alt: string;
 }
 
-export function FacsimilePane({ url, alt }: FacsimilePaneProps) {
+export function FacsimilePane({ iiifManifestUrl, url, alt }: FacsimilePaneProps) {
+  if (iiifManifestUrl) {
+    return <IIIFFacsimilePane manifestUrl={iiifManifestUrl} alt={alt} />;
+  }
   if (!url) {
     return (
       <div className="flex h-[60vh] items-center justify-center rounded-md border border-dashed border-ink-700/20 dark:border-parchment-50/20 text-ink-700/70 dark:text-parchment-50/70 p-8 text-center">

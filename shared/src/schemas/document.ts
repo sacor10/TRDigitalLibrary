@@ -34,6 +34,7 @@ export const DocumentSchema = z.object({
   transcriptionUrl: z.string().url().nullable(),
   transcriptionFormat: TranscriptionFormatSchema.default('wikisource-html'),
   facsimileUrl: z.string().url().nullable(),
+  iiifManifestUrl: z.string().url().nullable().default(null),
   provenance: z.string().nullable(),
   source: z.string().min(1),
   sourceUrl: z.string().url().nullable(),

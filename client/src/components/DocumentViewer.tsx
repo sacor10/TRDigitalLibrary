@@ -12,7 +12,8 @@ interface DocumentViewerProps {
 }
 
 export function DocumentViewer({ document }: DocumentViewerProps) {
-  const initialTab: Tab = document.facsimileUrl ? 'facsimile' : 'transcription';
+  const hasFacsimile = Boolean(document.iiifManifestUrl || document.facsimileUrl);
+  const initialTab: Tab = hasFacsimile ? 'facsimile' : 'transcription';
   const [tab, setTab] = useState<Tab>(initialTab);
   const tabsId = useId();
 
@@ -71,7 +72,11 @@ export function DocumentViewer({ document }: DocumentViewerProps) {
         hidden={tab !== 'facsimile'}
       >
         {tab === 'facsimile' && (
-          <FacsimilePane url={document.facsimileUrl} alt={`Facsimile of ${document.title}`} />
+          <FacsimilePane
+            iiifManifestUrl={document.iiifManifestUrl}
+            url={document.facsimileUrl}
+            alt={`Facsimile of ${document.title}`}
+          />
         )}
       </div>
     </div>
