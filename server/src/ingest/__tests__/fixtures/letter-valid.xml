@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0" xml:id="tr-to-lodge-1898-04-26">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title>Letter from Theodore Roosevelt to Henry Cabot Lodge, 26 April 1898</title>
+        <author>Theodore Roosevelt</author>
+      </titleStmt>
+      <publicationStmt>
+        <p>Encoded for the TR Digital Library, public domain.</p>
+      </publicationStmt>
+      <sourceDesc>
+        <bibl>Selections from the Correspondence of Theodore Roosevelt and Henry Cabot Lodge, 1884-1918, vol. I.</bibl>
+      </sourceDesc>
+    </fileDesc>
+    <profileDesc>
+      <creation><date when="1898-04-26">26 April 1898</date></creation>
+      <correspDesc>
+        <correspAction type="sent">
+          <persName>Theodore Roosevelt</persName>
+        </correspAction>
+        <correspAction type="received">
+          <persName>Henry Cabot Lodge</persName>
+        </correspAction>
+      </correspDesc>
+    </profileDesc>
+  </teiHeader>
+  <text>
+    <body>
+      <div type="letter" n="1">
+        <head>To Henry Cabot Lodge</head>
+        <p n="opening">Dear Cabot,</p>
+        <p n="body">War is now declared. I am off for San Antonio to muster my regiment of Rough Riders and I write in haste.</p>
+        <p n="closing">Faithfully yours, Theodore Roosevelt.</p>
+      </div>
+    </body>
+  </text>
+</TEI>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0" xml:id="strenuous-life-1899">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt>
+        <title>The Strenuous Life</title>
+        <author>Theodore Roosevelt</author>
+      </titleStmt>
+      <publicationStmt>
+        <p>Encoded for the TR Digital Library, public domain.</p>
+      </publicationStmt>
+      <sourceDesc>
+        <bibl>Address before the Hamilton Club, Chicago, 10 April 1899.</bibl>
+      </sourceDesc>
+    </fileDesc>
+    <profileDesc>
+      <creation><date when="1899-04-10">10 April 1899</date></creation>
+      <textDesc>
+        <channel>speech</channel>
+      </textDesc>
+    </profileDesc>
+  </teiHeader>
+  <text>
+    <body>
+      <div type="section" n="opening">
+        <head>Opening</head>
+        <p>In speaking to you, men of the greatest city of the West, I wish to preach the doctrine of the strenuous life.</p>
+      </div>
+      <div type="section" n="peroration">
+        <head>Peroration</head>
+        <lg type="closing">
+          <l>Above all, let us shrink from no strife,</l>
+          <l>Moral or physical, within or without the nation,</l>
+          <l>Provided we are certain that the strife is justified.</l>
+        </lg>
+      </div>
+    </body>
+  </text>
+</TEI>

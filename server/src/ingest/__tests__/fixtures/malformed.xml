@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+  <teiHeader>
+    <fileDesc>
+      <titleStmt><title>Broken</title></titleStmt>
+      <publicationStmt><p>x</p></publicationStmt>
+      <sourceDesc><bibl>x</bibl></sourceDesc>
+    </fileDesc>
+  </teiHeader>
+  <text><body><p>Mismatched tag</q></body></text>
+</TEI>

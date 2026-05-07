@@ -72,6 +72,26 @@ Open <http://localhost:5173> in a browser. The OpenAPI spec is at
 > titles, recipients, and tags only until you re-run `npm run seed` from a
 > connected environment.
 
+### Ingesting TEI documents
+
+Validate and ingest a folder of TEI/XML documents into the library:
+
+```bash
+npm run ingest-tei -- /path/to/tei-folder            # validate, normalize, insert
+npm run ingest-tei -- /path/to/tei-folder --dry-run  # parse + validate only
+npm run ingest-tei -- /path/to/tei-folder -r         # recurse into subfolders
+npm run ingest-tei -- /path/to/tei-folder --db ./data/library.db
+```
+
+Each `.xml` file is checked for well-formedness and required TEI structure
+(`teiHeader`, `fileDesc`, `titleStmt/title`, `publicationStmt`, `sourceDesc`,
+`text/body`). Valid documents are upserted into `documents` (with the original
+TEI preserved in `tei_xml`) and their structural hierarchy — `div`, `p`, `lg`,
+`l`, `quote`, `list`, `item`, `head`, `note` — is unrolled into
+`document_sections` so each section is independently queryable and
+FTS5-searchable. The CLI prints a per-file report and exits non-zero if any
+file fails validation.
+
 ---
 
 ## 3. Architecture
@@ -90,9 +110,13 @@ TRDigitalLibrary/
 ├── server/                  # Express + better-sqlite3 + zod
 │   └── src/
 │       ├── app.ts           # Express bootstrap (helmet, cors, routes)
-│       ├── db.ts            # connection, migration runner, upsert
-│       ├── migrations/001_init.sql
+│       ├── db.ts            # connection, migration runner, upsert + replaceSections
+│       ├── migrations/
+│       │   ├── 001_init.sql # documents + documents_fts + triggers
+│       │   └── 002_tei.sql  # tei_xml column, document_sections + sections_fts
 │       ├── seed.ts          # fetches transcriptionUrl per document
+│       ├── ingest-tei.ts    # CLI: npm run ingest-tei -- <folder>
+│       ├── ingest/          # TEI parser, validator, transformer, orchestrator
 │       ├── openapi.ts       # OpenAPI 3.1 generated from zod
 │       ├── routes/
 │       │   ├── documents.ts # GET /api/documents, GET /api/documents/:id
@@ -180,7 +204,7 @@ Legend: **S** = small (≤1 day) · **M** = medium (1–3 days) · **L** = large
 ### Pillar 1 — Comprehensive Collection
 
 - [x] **Metadata-driven seed pipeline (URL-only)** — S — done in POC
-- [ ] **TEI/XML ingestion pipeline** — XL — depends on `saxon` or `tei-publisher`. Acceptance: feed a folder of TEI documents, get them validated, normalized, and inserted with structural markup preserved.
+- [x] **TEI/XML ingestion pipeline** — XL — implemented with `fast-xml-parser` (pure Node, no Saxon/tei-publisher runtime required). See `server/src/ingest/` and `npm run ingest-tei -- <folder>`. Validates well-formedness and required TEI structure, preserves hierarchy in `document_sections`, retains raw TEI in `documents.tei_xml`.
 - [ ] **IIIF image server integration** — L — Internet Archive IIIF ($0, public-domain content only). Upload facsimiles to archive.org; endpoints auto-generated at `iiif.archive.org`; no server, no config, no egress cost; full IIIF Image API 3.0; no SLA or manifest control. Acceptance: every facsimile served via IIIF Image API 3.0; deep-zoom in viewer.
 - [ ] **OCR pipeline (Tesseract → Transkribus)** — XL — Tesseract free; Transkribus credits ~€0.05/page for handwriting. Acceptance: a typewritten page yields ≥98% character accuracy; a handwritten letter yields ≥90% via Transkribus.
 - [ ] **Provenance tracking** — M — Acceptance: every field on every document records its origin URL, fetched-at timestamp, and editor identity for any subsequent corrections.

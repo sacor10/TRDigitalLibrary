@@ -14,7 +14,11 @@ const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format');
 
-export const TranscriptionFormatSchema = z.enum(['wikisource-html', 'plain-text']);
+export const TranscriptionFormatSchema = z.enum([
+  'wikisource-html',
+  'plain-text',
+  'tei-xml',
+]);
 
 export type TranscriptionFormat = z.infer<typeof TranscriptionFormatSchema>;
 
@@ -34,9 +38,40 @@ export const DocumentSchema = z.object({
   source: z.string().min(1),
   sourceUrl: z.string().url().nullable(),
   tags: z.array(z.string()).default([]),
+  teiXml: z.string().nullable().default(null),
 });
 
 export type Document = z.infer<typeof DocumentSchema>;
+
+export const DocumentSectionTypeSchema = z.enum([
+  'div',
+  'head',
+  'p',
+  'lg',
+  'l',
+  'quote',
+  'list',
+  'item',
+  'note',
+  'other',
+]);
+
+export type DocumentSectionType = z.infer<typeof DocumentSectionTypeSchema>;
+
+export const DocumentSectionSchema = z.object({
+  id: z.string().min(1),
+  documentId: z.string().min(1),
+  parentId: z.string().nullable(),
+  order: z.number().int().nonnegative(),
+  level: z.number().int().nonnegative(),
+  type: DocumentSectionTypeSchema,
+  n: z.string().nullable(),
+  heading: z.string().nullable(),
+  text: z.string().default(''),
+  xmlFragment: z.string().default(''),
+});
+
+export type DocumentSection = z.infer<typeof DocumentSectionSchema>;
 
 export const DocumentListResponseSchema = z.object({
   items: z.array(DocumentSchema),

@@ -1,6 +1,8 @@
 export type {
   Document,
   DocumentType,
+  DocumentSection,
+  DocumentSectionType,
   DocumentListResponse,
   DocumentListQuery,
   SearchQuery,
