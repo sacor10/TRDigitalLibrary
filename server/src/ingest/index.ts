@@ -5,7 +5,7 @@ import type { Database as DatabaseT } from 'better-sqlite3';
 
 import type { DocumentType } from '@tr/shared';
 
-import { replaceSections, upsertDocument } from '../db.js';
+import { replaceSections, upsertDocument, type ProvenanceContext } from '../db.js';
 
 import { parseTei } from './tei-parser.js';
 import { validateTei } from './tei-validator.js';
@@ -16,6 +16,7 @@ export interface IngestOptions {
   dryRun?: boolean;
   defaultType?: DocumentType;
   defaultSource?: string;
+  editor?: string;
 }
 
 export interface IngestFileResult {
@@ -109,8 +110,13 @@ export function ingestTeiFolder(
       report.valid += 1;
 
       if (!options.dryRun && db) {
+        const ctx: ProvenanceContext = {
+          sourceUrl: transformed.document.sourceUrl,
+          fetchedAt: statSync(file).mtime.toISOString(),
+          editor: options.editor ?? 'tei-ingest',
+        };
         const tx = db.transaction(() => {
-          upsertDocument(db, transformed.document);
+          upsertDocument(db, transformed.document, ctx);
           replaceSections(db, transformed.document.id, transformed.sections);
         });
         tx();

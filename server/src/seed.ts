@@ -78,6 +78,8 @@ async function seed(): Promise<void> {
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = openDatabase(dbPath);
 
+  const editor = process.env.TR_EDITOR ?? 'seed';
+
   let fetched = 0;
   let failed = 0;
 
@@ -94,7 +96,15 @@ async function seed(): Promise<void> {
         console.warn(`  skipped  ${doc.id}  (${message}) — metadata stored, transcription empty`);
       }
     }
-    upsertDocument(db, { ...doc, transcription });
+    upsertDocument(
+      db,
+      { ...doc, transcription },
+      {
+        sourceUrl: doc.sourceUrl,
+        fetchedAt: new Date().toISOString(),
+        editor,
+      },
+    );
   }
 
   const count = (db.prepare('SELECT COUNT(*) as c FROM documents').get() as { c: number }).c;

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import type { Database as DatabaseT } from 'better-sqlite3';
 
-import type { Document, DocumentSection } from '@tr/shared';
+import type { Document, DocumentPatch, DocumentSection, FieldProvenance } from '@tr/shared';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +29,56 @@ export interface DocumentRow {
   source_url: string | null;
   tags: string;
   tei_xml: string | null;
+}
+
+export const PROVENANCE_FIELDS = [
+  'title',
+  'type',
+  'date',
+  'recipient',
+  'location',
+  'author',
+  'transcription',
+  'transcriptionUrl',
+  'transcriptionFormat',
+  'facsimileUrl',
+  'iiifManifestUrl',
+  'provenance',
+  'source',
+  'sourceUrl',
+  'tags',
+  'teiXml',
+] as const;
+
+export type ProvenanceField = (typeof PROVENANCE_FIELDS)[number];
+
+export interface ProvenanceContext {
+  sourceUrl: string | null;
+  fetchedAt: string;
+  editor: string;
+}
+
+const FIELD_TO_COLUMN: Record<ProvenanceField, string> = {
+  title: 'title',
+  type: 'type',
+  date: 'date',
+  recipient: 'recipient',
+  location: 'location',
+  author: 'author',
+  transcription: 'transcription',
+  transcriptionUrl: 'transcription_url',
+  transcriptionFormat: 'transcription_format',
+  facsimileUrl: 'facsimile_url',
+  iiifManifestUrl: 'iiif_manifest_url',
+  provenance: 'provenance',
+  source: 'source',
+  sourceUrl: 'source_url',
+  tags: 'tags',
+  teiXml: 'tei_xml',
+};
+
+function fieldValueFromDocument(doc: Document, field: ProvenanceField): unknown {
+  return doc[field];
 }
 
 export function rowToDocument(row: DocumentRow): Document {
@@ -94,7 +144,11 @@ function runMigrations(db: DatabaseT): void {
   }
 }
 
-export function upsertDocument(db: DatabaseT, doc: Document): void {
+export function upsertDocument(
+  db: DatabaseT,
+  doc: Document,
+  ctx?: ProvenanceContext,
+): void {
   const stmt = db.prepare(`
     INSERT INTO documents (
       id, title, type, date, recipient, location, author,
@@ -124,25 +178,157 @@ export function upsertDocument(db: DatabaseT, doc: Document): void {
       tei_xml = excluded.tei_xml
   `);
 
-  stmt.run({
-    id: doc.id,
-    title: doc.title,
-    type: doc.type,
-    date: doc.date,
-    recipient: doc.recipient,
-    location: doc.location,
-    author: doc.author,
-    transcription: doc.transcription,
-    transcription_url: doc.transcriptionUrl,
-    transcription_format: doc.transcriptionFormat,
-    facsimile_url: doc.facsimileUrl,
-    iiif_manifest_url: doc.iiifManifestUrl ?? null,
-    provenance: doc.provenance,
-    source: doc.source,
-    source_url: doc.sourceUrl,
-    tags: JSON.stringify(doc.tags),
-    tei_xml: doc.teiXml ?? null,
+  const run = (): void => {
+    stmt.run({
+      id: doc.id,
+      title: doc.title,
+      type: doc.type,
+      date: doc.date,
+      recipient: doc.recipient,
+      location: doc.location,
+      author: doc.author,
+      transcription: doc.transcription,
+      transcription_url: doc.transcriptionUrl,
+      transcription_format: doc.transcriptionFormat,
+      facsimile_url: doc.facsimileUrl,
+      iiif_manifest_url: doc.iiifManifestUrl ?? null,
+      provenance: doc.provenance,
+      source: doc.source,
+      source_url: doc.sourceUrl,
+      tags: JSON.stringify(doc.tags),
+      tei_xml: doc.teiXml ?? null,
+    });
+    if (ctx) {
+      for (const field of PROVENANCE_FIELDS) {
+        recordFieldProvenance(db, doc.id, field, ctx);
+      }
+    }
+  };
+
+  if (ctx) {
+    db.transaction(run)();
+  } else {
+    run();
+  }
+}
+
+function recordFieldProvenance(
+  db: DatabaseT,
+  documentId: string,
+  field: ProvenanceField,
+  ctx: ProvenanceContext,
+): void {
+  db.prepare(
+    `INSERT INTO document_field_provenance (document_id, field, source_url, fetched_at, editor)
+     VALUES (@document_id, @field, @source_url, @fetched_at, @editor)
+     ON CONFLICT(document_id, field) DO UPDATE SET
+       source_url = excluded.source_url,
+       fetched_at = excluded.fetched_at,
+       editor = excluded.editor`,
+  ).run({
+    document_id: documentId,
+    field,
+    source_url: ctx.sourceUrl,
+    fetched_at: ctx.fetchedAt,
+    editor: ctx.editor,
   });
+}
+
+export function getFieldProvenance(
+  db: DatabaseT,
+  documentId: string,
+): Record<string, FieldProvenance> {
+  const rows = db
+    .prepare(
+      `SELECT field, source_url AS sourceUrl, fetched_at AS fetchedAt, editor
+       FROM document_field_provenance
+       WHERE document_id = ?`,
+    )
+    .all(documentId) as Array<{
+    field: string;
+    sourceUrl: string | null;
+    fetchedAt: string;
+    editor: string;
+  }>;
+  const out: Record<string, FieldProvenance> = {};
+  for (const row of rows) {
+    out[row.field] = {
+      sourceUrl: row.sourceUrl,
+      fetchedAt: row.fetchedAt,
+      editor: row.editor,
+    };
+  }
+  return out;
+}
+
+export function rowToDocumentWithProvenance(db: DatabaseT, row: DocumentRow): Document {
+  const doc = rowToDocument(row);
+  const fieldProvenance = getFieldProvenance(db, row.id);
+  if (Object.keys(fieldProvenance).length > 0) {
+    doc.fieldProvenance = fieldProvenance;
+  }
+  return doc;
+}
+
+export function patchDocumentFields(
+  db: DatabaseT,
+  documentId: string,
+  patch: DocumentPatch,
+  ctx: ProvenanceContext,
+): Document | null {
+  const existing = db
+    .prepare('SELECT * FROM documents WHERE id = ?')
+    .get(documentId) as DocumentRow | undefined;
+  if (!existing) return null;
+
+  const current = rowToDocument(existing);
+  const entries = Object.entries(patch) as Array<[ProvenanceField, unknown]>;
+  if (entries.length === 0) return rowToDocumentWithProvenance(db, existing);
+
+  const setClauses: string[] = [];
+  const params: Record<string, unknown> = { id: documentId };
+  const changed: Array<{ field: ProvenanceField; previous: unknown; next: unknown }> = [];
+
+  for (const [field, nextValue] of entries) {
+    const column = FIELD_TO_COLUMN[field];
+    setClauses.push(`${column} = @${column}`);
+    params[column] = field === 'tags' ? JSON.stringify(nextValue ?? []) : (nextValue ?? null);
+    const previous = fieldValueFromDocument(current, field);
+    if (JSON.stringify(previous) !== JSON.stringify(nextValue)) {
+      changed.push({ field, previous, next: nextValue });
+    }
+  }
+
+  const updateSql = `UPDATE documents SET ${setClauses.join(', ')} WHERE id = @id`;
+  const updateStmt = db.prepare(updateSql);
+  const historyStmt = db.prepare(
+    `INSERT INTO document_field_provenance_history
+       (document_id, field, previous_value, new_value, source_url, fetched_at, editor)
+     VALUES (@document_id, @field, @previous_value, @new_value, @source_url, @fetched_at, @editor)`,
+  );
+
+  db.transaction(() => {
+    updateStmt.run(params);
+    for (const [field] of entries) {
+      recordFieldProvenance(db, documentId, field, ctx);
+    }
+    for (const change of changed) {
+      historyStmt.run({
+        document_id: documentId,
+        field: change.field,
+        previous_value: JSON.stringify(change.previous ?? null),
+        new_value: JSON.stringify(change.next ?? null),
+        source_url: ctx.sourceUrl,
+        fetched_at: ctx.fetchedAt,
+        editor: ctx.editor,
+      });
+    }
+  })();
+
+  const updated = db
+    .prepare('SELECT * FROM documents WHERE id = ?')
+    .get(documentId) as DocumentRow;
+  return rowToDocumentWithProvenance(db, updated);
 }
 
 export function replaceSections(

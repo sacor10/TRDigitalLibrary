@@ -1,9 +1,14 @@
 import { Router } from 'express';
 import type { Database as DatabaseT } from 'better-sqlite3';
 
-import { DocumentListQuerySchema } from '@tr/shared';
+import { DocumentListQuerySchema, DocumentPatchSchema } from '@tr/shared';
 
-import { rowToDocument, type DocumentRow } from '../db.js';
+import {
+  patchDocumentFields,
+  rowToDocumentWithProvenance,
+  type DocumentRow,
+  type ProvenanceContext,
+} from '../db.js';
 
 export function createDocumentsRouter(db: DatabaseT): Router {
   const router = Router();
@@ -47,7 +52,7 @@ export function createDocumentsRouter(db: DatabaseT): Router {
       .all({ ...params, limit, offset }) as DocumentRow[];
 
     return res.json({
-      items: rows.map(rowToDocument),
+      items: rows.map((row) => rowToDocumentWithProvenance(db, row)),
       total: totalRow.c,
     });
   });
@@ -60,7 +65,35 @@ export function createDocumentsRouter(db: DatabaseT): Router {
     if (!row) {
       return res.status(404).json({ error: 'Document not found' });
     }
-    return res.json(rowToDocument(row));
+    return res.json(rowToDocumentWithProvenance(db, row));
+  });
+
+  router.patch('/:id', (req, res) => {
+    const editorHeader = req.header('x-editor');
+    const editor = typeof editorHeader === 'string' ? editorHeader.trim() : '';
+    if (!editor) {
+      return res.status(400).json({
+        error: 'Missing X-Editor header',
+        details: 'Corrections require an X-Editor header identifying the editor.',
+      });
+    }
+
+    const parsed = DocumentPatchSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid body', details: parsed.error.flatten() });
+    }
+
+    const ctx: ProvenanceContext = {
+      sourceUrl: null,
+      fetchedAt: new Date().toISOString(),
+      editor,
+    };
+
+    const updated = patchDocumentFields(db, req.params.id, parsed.data, ctx);
+    if (!updated) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    return res.json(updated);
   });
 
   return router;

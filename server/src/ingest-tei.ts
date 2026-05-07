@@ -17,6 +17,7 @@ interface CliOptions {
   dbPath: string;
   defaultType: DocumentType;
   defaultSource?: string;
+  editor?: string;
 }
 
 function parseCliArgs(argv: string[]): CliOptions {
@@ -28,6 +29,7 @@ function parseCliArgs(argv: string[]): CliOptions {
       db: { type: 'string' },
       'default-type': { type: 'string', default: 'letter' },
       'default-source': { type: 'string' },
+      editor: { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
     },
     allowPositionals: true,
@@ -68,6 +70,7 @@ function parseCliArgs(argv: string[]): CliOptions {
     defaultType: defaultTypeParse.data,
   };
   if (values['default-source']) opts.defaultSource = values['default-source'];
+  if (values.editor) opts.editor = values.editor;
   return opts;
 }
 
@@ -83,6 +86,8 @@ Options:
   --default-type <t>    Default document type when not derivable from TEI
                         (one of: letter, speech, diary, article, autobiography)
   --default-source <s>  Default source citation when <sourceDesc> is empty
+  --editor <name>       Editor identity recorded in per-field provenance
+                        (default: 'tei-ingest')
   -h, --help            Show this help
 `);
 }
@@ -125,6 +130,7 @@ async function main(): Promise<void> {
       defaultType: opts.defaultType,
     };
     if (opts.defaultSource) ingestOpts.defaultSource = opts.defaultSource;
+    if (opts.editor) ingestOpts.editor = opts.editor;
     const report = ingestTeiFolder(opts.folder, db, ingestOpts);
 
     printReport(report, opts.dryRun);
