@@ -166,7 +166,7 @@ TRDigitalLibrary/
 | ------------------- | ---------------------------- | ---------------------------------------------------------------- |
 | RDBMS               | SQLite (better-sqlite3)      | Postgres (pg / drizzle / kysely)                                 |
 | Full-text search    | SQLite FTS5                  | Meilisearch (or Elasticsearch); same query API at the API layer  |
-| Image hosting       | Remote LoC / Wikimedia URLs  | IIIF server (Cantaloupe) + S3/R2 + CDN                           |
+| Image hosting       | Remote LoC / Wikimedia URLs  | Internet Archive IIIF (`iiif.archive.org`) — $0 for public-domain; or serverless-iiif (AWS Lambda + S3) if dynamic transforms needed |
 | Transcription store | Cached at seed time          | TEI/XML primary store; HTML/plain text projections               |
 | Auth                | none                         | OAuth (researcher accounts), JWT for API rate-limit tiers        |
 | Deploy              | Local `npm run dev`          | Docker → Fly.io / Railway → AWS ECS as scale demands              |
@@ -181,7 +181,7 @@ Legend: **S** = small (≤1 day) · **M** = medium (1–3 days) · **L** = large
 
 - [x] **Metadata-driven seed pipeline (URL-only)** — S — done in POC
 - [ ] **TEI/XML ingestion pipeline** — XL — depends on `saxon` or `tei-publisher`. Acceptance: feed a folder of TEI documents, get them validated, normalized, and inserted with structural markup preserved.
-- [ ] **IIIF image server integration** — L — Cantaloupe + S3 (~$30/mo). Acceptance: every facsimile served via IIIF Image API 3.0; deep-zoom in viewer.
+- [ ] **IIIF image server integration** — L — Internet Archive IIIF ($0, public-domain content only). Upload facsimiles to archive.org; endpoints auto-generated at `iiif.archive.org`; no server, no config, no egress cost; full IIIF Image API 3.0; no SLA or manifest control. Acceptance: every facsimile served via IIIF Image API 3.0; deep-zoom in viewer.
 - [ ] **OCR pipeline (Tesseract → Transkribus)** — XL — Tesseract free; Transkribus credits ~€0.05/page for handwriting. Acceptance: a typewritten page yields ≥98% character accuracy; a handwritten letter yields ≥90% via Transkribus.
 - [ ] **Provenance tracking** — M — Acceptance: every field on every document records its origin URL, fetched-at timestamp, and editor identity for any subsequent corrections.
 - [ ] **Multi-format exports (PDF / EPUB / TEI)** — L — Acceptance: per-document export buttons; PDF preserves typography; EPUB validates with `epubcheck`; TEI validates against P5.
