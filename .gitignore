@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+coverage/
+.env
+.env.local
+*.log
+npm-debug.log*
+
+# Build artifacts
+client/dist/
+server/dist/
+shared/dist/
+
+# SQLite
+data/library.db
+data/library.db-journal
+data/library.db-wal
+data/library.db-shm
+*.sqlite
+*.sqlite-journal
+
+# Editor
+.vscode/
+.idea/
+.DS_Store
+*.swp
