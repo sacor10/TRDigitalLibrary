@@ -12,6 +12,11 @@ client/dist/
 server/dist/
 shared/dist/
 
+# Emitted JS/maps in source folders (we ship .ts only)
+shared/src/**/*.js
+shared/src/**/*.js.map
+shared/src/**/*.d.ts
+
 # SQLite
 data/library.db
 data/library.db-journal

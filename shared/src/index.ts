@@ -1,6 +1,7 @@
 export {
   DocumentSchema,
   DocumentTypeSchema,
+  TranscriptionFormatSchema,
   DocumentListResponseSchema,
   DocumentListQuerySchema,
   SearchQuerySchema,
@@ -12,6 +13,7 @@ export {
 export type {
   Document,
   DocumentType,
+  TranscriptionFormat,
   DocumentListResponse,
   DocumentListQuery,
   SearchQuery,
