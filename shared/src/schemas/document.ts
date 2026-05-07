@@ -47,6 +47,7 @@ export const DocumentSchema = z.object({
   source: z.string().min(1),
   sourceUrl: z.string().url().nullable(),
   tags: z.array(z.string()).default([]),
+  mentions: z.array(z.string()).default([]),
   teiXml: z.string().nullable().default(null),
   fieldProvenance: z.record(FieldProvenanceSchema).optional(),
 });
@@ -70,6 +71,7 @@ export const DocumentPatchSchema = z
     source: z.string().min(1),
     sourceUrl: z.string().url().nullable(),
     tags: z.array(z.string()),
+    mentions: z.array(z.string()),
     teiXml: z.string().nullable(),
   })
   .partial()
@@ -160,3 +162,39 @@ export const ErrorResponseSchema = z.object({
 });
 
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
+
+export const CorrespondentNodeSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  letterCount: z.number().int().nonnegative(),
+  isTR: z.boolean(),
+});
+
+export type CorrespondentNode = z.infer<typeof CorrespondentNodeSchema>;
+
+export const CorrespondentEdgeSchema = z.object({
+  source: z.string().min(1),
+  target: z.string().min(1),
+  letterIds: z.array(z.string().min(1)).min(1),
+});
+
+export type CorrespondentEdge = z.infer<typeof CorrespondentEdgeSchema>;
+
+export const CorrespondentLetterSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  date: isoDate,
+  recipient: z.string().nullable(),
+  mentions: z.array(z.string()),
+  participantIds: z.array(z.string().min(1)),
+});
+
+export type CorrespondentLetter = z.infer<typeof CorrespondentLetterSchema>;
+
+export const CorrespondentGraphResponseSchema = z.object({
+  nodes: z.array(CorrespondentNodeSchema),
+  edges: z.array(CorrespondentEdgeSchema),
+  letters: z.array(CorrespondentLetterSchema),
+});
+
+export type CorrespondentGraphResponse = z.infer<typeof CorrespondentGraphResponseSchema>;

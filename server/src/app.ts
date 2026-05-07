@@ -6,6 +6,7 @@ import morgan from 'morgan';
 import type { Database as DatabaseT } from 'better-sqlite3';
 
 import { buildOpenApiDocument } from './openapi.js';
+import { createCorrespondentsRouter } from './routes/correspondents.js';
 import { createDocumentsRouter } from './routes/documents.js';
 import { createSearchRouter } from './routes/search.js';
 
@@ -28,6 +29,7 @@ export function createApp(db: DatabaseT): Express {
 
   app.use('/api/documents', createDocumentsRouter(db));
   app.use('/api/search', createSearchRouter(db));
+  app.use('/api/correspondents', createCorrespondentsRouter(db));
 
   app.use((req, res) => {
     res.status(404).json({ error: `Not found: ${req.method} ${req.path}` });

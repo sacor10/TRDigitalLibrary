@@ -22,6 +22,7 @@ const sample: Document = {
   source: 'Wikisource',
   sourceUrl: 'https://en.wikisource.org/wiki/Sample',
   tags: [],
+  mentions: [],
   teiXml: null,
 };
 

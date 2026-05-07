@@ -6,6 +6,7 @@ import {
 import { z } from 'zod';
 
 import {
+  CorrespondentGraphResponseSchema,
   DocumentListQuerySchema,
   DocumentListResponseSchema,
   DocumentPatchSchema,
@@ -26,6 +27,7 @@ export function buildOpenApiDocument(): object {
   registry.register('DocumentPatch', DocumentPatchSchema);
   registry.register('FieldProvenance', FieldProvenanceSchema);
   registry.register('SearchResponse', SearchResponseSchema);
+  registry.register('CorrespondentGraphResponse', CorrespondentGraphResponseSchema);
   registry.register('Error', ErrorResponseSchema);
 
   registry.registerPath({
@@ -113,6 +115,19 @@ export function buildOpenApiDocument(): object {
       404: {
         description: 'Document not found or unsupported extension',
         content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/correspondents/graph',
+    summary:
+      'Network graph of letter correspondents derived from recipients and curated `mentions` per letter.',
+    responses: {
+      200: {
+        description: 'Nodes (people), undirected edges (co-occurrence in letters), and the underlying letter index.',
+        content: { 'application/json': { schema: CorrespondentGraphResponseSchema } },
       },
     },
   });
