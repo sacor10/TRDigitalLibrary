@@ -1,6 +1,7 @@
 import type { Document } from '@tr/shared';
 
 import { CitationGenerator } from './CitationGenerator';
+import { OcrPanel } from './OcrPanel';
 
 interface MetadataSidebarProps {
   document: Document;
@@ -73,6 +74,7 @@ export function MetadataSidebar({ document }: MetadataSidebarProps) {
         </dl>
       </section>
       <CitationGenerator document={document} />
+      <OcrPanel document={document} />
     </aside>
   );
 }
