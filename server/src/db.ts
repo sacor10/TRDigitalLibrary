@@ -20,6 +20,8 @@ export interface DocumentRow {
   location: string | null;
   author: string;
   transcription: string;
+  transcription_url: string | null;
+  transcription_format: string;
   facsimile_url: string | null;
   provenance: string | null;
   source: string;
@@ -37,6 +39,8 @@ export function rowToDocument(row: DocumentRow): Document {
     location: row.location,
     author: row.author,
     transcription: row.transcription,
+    transcriptionUrl: row.transcription_url,
+    transcriptionFormat: row.transcription_format as Document['transcriptionFormat'],
     facsimileUrl: row.facsimile_url,
     provenance: row.provenance,
     source: row.source,
@@ -69,10 +73,12 @@ export function upsertDocument(db: DatabaseT, doc: Document): void {
   const stmt = db.prepare(`
     INSERT INTO documents (
       id, title, type, date, recipient, location, author,
-      transcription, facsimile_url, provenance, source, source_url, tags
+      transcription, transcription_url, transcription_format,
+      facsimile_url, provenance, source, source_url, tags
     ) VALUES (
       @id, @title, @type, @date, @recipient, @location, @author,
-      @transcription, @facsimile_url, @provenance, @source, @source_url, @tags
+      @transcription, @transcription_url, @transcription_format,
+      @facsimile_url, @provenance, @source, @source_url, @tags
     )
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
@@ -82,6 +88,8 @@ export function upsertDocument(db: DatabaseT, doc: Document): void {
       location = excluded.location,
       author = excluded.author,
       transcription = excluded.transcription,
+      transcription_url = excluded.transcription_url,
+      transcription_format = excluded.transcription_format,
       facsimile_url = excluded.facsimile_url,
       provenance = excluded.provenance,
       source = excluded.source,
@@ -98,6 +106,8 @@ export function upsertDocument(db: DatabaseT, doc: Document): void {
     location: doc.location,
     author: doc.author,
     transcription: doc.transcription,
+    transcription_url: doc.transcriptionUrl,
+    transcription_format: doc.transcriptionFormat,
     facsimile_url: doc.facsimileUrl,
     provenance: doc.provenance,
     source: doc.source,

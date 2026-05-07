@@ -14,6 +14,10 @@ const isoDate = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format');
 
+export const TranscriptionFormatSchema = z.enum(['wikisource-html', 'plain-text']);
+
+export type TranscriptionFormat = z.infer<typeof TranscriptionFormatSchema>;
+
 export const DocumentSchema = z.object({
   id: z.string().min(1),
   title: z.string().min(1),
@@ -22,7 +26,9 @@ export const DocumentSchema = z.object({
   recipient: z.string().nullable(),
   location: z.string().nullable(),
   author: z.string().default('Theodore Roosevelt'),
-  transcription: z.string().min(1),
+  transcription: z.string().default(''),
+  transcriptionUrl: z.string().url().nullable(),
+  transcriptionFormat: TranscriptionFormatSchema.default('wikisource-html'),
   facsimileUrl: z.string().url().nullable(),
   provenance: z.string().nullable(),
   source: z.string().min(1),
