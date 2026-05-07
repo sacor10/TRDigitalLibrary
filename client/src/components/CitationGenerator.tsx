@@ -2,49 +2,20 @@ import { useState } from 'react';
 
 import type { Document } from '@tr/shared';
 
-type Style = 'chicago' | 'mla' | 'apa';
+import { buildCitation, type CitationStyle } from '../lib/citation';
 
-const STYLES: { id: Style; label: string }[] = [
+const STYLES: { id: CitationStyle; label: string }[] = [
   { id: 'chicago', label: 'Chicago' },
   { id: 'mla', label: 'MLA' },
   { id: 'apa', label: 'APA' },
 ];
-
-function year(date: string): string {
-  return date.slice(0, 4);
-}
-
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function buildCitation(doc: Document, style: Style): string {
-  const author = doc.author;
-  const title = doc.title;
-  const dateYear = year(doc.date);
-  const fullDate = doc.date;
-  const source = doc.source;
-  const url = doc.sourceUrl ?? '';
-  const accessed = todayISO();
-
-  switch (style) {
-    case 'chicago':
-      return `${author}. "${title}." ${fullDate}. ${source}. ${url ? `${url}. ` : ''}Accessed ${accessed}.`;
-    case 'mla':
-      return `${author}. "${title}." ${source}, ${fullDate}, ${url}. Accessed ${accessed}.`;
-    case 'apa':
-      return `${author}. (${dateYear}, ${fullDate}). ${title}. ${source}. ${url}`;
-    default:
-      return '';
-  }
-}
 
 interface CitationGeneratorProps {
   document: Document;
 }
 
 export function CitationGenerator({ document }: CitationGeneratorProps) {
-  const [style, setStyle] = useState<Style>('chicago');
+  const [style, setStyle] = useState<CitationStyle>('chicago');
   const [copied, setCopied] = useState(false);
   const citation = buildCitation(document, style);
 

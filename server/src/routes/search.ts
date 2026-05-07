@@ -51,7 +51,7 @@ export function createSearchRouter(db: DatabaseT): Router {
     const sql = `
       SELECT
         documents.*,
-        snippet(documents_fts, 1, '<mark>', '</mark>', '…', 16) AS snippet,
+        snippet(documents_fts, -1, '<mark>', '</mark>', '…', 16) AS snippet,
         bm25(documents_fts) AS rank
       FROM documents_fts
       JOIN documents ON documents.rowid = documents_fts.rowid

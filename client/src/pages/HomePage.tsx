@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 
 export function HomePage() {
   return (
-    <div className="prose dark:prose-invert max-w-none">
+    <div className="max-w-none">
       <section className="text-center py-12">
         <h1 className="text-4xl md:text-5xl font-semibold tracking-tight">
           The works and correspondence of Theodore Roosevelt
