@@ -18,6 +18,15 @@ export {
   CorrespondentGraphResponseSchema,
 } from './schemas/document.js';
 
+export {
+  TopicSchema,
+  TopicMemberSchema,
+  TopicDriftPointSchema,
+  TopicsResponseSchema,
+  TopicDetailResponseSchema,
+  TopicDriftResponseSchema,
+} from './schemas/topic.js';
+
 export type {
   Document,
   DocumentType,
@@ -37,3 +46,12 @@ export type {
   CorrespondentLetter,
   CorrespondentGraphResponse,
 } from './schemas/document.js';
+
+export type {
+  Topic,
+  TopicMember,
+  TopicDriftPoint,
+  TopicsResponse,
+  TopicDetailResponse,
+  TopicDriftResponse,
+} from './schemas/topic.js';
