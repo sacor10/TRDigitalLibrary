@@ -3,12 +3,18 @@ import {
   DocumentListResponseSchema,
   DocumentSchema,
   SearchResponseSchema,
+  TopicDetailResponseSchema,
+  TopicDriftResponseSchema,
+  TopicsResponseSchema,
   type CorrespondentGraphResponse,
   type Document,
   type DocumentListQuery,
   type DocumentListResponse,
   type SearchQuery,
   type SearchResponse,
+  type TopicDetailResponse,
+  type TopicDriftResponse,
+  type TopicsResponse,
 } from '@tr/shared';
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
@@ -63,6 +69,19 @@ export async function fetchCorrespondentGraph(): Promise<CorrespondentGraphRespo
   return getJson('/api/correspondents/graph', (raw) =>
     CorrespondentGraphResponseSchema.parse(raw),
   );
+}
+
+export async function fetchTopics(): Promise<TopicsResponse> {
+  return getJson('/api/topics', (raw) => TopicsResponseSchema.parse(raw));
+}
+
+export async function fetchTopic(id: number, limit?: number): Promise<TopicDetailResponse> {
+  const qs = buildQuery({ limit });
+  return getJson(`/api/topics/${id}${qs}`, (raw) => TopicDetailResponseSchema.parse(raw));
+}
+
+export async function fetchTopicDrift(): Promise<TopicDriftResponse> {
+  return getJson('/api/topics/drift?bin=year', (raw) => TopicDriftResponseSchema.parse(raw));
 }
 
 export async function searchDocuments(query: SearchQuery): Promise<SearchResponse> {

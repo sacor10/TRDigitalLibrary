@@ -15,6 +15,7 @@
     "test": "npm run test -w shared --if-present && npm run test -w server && npm run test -w client",
     "seed": "npm run seed -w server",
     "ingest-tei": "npm run ingest-tei -w server --",
+    "topic-model": "node scripts/run-topic-model.mjs",
     "lint": "eslint \"{shared,server,client}/src/**/*.{ts,tsx}\"",
     "format": "prettier --write \"{shared,server,client}/src/**/*.{ts,tsx,css,json}\" \"*.{json,md}\""
   },

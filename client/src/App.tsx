@@ -9,6 +9,7 @@ import { HomePage } from './pages/HomePage';
 import { NetworkPage } from './pages/NetworkPage';
 import { SearchPage } from './pages/SearchPage';
 import { TimelinePage } from './pages/TimelinePage';
+import { TopicsPage } from './pages/TopicsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,6 +28,8 @@ export function App() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/timeline" element={<TimelinePage />} />
             <Route path="/network" element={<NetworkPage />} />
+            <Route path="/topics" element={<TopicsPage />} />
+            <Route path="/topics/:id" element={<TopicsPage />} />
             <Route path="/documents/:id" element={<DocumentPage />} />
             <Route
               path="*"
