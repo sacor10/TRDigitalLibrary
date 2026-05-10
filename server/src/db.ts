@@ -258,16 +258,23 @@ async function runMigrations(client: LibsqlClient): Promise<void> {
   }
 }
 
-const UPSERT_DOCUMENT_SQL = `
-  INSERT INTO documents (
-    id, title, type, date, recipient, location, author,
-    transcription, transcription_url, transcription_format,
-    facsimile_url, iiif_manifest_url, provenance, source, source_url, tags, mentions, tei_xml
-  ) VALUES (
-    @id, @title, @type, @date, @recipient, @location, @author,
-    @transcription, @transcription_url, @transcription_format,
-    @facsimile_url, @iiif_manifest_url, @provenance, @source, @source_url, @tags, @mentions, @tei_xml
-  )
+const DOCUMENT_INSERT_COLUMNS = `
+  id, title, type, date, recipient, location, author,
+  transcription, transcription_url, transcription_format,
+  facsimile_url, iiif_manifest_url, provenance, source, source_url, tags, mentions, tei_xml,
+  tei_source_hash
+`;
+const DOCUMENT_INSERT_VALUES = `
+  @id, @title, @type, @date, @recipient, @location, @author,
+  @transcription, @transcription_url, @transcription_format,
+  @facsimile_url, @iiif_manifest_url, @provenance, @source, @source_url, @tags, @mentions, @tei_xml,
+  @tei_source_hash
+`;
+
+// Default mode: refresh every column on conflict. Used by TEI ingest, the
+// /api/documents PATCH path, and tests.
+const UPSERT_DOCUMENT_REPLACE_SQL = `
+  INSERT INTO documents (${DOCUMENT_INSERT_COLUMNS}) VALUES (${DOCUMENT_INSERT_VALUES})
   ON CONFLICT(id) DO UPDATE SET
     title = excluded.title,
     type = excluded.type,
@@ -285,10 +292,22 @@ const UPSERT_DOCUMENT_SQL = `
     source_url = excluded.source_url,
     tags = excluded.tags,
     mentions = excluded.mentions,
-    tei_xml = excluded.tei_xml
+    tei_xml = excluded.tei_xml,
+    tei_source_hash = COALESCE(excluded.tei_source_hash, documents.tei_source_hash)
 `;
 
-function upsertDocumentArgs(doc: Document): Record<string, InValue> {
+// Skip-if-exists mode: used by LoC ingest. The fast no-op SELECT in the LoC
+// ingest already filters out rows that exist; DO NOTHING is the belt to that
+// braces, defending against TOCTOU races and making the intent explicit.
+const UPSERT_DOCUMENT_SKIP_IF_EXISTS_SQL = `
+  INSERT INTO documents (${DOCUMENT_INSERT_COLUMNS}) VALUES (${DOCUMENT_INSERT_VALUES})
+  ON CONFLICT(id) DO NOTHING
+`;
+
+function upsertDocumentArgs(
+  doc: Document,
+  teiSourceHash?: string | null,
+): Record<string, InValue> {
   return {
     id: doc.id,
     title: doc.title,
@@ -308,6 +327,7 @@ function upsertDocumentArgs(doc: Document): Record<string, InValue> {
     tags: JSON.stringify(doc.tags),
     mentions: JSON.stringify(doc.mentions ?? []),
     tei_xml: doc.teiXml ?? null,
+    tei_source_hash: teiSourceHash ?? null,
   };
 }
 
@@ -333,13 +353,38 @@ function provenanceStmt(
   };
 }
 
+export interface UpsertDocumentOptions {
+  /**
+   * `replace` (default): on conflict, refresh every column. Use for TEI
+   * ingest where re-ingest with a new content hash should propagate
+   * legitimate corrections.
+   *
+   * `skip-if-exists`: on conflict, do nothing. Use for LoC ingest where the
+   * caller already SELECT-checked existence as a fast no-op and we want
+   * defence against TOCTOU races without rewriting expensive metadata.
+   */
+  mode?: 'replace' | 'skip-if-exists';
+  /**
+   * SHA-256 of the raw TEI XML, written into `documents.tei_source_hash`.
+   * Pass for TEI ingest so subsequent runs can short-circuit unchanged
+   * files. The replace SQL uses COALESCE so passing `null` does not wipe
+   * an existing hash on a non-TEI re-ingest.
+   */
+  teiSourceHash?: string | null;
+}
+
 export async function upsertDocument(
   client: LibsqlClient,
   doc: Document,
   ctx?: ProvenanceContext,
+  opts: UpsertDocumentOptions = {},
 ): Promise<void> {
+  const sql =
+    opts.mode === 'skip-if-exists'
+      ? UPSERT_DOCUMENT_SKIP_IF_EXISTS_SQL
+      : UPSERT_DOCUMENT_REPLACE_SQL;
   const stmts: InStatement[] = [
-    { sql: UPSERT_DOCUMENT_SQL, args: upsertDocumentArgs(doc) },
+    { sql, args: upsertDocumentArgs(doc, opts.teiSourceHash ?? null) },
   ];
   if (ctx) {
     for (const field of PROVENANCE_FIELDS) {
@@ -351,6 +396,39 @@ export async function upsertDocument(
   } else {
     await client.batch(stmts, 'write');
   }
+}
+
+/**
+ * Returns the row's existing `tei_source_hash` (or `null` if the row exists
+ * with no recorded hash, or `undefined` if the row does not exist). The TEI
+ * ingest uses this to short-circuit unchanged files without parsing or
+ * writing anything.
+ */
+export async function getDocumentTeiSourceHash(
+  client: LibsqlClient,
+  documentId: string,
+): Promise<{ exists: boolean; teiSourceHash: string | null }> {
+  const result = await client.execute({
+    sql: 'SELECT tei_source_hash FROM documents WHERE id = ? LIMIT 1',
+    args: [documentId],
+  });
+  if (result.rows.length === 0) return { exists: false, teiSourceHash: null };
+  const row = result.rows[0]!;
+  return {
+    exists: true,
+    teiSourceHash: row.tei_source_hash == null ? null : String(row.tei_source_hash),
+  };
+}
+
+export async function documentExists(
+  client: LibsqlClient,
+  documentId: string,
+): Promise<boolean> {
+  const result = await client.execute({
+    sql: 'SELECT 1 AS x FROM documents WHERE id = ? LIMIT 1',
+    args: [documentId],
+  });
+  return result.rows.length > 0;
 }
 
 export async function getFieldProvenance(

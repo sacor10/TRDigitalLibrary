@@ -137,6 +137,72 @@ describe('LoC ingestion', () => {
     expect(Number(result.rows[0]?.c ?? 0)).toBe(0);
   });
 
+  it('skips items already present without fetching item details (fast no-op)', async () => {
+    db = await openInMemoryDatabase();
+    // First ingest: should fetch + write the item.
+    const first = await ingestLocCollection({
+      db,
+      limit: 1,
+      fetchImpl: fakeFetch(),
+      logger: silentLogger,
+      now: () => new Date('2026-01-05T12:00:00.000Z'),
+    });
+    expect(first.written).toBe(1);
+    expect(first.skipped).toBe(0);
+
+    // Second ingest with a stub fetch that fails on item-details + full-text
+    // URLs. If the ingest correctly short-circuits on documentExists, only
+    // the collection page should be fetched.
+    const calls: string[] = [];
+    const noFetchAfterCollection: typeof fakeFetch extends () => infer F ? F : never =
+      async (url: string) => {
+        calls.push(url);
+        if (url.includes('/collections/theodore-roosevelt-papers/')) {
+          return new Response(JSON.stringify(collectionPage), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        // Anything else means we failed to short-circuit.
+        throw new Error(`unexpected fetch on second ingest: ${url}`);
+      };
+
+    const second = await ingestLocCollection({
+      db,
+      limit: 1,
+      fetchImpl: noFetchAfterCollection,
+      logger: silentLogger,
+    });
+    expect(second.written).toBe(0);
+    expect(second.skipped).toBe(1);
+    expect(second.scanned).toBe(1);
+    // Only the collection page should have been fetched.
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toMatch(/\/collections\/theodore-roosevelt-papers\//);
+  });
+
+  it('--force re-fetches even if the row already exists', async () => {
+    db = await openInMemoryDatabase();
+    await ingestLocCollection({
+      db,
+      limit: 1,
+      fetchImpl: fakeFetch(),
+      logger: silentLogger,
+    });
+    const forced = await ingestLocCollection({
+      db,
+      limit: 1,
+      force: true,
+      fetchImpl: fakeFetch(),
+      logger: silentLogger,
+    });
+    expect(forced.skipped).toBe(0);
+    // skip-if-exists conflict mode means the row isn't overwritten, but the
+    // ingest path still ran (mapped + written counter both incremented).
+    expect(forced.mapped).toBe(1);
+    expect(forced.written).toBe(1);
+  });
+
   it('ingests LoC text into the existing document and FTS search APIs', async () => {
     db = await openInMemoryDatabase();
     const report = await ingestLocCollection({

@@ -12,6 +12,7 @@ interface CliOptions {
   dbPath: string;
   dryRun: boolean;
   reset: boolean;
+  force: boolean;
   limit?: number;
   startPage: number;
   editor?: string;
@@ -35,6 +36,7 @@ function parseCliArgs(argv: string[]): CliOptions {
       db: { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
       reset: { type: 'boolean', default: false },
+      force: { type: 'boolean', default: false },
       editor: { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -53,6 +55,7 @@ function parseCliArgs(argv: string[]): CliOptions {
     dbPath: values.db ? resolve(values.db) : defaultDbPath,
     dryRun: Boolean(values['dry-run']),
     reset: Boolean(values.reset),
+    force: Boolean(values.force),
     startPage,
   };
   const limit = positiveInt(values.limit, '--limit');
@@ -72,6 +75,7 @@ Options:
   --db <path>       Database path (default: data/library.db)
   --dry-run         Fetch and map records but do not write the database
   --reset           Clear existing corpus rows before importing
+  --force           Bypass the fast no-op skip-if-exists check (re-fetch every item)
   --editor <name>   Editor identity recorded in field provenance
                    (default: 'loc-ingest')
   -h, --help        Show this help
@@ -87,10 +91,24 @@ function printReport(report: LocIngestReport): void {
   console.log(`  with full text:   ${report.withFullText}`);
   console.log(`  without text:     ${report.withoutFullText}`);
   console.log(`  failed:           ${report.failed}`);
-  if (!report.dryRun) console.log(`  inserted/updated: ${report.written}`);
+  if (!report.dryRun) console.log(`  inserted:         ${report.written}`);
+  if (!report.dryRun) console.log(`  skipped (cached): ${report.skipped}`);
   if (report.nextPage) {
     console.log(`  resume with:      npm run ingest-loc -- --start-page ${report.nextPage}`);
   }
+  // Machine-readable summary line for the build orchestrator. Keeping the
+  // shape stable: { source, scanned, written, skipped, failed, dryRun }.
+  // The orchestrator parses anything starting with "SUMMARY " on its own line.
+  const summary = {
+    source: 'loc',
+    scanned: report.scanned,
+    written: report.written,
+    updated: 0,
+    skipped: report.skipped,
+    failed: report.failed,
+    dryRun: report.dryRun,
+  };
+  console.log(`SUMMARY ${JSON.stringify(summary)}`);
 }
 
 async function main(): Promise<void> {
@@ -111,6 +129,7 @@ async function main(): Promise<void> {
       db,
       dryRun: opts.dryRun,
       reset: opts.reset,
+      force: opts.force,
       startPage: opts.startPage,
     };
     if (opts.limit != null) ingestOptions.limit = opts.limit;

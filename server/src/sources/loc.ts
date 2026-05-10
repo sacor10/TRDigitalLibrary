@@ -1,6 +1,6 @@
 import { DocumentSchema, type Document } from '@tr/shared';
 
-import { upsertDocument, type LibsqlClient, type ProvenanceContext } from '../db.js';
+import { documentExists, upsertDocument, type LibsqlClient, type ProvenanceContext } from '../db.js';
 
 export const LOC_COLLECTION_SLUG = 'theodore-roosevelt-papers';
 export const LOC_SOURCE = 'Library of Congress Theodore Roosevelt Papers';
@@ -19,6 +19,14 @@ export interface LocIngestOptions {
   db: LibsqlClient | null;
   dryRun?: boolean;
   reset?: boolean;
+  /**
+   * When `true`, bypass the fast no-op SELECT and re-fetch every item from
+   * LoC even if it already exists in the database. The upsert is still
+   * idempotent under `skip-if-exists` semantics, so this primarily exists
+   * for tests; in production prefer `--reset` (full wipe) for forced
+   * re-ingestion.
+   */
+  force?: boolean;
   limit?: number;
   startPage?: number;
   pageSize?: number;
@@ -31,7 +39,7 @@ export interface LocIngestOptions {
 export interface LocIngestResult {
   documentId?: string;
   sourceUrl?: string;
-  status: 'ok' | 'error';
+  status: 'ok' | 'skipped' | 'error';
   title?: string;
   transcriptionLength?: number;
   error?: string;
@@ -41,6 +49,8 @@ export interface LocIngestReport {
   scanned: number;
   mapped: number;
   written: number;
+  /** Items skipped because they were already present in the DB. */
+  skipped: number;
   withFullText: number;
   withoutFullText: number;
   failed: number;
@@ -214,6 +224,31 @@ function extractDocumentId(item: JsonObject): string {
   const sourceUrl = extractSourceUrl(item);
   const raw = number ?? (sourceUrl ? itemIdFromUrl(sourceUrl) : null) ?? stringAt(item, 'title') ?? 'loc-item';
   return `loc-${slugify(raw)}`;
+}
+
+/**
+ * Cheaply predict the `documents.id` we'd assign to a collection-page result
+ * BEFORE fetching the (much larger) item details JSON. Used by the fast no-op
+ * check in `ingestLocCollection` to skip already-ingested rows without paying
+ * for the item fetch + full-text download.
+ *
+ * extractDocumentId() is the source of truth on the full item; this helper
+ * mirrors the same precedence chain using only the fields available on a
+ * collection page (id/url/title). For LoC TR papers the URL slug equals the
+ * `number` field, so the predicted id matches the eventual id; if a future
+ * LoC change ever drifts the two, the predicted id simply won't match
+ * anything in the DB and we'll fall through to the full fetch + upsert,
+ * which is correct (just no faster than today's behaviour).
+ */
+export function predictDocumentIdFromCollectionResult(result: JsonObject): string | null {
+  const rawUrl = stringAt(result, 'url') ?? stringAt(result, 'id');
+  if (rawUrl) {
+    const itemId = itemIdFromUrl(normalizeLocUrl(rawUrl));
+    if (itemId) return `loc-${slugify(itemId)}`;
+  }
+  const title = stringAt(result, 'title');
+  if (title) return `loc-${slugify(title)}`;
+  return null;
 }
 
 function extractTitle(item: JsonObject): string {
@@ -425,6 +460,7 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
     scanned: 0,
     mapped: 0,
     written: 0,
+    skipped: 0,
     withFullText: 0,
     withoutFullText: 0,
     failed: 0,
@@ -455,6 +491,28 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
       report.scanned += 1;
 
       try {
+        // Fast no-op: predict the document id from the collection-page result
+        // alone and skip the (expensive) item-details fetch + full-text
+        // download if it's already in the DB. `--force` bypasses the check;
+        // `--reset` already wiped the DB so nothing will exist to skip.
+        if (!options.force && options.db) {
+          const predictedId = predictDocumentIdFromCollectionResult(result);
+          if (predictedId && (await documentExists(options.db, predictedId))) {
+            report.skipped += 1;
+            const skippedResult: LocIngestResult = {
+              status: 'skipped',
+              documentId: predictedId,
+            };
+            const sourceUrl = stringAt(result, 'url');
+            if (sourceUrl) skippedResult.sourceUrl = sourceUrl;
+            const title = stringAt(result, 'title');
+            if (title) skippedResult.title = title;
+            report.results.push(skippedResult);
+            logger.log(`  skipped ${predictedId} (already in DB)`);
+            continue;
+          }
+        }
+
         const item = await fetchItem(fetchImpl, result);
         const transcriptionUrl = extractFullTextUrl(item);
         let transcription = '';
@@ -475,7 +533,12 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
             fetchedAt: now().toISOString(),
             editor,
           };
-          await upsertDocument(options.db, document, ctx);
+          // skip-if-exists: belt-and-braces against TOCTOU between the
+          // documentExists check above and the INSERT here. Without --force
+          // we never want to overwrite an already-ingested LoC row from a
+          // build-time re-ingest; corrections should go through the
+          // /api/documents PATCH path which records provenance history.
+          await upsertDocument(options.db, document, ctx, { mode: 'skip-if-exists' });
           report.written += 1;
         }
 

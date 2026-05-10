@@ -14,6 +14,7 @@ interface CliOptions {
   folder: string;
   dryRun: boolean;
   recursive: boolean;
+  force: boolean;
   dbPath: string;
   defaultType: DocumentType;
   defaultSource?: string;
@@ -26,6 +27,7 @@ function parseCliArgs(argv: string[]): CliOptions {
     options: {
       'dry-run': { type: 'boolean', default: false },
       recursive: { type: 'boolean', short: 'r', default: false },
+      force: { type: 'boolean', default: false },
       db: { type: 'string' },
       'default-type': { type: 'string', default: 'letter' },
       'default-source': { type: 'string' },
@@ -66,6 +68,7 @@ function parseCliArgs(argv: string[]): CliOptions {
     folder,
     dryRun: Boolean(values['dry-run']),
     recursive: Boolean(values.recursive),
+    force: Boolean(values.force),
     dbPath: values.db ? resolve(values.db) : defaultDbPath,
     defaultType: defaultTypeParse.data,
   };
@@ -82,6 +85,7 @@ Validates and ingests TEI/XML documents from a folder into the digital library.
 Options:
   --dry-run             Parse and validate only; do not write to the database
   -r, --recursive       Recurse into subdirectories
+  --force               Bypass tei_source_hash cache and re-ingest every file
   --db <path>           Database path (default: data/library.db)
   --default-type <t>    Default document type when not derivable from TEI
                         (one of: letter, speech, diary, article, autobiography)
@@ -97,7 +101,11 @@ function printReport(report: IngestReport, dryRun: boolean): void {
   console.log(`  files scanned:    ${report.scanned}`);
   console.log(`  valid:            ${report.valid}`);
   console.log(`  invalid:          ${report.invalid}`);
-  if (!dryRun) console.log(`  inserted/updated: ${report.written}`);
+  if (!dryRun) {
+    console.log(`  inserted (new):   ${report.written}`);
+    console.log(`  updated (hash):   ${report.updated}`);
+    console.log(`  skipped (cached): ${report.skipped}`);
+  }
   console.log('');
 
   for (const r of report.results) {
@@ -107,11 +115,26 @@ function printReport(report: IngestReport, dryRun: boolean): void {
       if (r.warnings && r.warnings.length > 0) {
         for (const w of r.warnings) console.log(`           warn: ${w}`);
       }
+    } else if (r.status === 'skipped') {
+      console.log(`  skipped  ${r.file} -> ${r.documentId} (tei_source_hash unchanged)`);
     } else {
       console.log(`  ${r.status.padEnd(8)} ${r.file}`);
       for (const e of r.errors ?? []) console.log(`           error: ${e}`);
     }
   }
+
+  // Machine-readable summary line for the build orchestrator. Keeping the
+  // shape stable: { source, scanned, written, updated, skipped, failed, dryRun }.
+  const summary = {
+    source: 'tei',
+    scanned: report.scanned,
+    written: report.written,
+    updated: report.updated,
+    skipped: report.skipped,
+    failed: report.invalid,
+    dryRun,
+  };
+  console.log(`SUMMARY ${JSON.stringify(summary)}`);
 }
 
 async function main(): Promise<void> {
@@ -127,6 +150,7 @@ async function main(): Promise<void> {
     const ingestOpts: Parameters<typeof ingestTeiFolder>[2] = {
       dryRun: opts.dryRun,
       recursive: opts.recursive,
+      force: opts.force,
       defaultType: opts.defaultType,
     };
     if (opts.defaultSource) ingestOpts.defaultSource = opts.defaultSource;
