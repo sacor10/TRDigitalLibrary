@@ -1,6 +1,6 @@
 import { DocumentSchema } from '@tr/shared';
 import request from 'supertest';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 
 import { createApp } from '../app.js';
@@ -10,6 +10,7 @@ import {
   mapLocItemToDocument,
   normalizeLocDate,
   type FetchLike,
+  type LocFetchErrorInfo,
 } from '../sources/loc.js';
 
 const LOC_ITEM_URL = 'https://www.loc.gov/item/mss382990022/';
@@ -89,7 +90,41 @@ function fakeFetch(text = 'LoC full text with unique-token-alpenglow.'): FetchLi
 const silentLogger = {
   log: () => undefined,
   warn: () => undefined,
+  error: () => undefined,
 };
+
+const noSleep = async (): Promise<void> => undefined;
+
+function makeRecordingLogger(): {
+  log: ReturnType<typeof vi.fn>;
+  warn: ReturnType<typeof vi.fn>;
+  error: ReturnType<typeof vi.fn>;
+} {
+  return { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+function errorResponse(status: number, statusText = ''): Response {
+  return new Response(`HTTP ${status}`, {
+    status,
+    statusText,
+    headers: { 'content-type': 'text/plain' },
+  });
+}
+
+function isCollectionUrl(url: string): boolean {
+  return url.includes('/collections/theodore-roosevelt-papers/');
+}
+
+function isItemUrl(url: string): boolean {
+  return url.startsWith(LOC_ITEM_URL) || url.startsWith('https://www.loc.gov/item/mss382990022/');
+}
 
 describe('LoC ingestion', () => {
   let db: LibsqlClient | null = null;
@@ -225,5 +260,251 @@ describe('LoC ingestion', () => {
     expect(search.body.total).toBe(1);
     expect(search.body.results[0].document.id).toBe('loc-mss382990022');
     expect(search.body.results[0].snippet).toContain('<mark>');
+  });
+
+  it('retries a transient 503 on the item fetch and then succeeds', async () => {
+    db = await openInMemoryDatabase();
+    let itemCalls = 0;
+    const fetchImpl: FetchLike = async (url: string) => {
+      if (isCollectionUrl(url)) return jsonResponse(collectionPage);
+      if (isItemUrl(url)) {
+        itemCalls += 1;
+        if (itemCalls === 1) return errorResponse(503, 'Service Unavailable');
+        return jsonResponse({ item: locItem });
+      }
+      return new Response('LoC full text with unique-token-alpenglow.', {
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+      });
+    };
+    const logger = makeRecordingLogger();
+
+    const report = await ingestLocCollection({
+      db,
+      limit: 1,
+      fetchImpl,
+      logger,
+      sleep: noSleep,
+    });
+
+    expect(report.written).toBe(1);
+    expect(report.failed).toBe(0);
+    expect(itemCalls).toBe(2);
+    const retryLogs = logger.log.mock.calls
+      .map((args) => String(args[0]))
+      .filter((line) => line.includes('retry item'));
+    expect(retryLogs.length).toBe(1);
+    expect(retryLogs[0]).toContain('status=503');
+    expect(retryLogs[0]).toContain('docId=loc-mss382990022');
+  });
+
+  it('retries a network error then succeeds', async () => {
+    db = await openInMemoryDatabase();
+    let itemCalls = 0;
+    const fetchImpl: FetchLike = async (url: string) => {
+      if (isCollectionUrl(url)) return jsonResponse(collectionPage);
+      if (isItemUrl(url)) {
+        itemCalls += 1;
+        if (itemCalls === 1) {
+          const cause = Object.assign(new Error('terminated'), { code: 'UND_ERR_SOCKET' });
+          const err = Object.assign(new TypeError('fetch failed'), { cause });
+          throw err;
+        }
+        return jsonResponse({ item: locItem });
+      }
+      return new Response('LoC full text', {
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+      });
+    };
+    const logger = makeRecordingLogger();
+
+    const report = await ingestLocCollection({
+      db,
+      limit: 1,
+      fetchImpl,
+      logger,
+      sleep: noSleep,
+    });
+
+    expect(report.failed).toBe(0);
+    expect(report.written).toBe(1);
+    expect(itemCalls).toBe(2);
+    const retryLogs = logger.log.mock.calls
+      .map((args) => String(args[0]))
+      .filter((line) => line.includes('retry item'));
+    expect(retryLogs[0]).toContain('error=TypeError: fetch failed');
+    expect(retryLogs[0]).toContain('cause=Error: terminated');
+  });
+
+  it('exhausts retries on persistent 503 and records structured error info', async () => {
+    db = await openInMemoryDatabase();
+    let itemCalls = 0;
+    const fetchImpl: FetchLike = async (url: string) => {
+      if (isCollectionUrl(url)) return jsonResponse(collectionPage);
+      if (isItemUrl(url)) {
+        itemCalls += 1;
+        return errorResponse(503, 'Service Unavailable');
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    };
+    const logger = makeRecordingLogger();
+
+    const report = await ingestLocCollection({
+      db,
+      limit: 1,
+      fetchImpl,
+      logger,
+      sleep: noSleep,
+    });
+
+    expect(report.failed).toBe(1);
+    expect(itemCalls).toBe(3);
+    const failure = report.results[0];
+    expect(failure?.status).toBe('error');
+    const info = failure?.errorInfo as LocFetchErrorInfo | undefined;
+    expect(info).toBeDefined();
+    expect(info?.stage).toBe('item');
+    expect(info?.attempts).toBe(3);
+    expect(info?.httpStatus).toBe(503);
+    expect(info?.documentId).toBe('loc-mss382990022');
+    expect(info?.retryable).toBe(true);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    const warning = String(logger.warn.mock.calls[0]?.[0] ?? '');
+    expect(warning).toContain('stage=item');
+    expect(warning).toContain('attempts=3');
+    expect(warning).toContain('http=503');
+    expect(warning).toContain('docId=loc-mss382990022');
+  });
+
+  it('does not retry on 404', async () => {
+    db = await openInMemoryDatabase();
+    let itemCalls = 0;
+    const fetchImpl: FetchLike = async (url: string) => {
+      if (isCollectionUrl(url)) return jsonResponse(collectionPage);
+      if (isItemUrl(url)) {
+        itemCalls += 1;
+        return errorResponse(404, 'Not Found');
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    };
+    const logger = makeRecordingLogger();
+
+    const report = await ingestLocCollection({
+      db,
+      limit: 1,
+      fetchImpl,
+      logger,
+      sleep: noSleep,
+    });
+
+    expect(itemCalls).toBe(1);
+    expect(report.failed).toBe(1);
+    const info = report.results[0]?.errorInfo;
+    expect(info?.attempts).toBe(1);
+    expect(info?.retryable).toBe(false);
+    expect(info?.httpStatus).toBe(404);
+  });
+
+  it('honors Retry-After on 429', async () => {
+    db = await openInMemoryDatabase();
+    let itemCalls = 0;
+    const sleepWaits: number[] = [];
+    const fetchImpl: FetchLike = async (url: string) => {
+      if (isCollectionUrl(url)) return jsonResponse(collectionPage);
+      if (isItemUrl(url)) {
+        itemCalls += 1;
+        if (itemCalls === 1) {
+          return new Response('rate-limited', {
+            status: 429,
+            statusText: 'Too Many Requests',
+            headers: { 'content-type': 'text/plain', 'retry-after': '2' },
+          });
+        }
+        return jsonResponse({ item: locItem });
+      }
+      return new Response('LoC full text', {
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+      });
+    };
+    const logger = makeRecordingLogger();
+
+    const report = await ingestLocCollection({
+      db,
+      limit: 1,
+      fetchImpl,
+      logger,
+      sleep: async (ms) => {
+        sleepWaits.push(ms);
+      },
+    });
+
+    expect(report.failed).toBe(0);
+    expect(sleepWaits).toContain(2000);
+    const retryLog = logger.log.mock.calls
+      .map((args) => String(args[0]))
+      .find((line) => line.includes('retry item') && line.includes('status=429'));
+    expect(retryLog).toBeDefined();
+    expect(retryLog).toContain('after 2000ms');
+  });
+
+  it('labels fulltext stage when the fulltext fetch fails', async () => {
+    db = await openInMemoryDatabase();
+    const fetchImpl: FetchLike = async (url: string) => {
+      if (isCollectionUrl(url)) return jsonResponse(collectionPage);
+      if (isItemUrl(url)) return jsonResponse({ item: locItem });
+      return errorResponse(503, 'Service Unavailable');
+    };
+    const logger = makeRecordingLogger();
+
+    const report = await ingestLocCollection({
+      db,
+      limit: 1,
+      fetchImpl,
+      logger,
+      sleep: noSleep,
+    });
+
+    expect(report.failed).toBe(1);
+    const info = report.results[0]?.errorInfo;
+    expect(info?.stage).toBe('fulltext');
+    expect(info?.documentId).toBe('loc-mss382990022');
+    expect(info?.attempts).toBe(3);
+  });
+
+  it('JSON parse errors on a 200 fail fast without retry', async () => {
+    db = await openInMemoryDatabase();
+    let itemCalls = 0;
+    const fetchImpl: FetchLike = async (url: string) => {
+      if (isCollectionUrl(url)) return jsonResponse(collectionPage);
+      if (isItemUrl(url)) {
+        itemCalls += 1;
+        return new Response('not json', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    };
+    const logger = makeRecordingLogger();
+
+    const report = await ingestLocCollection({
+      db,
+      limit: 1,
+      fetchImpl,
+      logger,
+      sleep: noSleep,
+    });
+
+    expect(itemCalls).toBe(1);
+    expect(report.failed).toBe(1);
+    expect(report.results[0]?.status).toBe('error');
+    // Post-fetch (JSON parse) errors take the non-LocFetchError branch and
+    // therefore don't carry structured errorInfo.
+    expect(report.results[0]?.errorInfo).toBeUndefined();
+    const warning = String(logger.warn.mock.calls[0]?.[0] ?? '');
+    expect(warning).toContain('stage=post-fetch');
+    expect(warning).toContain('docId=loc-mss382990022');
   });
 });
