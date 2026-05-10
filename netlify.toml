@@ -4,8 +4,12 @@
   #   - If TURSO_LIBRARY_DATABASE_URL is set, run ingest-loc + ingest-tei
   #     against the configured Turso DB (idempotent — a no-op rebuild
   #     finishes in seconds).
-  #   - If not, log a warning and exit 0 so PR previews / forks without the
-  #     Turso secrets do not fail the build.
+  #   - If any new/updated rows were written, also run python/sentiment.py
+  #     and python/topic_model.py to keep the precomputed analytics tables
+  #     in sync. A no-op ingest skips the Python pass entirely (fast path).
+  #   - If TURSO_LIBRARY_DATABASE_URL is not set, log a warning and exit 0
+  #     so PR previews / forks without the Turso secrets do not fail the
+  #     build.
   # Required Netlify environment variables for production:
   #   - TURSO_LIBRARY_DATABASE_URL  (libsql:// URL of the library DB)
   #   - TURSO_LIBRARY_AUTH_TOKEN    (Turso auth token, secret)
@@ -14,6 +18,30 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # Python sidecars (sentiment + topic-model) only run when ingest reports
+  # new/updated rows. The first cold build pulls ~500 MB of HuggingFace
+  # weights for sentence-transformers/all-MiniLM-L6-v2 and a similar amount
+  # of pip wheels (torch, scikit-learn, bertopic). Pinning the cache dirs
+  # under /opt/build/cache (Netlify's persistent build-cache mount) lets the
+  # netlify-plugin-cache plugin below restore them on the next build, so
+  # subsequent builds that DO trigger analysis finish in a few minutes
+  # instead of 15+.
+  PIP_CACHE_DIR = "/opt/build/cache/pip"
+  HF_HOME = "/opt/build/cache/huggingface"
+  TRANSFORMERS_CACHE = "/opt/build/cache/huggingface/transformers"
+  SENTENCE_TRANSFORMERS_HOME = "/opt/build/cache/huggingface/sentence-transformers"
+
+# Persist the pip + HuggingFace caches between builds. Netlify's automatic
+# cache only covers a small allow-list of paths (npm, yarn, etc.); for
+# arbitrary paths we use netlify-plugin-cache, declared as a devDependency
+# at the repo root and resolved from local node_modules at build time.
+[[plugins]]
+  package = "netlify-plugin-cache"
+  [plugins.inputs]
+    paths = [
+      "/opt/build/cache/pip",
+      "/opt/build/cache/huggingface",
+    ]
 
 [functions]
   node_bundler = "esbuild"
