@@ -1,6 +1,3 @@
-import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-
 import {
   ANNOTATION_JSONLD_CONTEXT,
   AnnotationCollectionSchema,
@@ -8,11 +5,15 @@ import {
   type Annotation,
   type AnnotationCreateInput,
 } from '@tr/shared';
+import request from 'supertest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
 
 import { openAnnotationsDb, type LibsqlClient as AnnotationsClient } from '../annotations-db.js';
 import { createApp } from '../app.js';
 import type { GoogleVerifier } from '../auth/google.js';
 import { openInMemoryDatabase, upsertDocument, type LibsqlClient } from '../db.js';
+
 import { cloneTestDocuments } from './fixtures/documents.js';
 
 const baseInput: AnnotationCreateInput = {

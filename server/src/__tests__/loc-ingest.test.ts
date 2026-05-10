@@ -1,7 +1,7 @@
+import { DocumentSchema } from '@tr/shared';
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { DocumentSchema } from '@tr/shared';
 
 import { createApp } from '../app.js';
 import { openInMemoryDatabase, type LibsqlClient } from '../db.js';

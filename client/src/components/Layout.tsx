@@ -2,6 +2,7 @@ import { type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 
 import { useTheme } from '../context/ThemeContext';
+
 import { SignInButton } from './SignInButton';
 
 const NAV_ITEMS = [

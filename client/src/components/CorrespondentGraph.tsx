@@ -1,8 +1,8 @@
+import type { CorrespondentEdge, CorrespondentNode } from '@tr/shared';
+import type cytoscape from 'cytoscape';
 import { useEffect, useMemo, useRef } from 'react';
 import CytoscapeComponent from 'react-cytoscapejs';
-import type cytoscape from 'cytoscape';
 
-import type { CorrespondentEdge, CorrespondentNode } from '@tr/shared';
 
 interface Props {
   nodes: CorrespondentNode[];

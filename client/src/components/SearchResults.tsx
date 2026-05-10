@@ -1,6 +1,6 @@
+import type { SearchResult } from '@tr/shared';
 import { Link } from 'react-router-dom';
 
-import type { SearchResult } from '@tr/shared';
 
 interface SearchResultsProps {
   results: SearchResult[];
@@ -53,7 +53,6 @@ export function SearchResults({ results }: SearchResultsProps) {
             {snippet && (
               <p
                 className="mt-3 text-sm leading-relaxed text-ink-800 dark:text-parchment-100"
-                /* eslint-disable-next-line react/no-danger */
                 dangerouslySetInnerHTML={{ __html: sanitizeSnippet(snippet) }}
               />
             )}

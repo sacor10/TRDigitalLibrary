@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
+import { DocumentTypeSchema, type DocumentType } from '@tr/shared';
 import { useMemo, useState } from 'react';
 
-import { DocumentTypeSchema, type DocumentType } from '@tr/shared';
 
 import { fetchDocuments } from '../api/client';
 import { DocumentList } from '../components/DocumentList';

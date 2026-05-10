@@ -1,7 +1,7 @@
+import type { Document } from '@tr/shared';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import type { Document } from '@tr/shared';
 
 interface TimelineProps {
   documents: Document[];

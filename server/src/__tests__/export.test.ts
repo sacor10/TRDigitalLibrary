@@ -2,10 +2,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { XMLParser } from 'fast-xml-parser';
 import JSZip from 'jszip';
 import request from 'supertest';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
-import { XMLParser } from 'fast-xml-parser';
 
 import { createApp } from '../app.js';
 import {
@@ -16,6 +16,7 @@ import {
 } from '../db.js';
 import { parseTei } from '../ingest/tei-parser.js';
 import { transformToDocument } from '../ingest/tei-transformer.js';
+
 import { cloneTestDocuments } from './fixtures/documents.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

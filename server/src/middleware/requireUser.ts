@@ -1,3 +1,4 @@
+import type { AuthUser } from '@tr/shared';
 import type { NextFunction, Request, Response } from 'express';
 
 import type { LibsqlClient } from '../annotations-db.js';
@@ -7,7 +8,6 @@ import {
   verifySignedSessionId,
 } from '../auth/session.js';
 import { findUserById, rowToAuthUser } from '../auth/users.js';
-import type { AuthUser } from '@tr/shared';
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace

@@ -9,7 +9,6 @@ import type {
   InValue,
   Row,
 } from '@libsql/client';
-
 import type { Document, DocumentPatch, DocumentSection, FieldProvenance } from '@tr/shared';
 
 const __dirname = (() => {

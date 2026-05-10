@@ -1,7 +1,6 @@
-import { Router } from 'express';
 import type { InValue } from '@libsql/client';
-
 import { DocumentListQuerySchema, DocumentPatchSchema } from '@tr/shared';
+import { Router } from 'express';
 
 import {
   getSectionsByDocumentId,

@@ -1,8 +1,8 @@
 import { render } from '@testing-library/react';
+import type { Document } from '@tr/shared';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 
-import type { Document } from '@tr/shared';
 
 import { Timeline } from './Timeline';
 

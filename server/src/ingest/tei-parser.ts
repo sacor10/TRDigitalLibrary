@@ -1,6 +1,6 @@
+import type { DocumentSectionType } from '@tr/shared';
 import { XMLBuilder, XMLParser, XMLValidator } from 'fast-xml-parser';
 
-import type { DocumentSectionType } from '@tr/shared';
 
 export type ParsedNode = Record<string, unknown>;
 

@@ -1,6 +1,6 @@
+import type { Document } from '@tr/shared';
 import { useId, useState } from 'react';
 
-import type { Document } from '@tr/shared';
 
 import { FacsimilePane } from './FacsimilePane';
 import { TranscriptionPane } from './TranscriptionPane';

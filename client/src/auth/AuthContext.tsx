@@ -1,3 +1,4 @@
+import type { AuthUser } from '@tr/shared';
 import {
   createContext,
   useCallback,
@@ -8,7 +9,6 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { AuthUser } from '@tr/shared';
 
 import { fetchMe, googleSignIn, logout as apiLogout } from '../api/client';
 

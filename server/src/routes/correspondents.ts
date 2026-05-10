@@ -1,11 +1,11 @@
-import { Router } from 'express';
-
 import type {
   CorrespondentEdge,
   CorrespondentGraphResponse,
   CorrespondentLetter,
   CorrespondentNode,
 } from '@tr/shared';
+import { Router } from 'express';
+
 
 import type { LibsqlClient } from '../db.js';
 

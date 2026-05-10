@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { Annotation, AnnotationCreateInput, Document } from '@tr/shared';
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLocation } from 'react-router-dom';
 
-import type { Annotation, AnnotationCreateInput, Document } from '@tr/shared';
 
 import {
   createAnnotation,
@@ -12,6 +12,7 @@ import {
 } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { locateAnnotationRange, type AnnotationRange } from '../lib/selection';
+
 import { AnnotationPopover } from './AnnotationPopover';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { AnnotationsSidePanel } from './AnnotationsSidePanel';

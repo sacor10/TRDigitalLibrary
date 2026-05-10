@@ -220,6 +220,7 @@ async function copyTable(
   let scanned = 0;
   let written = 0;
   let offset = 0;
+  // eslint-disable-next-line no-constant-condition -- pagination loop; both exit branches use `break`
   while (true) {
     const page = await source.execute({
       sql: `SELECT ${colList} FROM ${spec.name} LIMIT ? OFFSET ?`,

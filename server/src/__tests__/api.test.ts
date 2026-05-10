@@ -1,10 +1,11 @@
+import { DocumentSchema, type Document } from '@tr/shared';
 import request from 'supertest';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 
-import { DocumentSchema, type Document } from '@tr/shared';
 
 import { createApp } from '../app.js';
 import { openInMemoryDatabase, upsertDocument, type LibsqlClient } from '../db.js';
+
 import { cloneTestDocuments, TEST_DOCUMENTS } from './fixtures/documents.js';
 
 describe('TR Digital Library API', () => {
