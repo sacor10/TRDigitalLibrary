@@ -5,6 +5,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -24,15 +25,25 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  /** Avoids initial GET /me (401, no cookie yet) overwriting state after a fast Google sign-in. */
+  const signInCompletedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
     fetchMe()
       .then((u) => {
-        if (!cancelled) setUser(u);
+        if (!cancelled) {
+          if (u !== null) {
+            setUser(u);
+          } else if (!signInCompletedRef.current) {
+            setUser(null);
+          }
+        }
       })
       .catch(() => {
-        if (!cancelled) setUser(null);
+        if (!cancelled && !signInCompletedRef.current) {
+          setUser(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -43,11 +54,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async (idToken: string) => {
+    signInCompletedRef.current = true;
     const u = await googleSignIn(idToken);
     setUser(u);
   }, []);
 
   const signOut = useCallback(async () => {
+    signInCompletedRef.current = false;
     await apiLogout();
     setUser(null);
   }, []);

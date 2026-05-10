@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 
 import { useAuth } from '../auth/AuthContext';
 
@@ -14,6 +14,7 @@ interface GoogleAccountsId {
     callback: (response: GoogleCredentialResponse) => void;
     auto_select?: boolean;
   }) => void;
+  cancel?: () => void;
   renderButton: (
     parent: HTMLElement,
     options: {
@@ -58,15 +59,27 @@ function loadGisScript(): Promise<void> {
   return scriptPromise;
 }
 
+function dismissGoogleIdentityUi(host: HTMLElement | null) {
+  window.google?.accounts?.id?.cancel?.();
+  host?.replaceChildren();
+}
+
 export function SignInButton() {
   const { user, loading, signIn, signOut } = useAuth();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const clientId = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? '';
 
+  useLayoutEffect(() => {
+    if (user) {
+      dismissGoogleIdentityUi(null);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (user || loading) return;
     if (!clientId) return;
-    if (!containerRef.current) return;
+    const host = containerRef.current;
+    if (!host) return;
 
     let cancelled = false;
     loadGisScript()
@@ -95,6 +108,7 @@ export function SignInButton() {
 
     return () => {
       cancelled = true;
+      dismissGoogleIdentityUi(host);
     };
   }, [user, loading, clientId, signIn]);
 
