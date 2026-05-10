@@ -56,13 +56,13 @@ export function SearchPage() {
   return (
     <div>
       <header className="mb-6">
-        <h1 className="text-3xl font-semibold">Search</h1>
+        <h1 className="text-2xl font-semibold sm:text-3xl">Search</h1>
         <p className="text-ink-700 dark:text-parchment-100 mt-1">
           Full-text search across titles and transcriptions, ranked by SQLite FTS5 BM25.
         </p>
       </header>
 
-      <div className="grid md:grid-cols-2 gap-3 mb-6">
+      <div className="mb-6 grid gap-3 md:grid-cols-2">
         <SearchBar initialValue={initialQ} onChange={handleQueryChange} />
         <label className="flex flex-col gap-1">
           <span className="text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
@@ -92,7 +92,7 @@ export function SearchPage() {
             placeholder="e.g. Kermit, Lodge, Congress"
           />
         </label>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid gap-2 sm:grid-cols-2">
           <label className="flex flex-col gap-1">
             <span className="text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
               From

@@ -12,10 +12,10 @@ export function TimelinePage() {
   return (
     <div>
       <header className="mb-6">
-        <h1 className="text-3xl font-semibold">Timeline</h1>
+        <h1 className="text-2xl font-semibold sm:text-3xl">Timeline</h1>
         <p className="text-ink-700 dark:text-parchment-100 mt-1">
-          A chronological view of imported documents. Click a marker — or focus it and press
-          Enter — to open the document.
+          A chronological view of imported documents. Click a marker — or focus it and press Enter
+          — to open the document.
         </p>
       </header>
       {isLoading && <p>Loading…</p>}

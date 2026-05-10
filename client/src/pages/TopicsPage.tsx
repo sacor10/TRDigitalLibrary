@@ -10,7 +10,6 @@ const SPARK_W = 96;
 const SPARK_H = 28;
 const CHART_W = 560;
 const CHART_H = 220;
-const BAR_W = 360;
 
 function uniqueSortedPeriods(points: TopicDriftPoint[]): string[] {
   const set = new Set<string>();
@@ -24,15 +23,11 @@ function pointsForTopic(points: TopicDriftPoint[], topicId: number): TopicDriftP
     .sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0));
 }
 
-function Sparkline({
-  points,
-  periods,
-}: {
-  points: TopicDriftPoint[];
-  periods: string[];
-}) {
+function Sparkline({ points, periods }: { points: TopicDriftPoint[]; periods: string[] }) {
   if (periods.length === 0) {
-    return <span className="text-ink-700/60 dark:text-parchment-100/60 text-xs">no drift data</span>;
+    return (
+      <span className="text-ink-700/60 dark:text-parchment-100/60 text-xs">no drift data</span>
+    );
   }
   const byPeriod = new Map(points.map((p) => [p.period, p.share]));
   const max = Math.max(0.0001, ...points.map((p) => p.share));
@@ -59,15 +54,13 @@ function Sparkline({
   );
 }
 
-function DriftChart({
-  points,
-  periods,
-}: {
-  points: TopicDriftPoint[];
-  periods: string[];
-}) {
+function DriftChart({ points, periods }: { points: TopicDriftPoint[]; periods: string[] }) {
   if (periods.length === 0) {
-    return <p className="text-ink-700/70 dark:text-parchment-100/70">No drift data for this topic yet.</p>;
+    return (
+      <p className="text-ink-700/70 dark:text-parchment-100/70">
+        No drift data for this topic yet.
+      </p>
+    );
   }
   const padding = { top: 16, right: 16, bottom: 32, left: 40 };
   const innerW = CHART_W - padding.left - padding.right;
@@ -149,22 +142,27 @@ function DriftChart({
 function KeywordChart({ keywords }: { keywords: string[] }) {
   const items = keywords.slice(0, 15);
   if (items.length === 0) {
-    return <p className="text-ink-700/70 dark:text-parchment-100/70">No keywords recorded for this topic.</p>;
+    return (
+      <p className="text-ink-700/70 dark:text-parchment-100/70">
+        No keywords recorded for this topic.
+      </p>
+    );
   }
   return (
     <ul className="flex flex-col gap-1">
       {items.map((kw, i) => {
-        const width = ((items.length - i) / items.length) * BAR_W;
+        const width = ((items.length - i) / items.length) * 100;
         return (
           <li key={kw} className="flex items-center gap-3 text-sm">
-            <span className="w-32 truncate" title={kw}>
+            <span className="w-24 shrink-0 truncate sm:w-32" title={kw}>
               {kw}
             </span>
-            <span
-              aria-hidden
-              className="h-3 rounded-sm bg-accent-500/70"
-              style={{ width: `${width}px` }}
-            />
+            <span className="min-w-0 flex-1" aria-hidden>
+              <span
+                className="block h-3 rounded-sm bg-accent-500/70"
+                style={{ width: `${width}%` }}
+              />
+            </span>
           </li>
         );
       })}
@@ -185,9 +183,7 @@ function TopicsGrid() {
   if (topicsQuery.error) {
     return (
       <p className="text-red-600 dark:text-red-400">
-        {topicsQuery.error instanceof Error
-          ? topicsQuery.error.message
-          : 'Failed to load topics.'}
+        {topicsQuery.error instanceof Error ? topicsQuery.error.message : 'Failed to load topics.'}
       </p>
     );
   }
@@ -204,8 +200,8 @@ function TopicsGrid() {
           to populate them.
         </p>
         <p className="mt-2 text-ink-700/70 dark:text-parchment-100/70">
-          The 8-document POC corpus produces &le; 1 topic; meaningful clusters require the
-          full corpus. See{' '}
+          The 8-document POC corpus produces &le; 1 topic; meaningful clusters require the full
+          corpus. See{' '}
           <a
             className="underline decoration-accent-500/50 hover:decoration-accent-500"
             href="https://github.com/sacor10/TRDigitalLibrary/blob/main/docs/topic-modeling.md"
@@ -279,18 +275,15 @@ function TopicDetail({ id }: { id: number }) {
 
   return (
     <article>
-      <header className="mb-6 flex items-baseline justify-between gap-4">
+      <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-baseline sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold">{topic.label}</h1>
+          <h1 className="text-2xl font-semibold sm:text-3xl">{topic.label}</h1>
           <p className="text-ink-700/80 dark:text-parchment-100/80 mt-1">
             {topic.size} {topic.size === 1 ? 'document' : 'documents'} &middot; model{' '}
             <code className="text-xs">{topic.modelVersion}</code>
           </p>
         </div>
-        <Link
-          to="/topics"
-          className="btn"
-        >
+        <Link to="/topics" className="btn">
           &larr; All topics
         </Link>
       </header>
@@ -322,19 +315,17 @@ function TopicDetail({ id }: { id: number }) {
         ) : (
           <ul className="flex flex-col gap-2">
             {members.map((m) => (
-              <li key={m.documentId} className="flex items-baseline gap-3">
-                <span className="text-xs text-ink-700/70 dark:text-parchment-100/70 w-16 tabular-nums">
+              <li key={m.documentId} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="w-16 text-xs tabular-nums text-ink-700/70 dark:text-parchment-100/70">
                   {(m.probability * 100).toFixed(0)}%
                 </span>
                 <Link
                   to={`/documents/${encodeURIComponent(m.documentId)}`}
-                  className="underline decoration-accent-500/50 hover:decoration-accent-500"
+                  className="min-w-0 underline decoration-accent-500/50 hover:decoration-accent-500"
                 >
                   {m.title}
                 </Link>
-                <span className="text-ink-700/70 dark:text-parchment-100/70 text-sm">
-                  {m.date}
-                </span>
+                <span className="text-ink-700/70 dark:text-parchment-100/70 text-sm">{m.date}</span>
               </li>
             ))}
           </ul>
@@ -350,11 +341,10 @@ export function TopicsPage() {
     return (
       <div>
         <header className="mb-6">
-          <h1 className="text-3xl font-semibold">Topics</h1>
+          <h1 className="text-2xl font-semibold sm:text-3xl">Topics</h1>
           <p className="text-ink-700 dark:text-parchment-100 mt-1">
-            Themes BERTopic discovered across the corpus, ordered by size. Each card shows
-            the top keywords and the topic&rsquo;s share of documents over time. Click a
-            card for details.
+            Themes BERTopic discovered across the corpus, ordered by size. Each card shows the top
+            keywords and the topic&rsquo;s share of documents over time. Click a card for details.
           </p>
         </header>
         <TopicsGrid />

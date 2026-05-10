@@ -49,8 +49,8 @@ export function DocumentPage() {
           </Link>{' '}
           / {data.type}
         </p>
-        <h1 className="text-3xl md:text-4xl font-semibold mt-2">{data.title}</h1>
-        <p className="mt-2 text-sm text-ink-700 dark:text-parchment-100 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h1 className="mt-2 text-2xl font-semibold sm:text-3xl md:text-4xl">{data.title}</h1>
+        <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-700 dark:text-parchment-100">
           <span>{data.date}</span>
           {data.location && <span>&middot; {data.location}</span>}
           {data.recipient && <span>&middot; To {data.recipient}</span>}
@@ -58,8 +58,8 @@ export function DocumentPage() {
         </p>
       </header>
 
-      <div className="grid lg:grid-cols-[1fr_320px] gap-8">
-        <div>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-8">
+        <div className="min-w-0">
           <DocumentViewer document={data} />
         </div>
         <MetadataSidebar document={data} />

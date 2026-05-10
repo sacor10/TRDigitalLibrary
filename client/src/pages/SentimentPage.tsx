@@ -2,11 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import type {
-  SentimentBin,
-  SentimentExtremeItem,
-  SentimentTimelinePoint,
-} from '@tr/shared';
+import type { SentimentBin, SentimentExtremeItem, SentimentTimelinePoint } from '@tr/shared';
 
 import { fetchSentimentExtremes, fetchSentimentTimeline } from '../api/client';
 
@@ -20,13 +16,7 @@ function formatPolarity(value: number): string {
   return value >= 0 ? `+${value.toFixed(2)}` : value.toFixed(2);
 }
 
-function MoodChart({
-  points,
-  bin,
-}: {
-  points: SentimentTimelinePoint[];
-  bin: SentimentBin;
-}) {
+function MoodChart({ points, bin }: { points: SentimentTimelinePoint[]; bin: SentimentBin }) {
   if (points.length === 0) {
     return (
       <p className="text-ink-700/70 dark:text-parchment-100/70">
@@ -40,8 +30,7 @@ function MoodChart({
   const stepX = points.length > 1 ? innerW / (points.length - 1) : 0;
   const yMin = -1;
   const yMax = 1;
-  const yToPx = (v: number) =>
-    padding.top + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
+  const yToPx = (v: number) => padding.top + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
 
   const linePath = points
     .map((p, i) => {
@@ -56,77 +45,79 @@ function MoodChart({
   const zeroY = yToPx(0);
 
   return (
-    <svg
-      width="100%"
-      viewBox={`0 0 ${CHART_W} ${CHART_H}`}
-      role="img"
-      aria-label={`TR's mood across ${points[0]!.period} to ${points[points.length - 1]!.period}, binned by ${bin}`}
-      className="text-accent-500"
-    >
-      {yTicks.map((tv) => {
-        const y = yToPx(tv);
-        return (
-          <g key={tv}>
-            <line
-              x1={padding.left}
-              x2={padding.left + innerW}
-              y1={y}
-              y2={y}
-              stroke="currentColor"
-              strokeOpacity={tv === 0 ? 0.4 : 0.12}
-              strokeDasharray={tv === 0 ? undefined : '3 3'}
-            />
+    <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <svg
+        width="100%"
+        viewBox={`0 0 ${CHART_W} ${CHART_H}`}
+        role="img"
+        aria-label={`TR's mood across ${points[0]!.period} to ${points[points.length - 1]!.period}, binned by ${bin}`}
+        className="min-w-[36rem] text-accent-500 sm:min-w-0"
+      >
+        {yTicks.map((tv) => {
+          const y = yToPx(tv);
+          return (
+            <g key={tv}>
+              <line
+                x1={padding.left}
+                x2={padding.left + innerW}
+                y1={y}
+                y2={y}
+                stroke="currentColor"
+                strokeOpacity={tv === 0 ? 0.4 : 0.12}
+                strokeDasharray={tv === 0 ? undefined : '3 3'}
+              />
+              <text
+                x={padding.left - 6}
+                y={y + 4}
+                textAnchor="end"
+                fontSize={10}
+                fill="currentColor"
+                fillOpacity={0.7}
+              >
+                {formatPolarity(tv)}
+              </text>
+            </g>
+          );
+        })}
+        <line
+          x1={padding.left}
+          x2={padding.left + innerW}
+          y1={zeroY}
+          y2={zeroY}
+          stroke="currentColor"
+          strokeOpacity={0.4}
+        />
+        <path d={linePath} fill="none" stroke="currentColor" strokeWidth={2} />
+        {points.map((p, i) => {
+          const x = padding.left + i * stepX;
+          const y = yToPx(p.meanPolarity);
+          const fill = p.meanPolarity >= 0 ? 'currentColor' : 'rgb(220 38 38)';
+          return (
+            <circle key={p.period} cx={x} cy={y} r={3} fill={fill}>
+              <title>
+                {p.period}: {formatPolarity(p.meanPolarity)} ({p.documentCount}{' '}
+                {p.documentCount === 1 ? 'doc' : 'docs'})
+              </title>
+            </circle>
+          );
+        })}
+        {points.map((p, i) =>
+          i % xTickEvery === 0 || i === points.length - 1 ? (
             <text
-              x={padding.left - 6}
-              y={y + 4}
-              textAnchor="end"
+              key={`x-${p.period}`}
+              x={padding.left + i * stepX}
+              y={CHART_H - padding.bottom + 16}
+              textAnchor="middle"
               fontSize={10}
               fill="currentColor"
               fillOpacity={0.7}
             >
-              {formatPolarity(tv)}
+              {p.period}
             </text>
-          </g>
-        );
-      })}
-      <line
-        x1={padding.left}
-        x2={padding.left + innerW}
-        y1={zeroY}
-        y2={zeroY}
-        stroke="currentColor"
-        strokeOpacity={0.4}
-      />
-      <path d={linePath} fill="none" stroke="currentColor" strokeWidth={2} />
-      {points.map((p, i) => {
-        const x = padding.left + i * stepX;
-        const y = yToPx(p.meanPolarity);
-        const fill = p.meanPolarity >= 0 ? 'currentColor' : 'rgb(220 38 38)';
-        return (
-          <circle key={p.period} cx={x} cy={y} r={3} fill={fill}>
-            <title>
-              {p.period}: {formatPolarity(p.meanPolarity)} ({p.documentCount}{' '}
-              {p.documentCount === 1 ? 'doc' : 'docs'})
-            </title>
-          </circle>
-        );
-      })}
-      {points.map((p, i) =>
-        i % xTickEvery === 0 || i === points.length - 1 ? (
-          <text
-            key={`x-${p.period}`}
-            x={padding.left + i * stepX}
-            y={CHART_H - padding.bottom + 16}
-            textAnchor="middle"
-            fontSize={10}
-            fill="currentColor"
-            fillOpacity={0.7}
-          >
-            {p.period}
-          </text>
-        ) : null,
-      )}
-    </svg>
+          ) : null,
+        )}
+      </svg>
+    </div>
   );
 }
 
@@ -149,13 +140,13 @@ function ExtremeList({
       ) : (
         <ul className="flex flex-col gap-2">
           {items.map((item) => (
-            <li key={item.documentId} className="flex items-baseline gap-3">
-              <span className="text-xs tabular-nums w-14 text-ink-700/70 dark:text-parchment-100/70">
+            <li key={item.documentId} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="w-14 text-xs tabular-nums text-ink-700/70 dark:text-parchment-100/70">
                 {formatPolarity(item.polarity)}
               </span>
               <Link
                 to={`/documents/${encodeURIComponent(item.documentId)}`}
-                className="underline decoration-accent-500/50 hover:decoration-accent-500 truncate"
+                className="min-w-0 underline decoration-accent-500/50 hover:decoration-accent-500"
               >
                 {item.title}
               </Link>
@@ -192,17 +183,16 @@ export function SentimentPage() {
   return (
     <div>
       <header className="mb-6">
-        <h1 className="text-3xl font-semibold">Sentiment</h1>
+        <h1 className="text-2xl font-semibold sm:text-3xl">Sentiment</h1>
         <p className="text-ink-700 dark:text-parchment-100 mt-1">
-          Per-document polarity scored by VADER (lexicon-based, sentence-level
-          length-weighted compound). The default range traces TR&rsquo;s mood across the 1912
-          campaign. Each polarity is in <code className="text-xs">[-1, +1]</code>; values near
-          zero are neutral.
+          Per-document polarity scored by VADER (lexicon-based, sentence-level length-weighted
+          compound). The default range traces TR&rsquo;s mood across the 1912 campaign. Each
+          polarity is in <code className="text-xs">[-1, +1]</code>; values near zero are neutral.
         </p>
       </header>
 
       <form
-        className="flex flex-wrap items-end gap-4 mb-6"
+        className="mb-6 grid gap-3 sm:grid-cols-2 lg:flex lg:flex-wrap lg:items-end lg:gap-4"
         onSubmit={(e) => e.preventDefault()}
         aria-label="Sentiment date range"
       >
@@ -212,7 +202,7 @@ export function SentimentPage() {
             type="date"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
-            className="mt-1 px-2 py-1 rounded border border-ink-700/15 dark:border-parchment-50/15 bg-parchment-50 dark:bg-ink-800 text-sm normal-case tracking-normal"
+            className="input mt-1 text-sm normal-case tracking-normal"
           />
         </label>
         <label className="flex flex-col text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
@@ -221,7 +211,7 @@ export function SentimentPage() {
             type="date"
             value={to}
             onChange={(e) => setTo(e.target.value)}
-            className="mt-1 px-2 py-1 rounded border border-ink-700/15 dark:border-parchment-50/15 bg-parchment-50 dark:bg-ink-800 text-sm normal-case tracking-normal"
+            className="input mt-1 text-sm normal-case tracking-normal"
           />
         </label>
         <label className="flex flex-col text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
@@ -229,7 +219,7 @@ export function SentimentPage() {
           <select
             value={bin}
             onChange={(e) => setBin(e.target.value as SentimentBin)}
-            className="mt-1 px-2 py-1 rounded border border-ink-700/15 dark:border-parchment-50/15 bg-parchment-50 dark:bg-ink-800 text-sm normal-case tracking-normal"
+            className="input mt-1 text-sm normal-case tracking-normal"
           >
             <option value="month">Month</option>
             <option value="year">Year</option>

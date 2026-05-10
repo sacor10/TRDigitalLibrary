@@ -22,7 +22,11 @@ export function DocumentViewer({ document }: DocumentViewerProps) {
 
   return (
     <div>
-      <div role="tablist" aria-label="Document view" className="inline-flex gap-1 p-1 rounded-md bg-parchment-200/60 dark:bg-ink-800 mb-4">
+      <div
+        role="tablist"
+        aria-label="Document view"
+        className="mb-4 grid grid-cols-2 gap-1 rounded-md bg-parchment-200/60 p-1 dark:bg-ink-800 sm:inline-grid"
+      >
         <button
           type="button"
           role="tab"
@@ -31,7 +35,7 @@ export function DocumentViewer({ document }: DocumentViewerProps) {
           id={`${transcriptionPanelId}-tab`}
           tabIndex={tab === 'transcription' ? 0 : -1}
           onClick={() => setTab('transcription')}
-          className={`px-4 py-1.5 rounded text-sm font-medium ${
+          className={`min-h-10 rounded px-3 py-2 text-sm font-medium sm:px-4 ${
             tab === 'transcription'
               ? 'bg-white dark:bg-ink-700 shadow-sm'
               : 'text-ink-700 dark:text-parchment-100'
@@ -47,7 +51,7 @@ export function DocumentViewer({ document }: DocumentViewerProps) {
           id={`${facsimilePanelId}-tab`}
           tabIndex={tab === 'facsimile' ? 0 : -1}
           onClick={() => setTab('facsimile')}
-          className={`px-4 py-1.5 rounded text-sm font-medium ${
+          className={`min-h-10 rounded px-3 py-2 text-sm font-medium sm:px-4 ${
             tab === 'facsimile'
               ? 'bg-white dark:bg-ink-700 shadow-sm'
               : 'text-ink-700 dark:text-parchment-100'

@@ -25,7 +25,7 @@ export function ExportPanel({ document }: ExportPanelProps) {
         {FORMATS.map((f) => (
           <li key={f.id}>
             <a
-              className="btn w-full justify-between"
+              className="btn w-full flex-col items-start text-left sm:flex-row sm:items-center sm:justify-between"
               href={documentExportUrl(document.id, f.id)}
               download
               aria-label={`Download ${document.title} as ${f.label}`}

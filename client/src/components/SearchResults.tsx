@@ -41,8 +41,8 @@ export function SearchResults({ results }: SearchResultsProps) {
       {results.map(({ document, snippet }) => (
         <li key={document.id} className="card hover:shadow-md transition-shadow">
           <Link to={`/documents/${document.id}`} className="block">
-            <div className="flex items-start justify-between gap-4">
-              <div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <div className="min-w-0">
                 <h3 className="font-semibold text-lg leading-tight">{document.title}</h3>
                 <p className="mt-1 text-sm text-ink-700 dark:text-parchment-100">
                   {document.date} &middot; {document.type}

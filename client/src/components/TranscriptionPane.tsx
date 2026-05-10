@@ -1,12 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Fragment,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLocation } from 'react-router-dom';
 
 import type { Annotation, AnnotationCreateInput, Document } from '@tr/shared';
@@ -35,7 +28,11 @@ interface Segment {
   annotationIds: string[];
 }
 
-function buildSegments(paragraph: string, paragraphStart: number, ranges: { id: string; range: AnnotationRange }[]): Segment[] {
+function buildSegments(
+  paragraph: string,
+  paragraphStart: number,
+  ranges: { id: string; range: AnnotationRange }[],
+): Segment[] {
   const paragraphEnd = paragraphStart + paragraph.length;
   const overlapping = ranges.filter(
     ({ range }) => range.start < paragraphEnd && range.end > paragraphStart,
@@ -54,10 +51,7 @@ function buildSegments(paragraph: string, paragraphStart: number, ranges: { id: 
     const segStart = paragraphStart + s;
     const segEnd = paragraphStart + e;
     const annotationIds = overlapping
-      .filter(
-        ({ range }) =>
-          range.start <= segStart && range.end >= segEnd,
-      )
+      .filter(({ range }) => range.start <= segStart && range.end >= segEnd)
       .map(({ id }) => id);
     segments.push({ start: s, end: e, annotationIds });
   }
@@ -129,9 +123,7 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
     if (!exists) return;
     setActiveId(id);
     requestAnimationFrame(() => {
-      const el = window.document.querySelector<HTMLElement>(
-        `[data-anno-id="${CSS.escape(id)}"]`,
-      );
+      const el = window.document.querySelector<HTMLElement>(`[data-anno-id="${CSS.escape(id)}"]`);
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.classList.add('anno-flash');
@@ -142,17 +134,17 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
 
   if (!document.transcription) {
     return (
-      <article className="max-w-none p-6 rounded-md border border-dashed border-ink-700/20 dark:border-parchment-50/20 space-y-3">
+      <article className="max-w-none space-y-3 rounded-md border border-dashed border-ink-700/20 p-4 dark:border-parchment-50/20 sm:p-6">
         {import.meta.env.DEV ? (
           <p>
             No cached transcription is available. This document was imported from a remote source. Run
-            <code className="mx-1">npm run ingest-loc -- --limit 25</code> with network access, or read it directly at the
-            source:
+            <code className="mx-1">npm run ingest-loc -- --limit 25</code> with network access,
+            or read it directly at the source:
           </p>
         ) : (
           <p>
-            No cached transcription is available in this deployment. You can read the document directly
-            at the source:
+            No cached transcription is available in this deployment. You can read the document
+            directly at the source:
           </p>
         )}
         {document.sourceUrl && (
@@ -201,16 +193,14 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
     );
   });
 
-  const activeAnnotation = activeId
-    ? located.find((a) => a.id === activeId) ?? null
-    : null;
+  const activeAnnotation = activeId ? (located.find((a) => a.id === activeId) ?? null) : null;
 
   return (
-    <div className="grid lg:grid-cols-[1fr_280px] gap-6">
-      <div className="relative">
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="relative min-w-0">
         <article
           ref={rootRef}
-          className="max-w-none leading-relaxed space-y-4 text-base"
+          className="max-w-none space-y-4 text-base leading-relaxed sm:text-lg"
           aria-describedby={user ? 'annotation-help' : undefined}
         >
           {renderedParagraphs}

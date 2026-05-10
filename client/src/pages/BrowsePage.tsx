@@ -31,14 +31,14 @@ export function BrowsePage() {
   return (
     <div>
       <header className="mb-6">
-        <h1 className="text-3xl font-semibold">Browse the collection</h1>
+        <h1 className="text-2xl font-semibold sm:text-3xl">Browse the collection</h1>
         <p className="text-ink-700 dark:text-parchment-100 mt-1">
           {data ? `${data.total} documents` : 'Loading…'}
         </p>
       </header>
 
-      <div className="flex flex-wrap gap-3 mb-6">
-        <label className="flex flex-col text-xs gap-1">
+      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+        <label className="flex flex-col gap-1 text-xs">
           <span className="uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
             Type
           </span>
@@ -55,20 +55,16 @@ export function BrowsePage() {
             ))}
           </select>
         </label>
-        <label className="flex flex-col text-xs gap-1">
+        <label className="flex flex-col gap-1 text-xs">
           <span className="uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
             Sort by
           </span>
-          <select
-            className="input"
-            value={sort}
-            onChange={(e) => setSort(e.target.value as Sort)}
-          >
+          <select className="input" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
             <option value="date">Date</option>
             <option value="title">Title</option>
           </select>
         </label>
-        <label className="flex flex-col text-xs gap-1">
+        <label className="flex flex-col gap-1 text-xs">
           <span className="uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
             Order
           </span>
