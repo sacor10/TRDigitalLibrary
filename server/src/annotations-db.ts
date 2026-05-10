@@ -13,10 +13,12 @@ const __dirname = (() => {
 })();
 
 const DEFAULT_LOCAL_URL = `file:${join(__dirname, '..', '..', 'data', 'annotations.db')}`;
+const DEFAULT_MIGRATIONS_DIR = join(__dirname, 'annotations-migrations');
 
 export interface OpenAnnotationsDbOptions {
   url?: string;
   authToken?: string;
+  migrationsDir?: string;
 }
 
 export async function openAnnotationsDb(
@@ -26,17 +28,17 @@ export async function openAnnotationsDb(
   const authToken = opts.authToken ?? process.env.TURSO_AUTH_TOKEN;
 
   const client = createClient(authToken ? { url, authToken } : { url });
-  await runMigrations(client);
+  await runMigrations(client, opts.migrationsDir ?? DEFAULT_MIGRATIONS_DIR);
   return client;
 }
 
 export async function openInMemoryAnnotationsDb(): Promise<LibsqlClient> {
   const client = createClient({ url: ':memory:' });
-  await runMigrations(client);
+  await runMigrations(client, DEFAULT_MIGRATIONS_DIR);
   return client;
 }
 
-async function runMigrations(client: LibsqlClient): Promise<void> {
+async function runMigrations(client: LibsqlClient, migrationsDir: string): Promise<void> {
   await client.execute(
     `CREATE TABLE IF NOT EXISTS schema_migrations (
        id TEXT PRIMARY KEY,
@@ -44,7 +46,6 @@ async function runMigrations(client: LibsqlClient): Promise<void> {
      )`,
   );
 
-  const migrationsDir = join(__dirname, 'annotations-migrations');
   const files = readdirSync(migrationsDir)
     .filter((f) => f.endsWith('.sql'))
     .sort();
