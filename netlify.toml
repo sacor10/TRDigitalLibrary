@@ -21,3 +21,16 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Security headers for the SPA. CSP intentionally does NOT include
+# 'unsafe-eval' so that any stray eval() / new Function() call surfaces
+# loudly rather than silently working. style-src needs 'unsafe-inline'
+# for Tailwind / React inline styles; img-src needs data: and blob: for
+# OpenSeadragon tile rendering.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
