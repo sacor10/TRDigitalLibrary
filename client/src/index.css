@@ -5,9 +5,12 @@
 @layer base {
   html {
     scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
   body {
-    @apply font-serif antialiased;
+    @apply font-serif antialiased bg-parchment-50 text-ink-900 dark:bg-ink-900 dark:text-parchment-50;
+    overflow-wrap: break-word;
   }
   :focus-visible {
     @apply outline-none ring-2 ring-accent-500 ring-offset-2 ring-offset-parchment-50 dark:ring-offset-ink-900;
@@ -19,8 +22,13 @@
     animation: anno-flash 1.6s ease-out;
   }
   @keyframes anno-flash {
-    0% { background-color: theme('colors.accent.500'); color: white; }
-    100% { background-color: theme('colors.yellow.200'); }
+    0% {
+      background-color: theme('colors.accent.500');
+      color: white;
+    }
+    100% {
+      background-color: theme('colors.yellow.200');
+    }
   }
 }
 
@@ -29,18 +37,18 @@
     @apply absolute left-2 top-2 -translate-y-20 transform rounded bg-accent-500 px-4 py-2 text-white shadow focus:translate-y-0 transition-transform z-50;
   }
   .btn {
-    @apply inline-flex items-center gap-2 rounded-md border border-ink-700/20 bg-parchment-100 px-3 py-1.5 text-sm font-medium text-ink-900 hover:bg-parchment-200 dark:border-parchment-50/20 dark:bg-ink-800 dark:text-parchment-50 dark:hover:bg-ink-700;
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-ink-700/20 bg-parchment-100 px-3 py-2 text-sm font-medium text-ink-900 hover:bg-parchment-200 disabled:pointer-events-none disabled:opacity-60 dark:border-parchment-50/20 dark:bg-ink-800 dark:text-parchment-50 dark:hover:bg-ink-700;
   }
   .btn-primary {
     @apply bg-accent-500 text-white border-accent-600 hover:bg-accent-600 dark:bg-accent-500 dark:hover:bg-accent-600;
   }
   .input {
-    @apply w-full rounded-md border border-ink-700/20 bg-white/60 px-3 py-2 text-ink-900 placeholder-ink-700/50 dark:border-parchment-50/20 dark:bg-ink-800 dark:text-parchment-50 dark:placeholder-parchment-50/50;
+    @apply min-h-11 w-full rounded-md border border-ink-700/20 bg-white/60 px-3 py-2 text-ink-900 placeholder-ink-700/50 dark:border-parchment-50/20 dark:bg-ink-800 dark:text-parchment-50 dark:placeholder-parchment-50/50;
   }
   .chip {
     @apply inline-flex items-center gap-1 rounded-full bg-parchment-200/70 px-2.5 py-0.5 text-xs font-medium text-ink-800 dark:bg-ink-700 dark:text-parchment-50;
   }
   .card {
-    @apply rounded-lg border border-ink-700/10 bg-white/70 p-5 shadow-sm dark:border-parchment-50/10 dark:bg-ink-800/60;
+    @apply rounded-lg border border-ink-700/10 bg-white/70 p-4 shadow-sm dark:border-parchment-50/10 dark:bg-ink-800/60 sm:p-5;
   }
 }

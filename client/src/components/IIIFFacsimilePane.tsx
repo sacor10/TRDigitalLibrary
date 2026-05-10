@@ -2,12 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import OpenSeadragon from 'openseadragon';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  canvasLabel,
-  canvasToInfoJson,
-  extractCanvases,
-  fetchManifest,
-} from '../lib/iiif';
+import { canvasLabel, canvasToInfoJson, extractCanvases, fetchManifest } from '../lib/iiif';
 
 interface IIIFFacsimilePaneProps {
   manifestUrl: string;
@@ -15,7 +10,7 @@ interface IIIFFacsimilePaneProps {
 }
 
 const EMPTY_CLASSES =
-  'flex h-[60vh] items-center justify-center rounded-md border border-dashed border-ink-700/20 dark:border-parchment-50/20 text-ink-700/70 dark:text-parchment-50/70 p-8 text-center';
+  'flex min-h-[18rem] items-center justify-center rounded-md border border-dashed border-ink-700/20 p-6 text-center text-ink-700/70 dark:border-parchment-50/20 dark:text-parchment-50/70 sm:h-[60vh] sm:p-8';
 
 export function IIIFFacsimilePane({ manifestUrl, alt }: IIIFFacsimilePaneProps) {
   const { data, isLoading, error } = useQuery({
@@ -58,8 +53,7 @@ export function IIIFFacsimilePane({ manifestUrl, alt }: IIIFFacsimilePaneProps) 
   if (error) {
     return (
       <div className={EMPTY_CLASSES}>
-        Could not load IIIF manifest:{' '}
-        {error instanceof Error ? error.message : 'unknown error'}
+        Could not load IIIF manifest: {error instanceof Error ? error.message : 'unknown error'}
       </div>
     );
   }
@@ -90,7 +84,7 @@ export function IIIFFacsimilePane({ manifestUrl, alt }: IIIFFacsimilePaneProps) 
     >
       {multiPage && (
         <div
-          className="flex items-center gap-2 p-2 border-b border-ink-700/10 dark:border-parchment-50/10 bg-parchment-50/60 dark:bg-ink-800"
+          className="flex flex-wrap items-center gap-2 border-b border-ink-700/10 bg-parchment-50/60 p-2 dark:border-parchment-50/10 dark:bg-ink-800"
           role="group"
           aria-label="Page navigation"
         >
@@ -113,7 +107,7 @@ export function IIIFFacsimilePane({ manifestUrl, alt }: IIIFFacsimilePaneProps) 
             Next →
           </button>
           <span
-            className="text-sm text-ink-700 dark:text-parchment-100"
+            className="w-full text-sm text-ink-700 dark:text-parchment-100 sm:w-auto"
             aria-live="polite"
           >
             {label} ({pageIndex + 1} of {canvases.length})
@@ -125,7 +119,7 @@ export function IIIFFacsimilePane({ manifestUrl, alt }: IIIFFacsimilePaneProps) 
         role="img"
         aria-label={alt}
         tabIndex={0}
-        className="w-full h-[60vh] focus:outline focus:outline-2 focus:outline-ink-700 dark:focus:outline-parchment-50"
+        className="h-[50vh] w-full focus:outline focus:outline-2 focus:outline-ink-700 dark:focus:outline-parchment-50 sm:h-[60vh]"
       />
     </div>
   );
