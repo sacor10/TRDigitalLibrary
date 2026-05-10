@@ -96,3 +96,23 @@ describe('Auth API', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('Auth API when auth is not configured', () => {
+  let db: DatabaseT;
+  let app: ReturnType<typeof createApp>;
+
+  beforeAll(() => {
+    db = openInMemoryDatabase();
+    app = createApp(db);
+  });
+
+  afterAll(() => {
+    db.close();
+  });
+
+  it('treats /api/auth/me as signed out', async () => {
+    const res = await request(app).get('/api/auth/me');
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('Not signed in');
+  });
+});

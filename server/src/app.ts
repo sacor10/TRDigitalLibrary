@@ -74,6 +74,10 @@ export function createApp(db: DatabaseT, opts: CreateAppOptions = {}): Express {
         annotationsDb: opts.annotationsDb,
       }),
     );
+  } else {
+    app.get('/api/auth/me', (_req, res) => {
+      res.status(401).json({ error: 'Not signed in' });
+    });
   }
 
   app.use('/api/documents', createDocumentsRouter(db, { readonly: opts.readonly }));
