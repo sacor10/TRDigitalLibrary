@@ -13,6 +13,7 @@
     "dev": "concurrently -k -n server,client -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
     "test": "npm run test -w shared --if-present && npm run test -w server && npm run test -w client",
+    "ingest": "node scripts/run-build-ingest.mjs",
     "ingest-loc": "npm run ingest-loc -w server --",
     "ingest-tei": "npm run ingest-tei -w server --",
     "topic-model": "node scripts/run-topic-model.mjs",

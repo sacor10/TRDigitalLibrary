@@ -1,6 +1,3 @@
-import { copyFileSync } from 'node:fs';
-import { join } from 'node:path';
-
 import serverless from 'serverless-http';
 
 import { createApp } from '../../server/src/app.js';
@@ -8,37 +5,27 @@ import { openLibraryDb } from '../../server/src/db.js';
 
 type ServerlessHandler = ReturnType<typeof serverless>;
 
-const TMP_DB_PATH = '/tmp/library.db';
-
 let handlerPromise: Promise<ServerlessHandler> | undefined;
 
-function sourceDbPath(): string {
-  return (
-    process.env.LIBRARY_DB_PATH ??
-    join(process.env.LAMBDA_TASK_ROOT ?? process.cwd(), 'data', 'library.db')
-  );
-}
-
 async function createHandler(): Promise<ServerlessHandler> {
-  // TODO(commit 5): rewrite this to connect directly to Turso via
-  // TURSO_LIBRARY_DATABASE_URL + TURSO_LIBRARY_AUTH_TOKEN. For now, preserve
-  // the bundled-DB-on-/tmp behaviour so the function still works during the
-  // async-conversion commit.
+  // The library DB lives on Turso and is shared across every environment.
+  // The Netlify build (see netlify.toml) keeps it populated via
+  // scripts/run-build-ingest.mjs, so the function only ever opens a remote
+  // libSQL connection here — no /tmp copy, no bundled .db file.
   const tursoLibraryUrl = process.env.TURSO_LIBRARY_DATABASE_URL;
   const tursoLibraryAuthToken = process.env.TURSO_LIBRARY_AUTH_TOKEN;
 
-  let db;
-  if (tursoLibraryUrl) {
-    db = await openLibraryDb({
-      url: tursoLibraryUrl,
-      ...(tursoLibraryAuthToken ? { authToken: tursoLibraryAuthToken } : {}),
-    });
-  } else {
-    // Fallback: copy the bundled SQLite DB into /tmp (Lambda's writable area)
-    // and open it via libsql's file: URL.
-    copyFileSync(sourceDbPath(), TMP_DB_PATH);
-    db = await openLibraryDb({ url: `file:${TMP_DB_PATH}` });
+  if (!tursoLibraryUrl) {
+    throw new Error(
+      'TURSO_LIBRARY_DATABASE_URL is not set. Configure it (and TURSO_LIBRARY_AUTH_TOKEN) ' +
+        'in the Netlify site environment so the API can reach the hosted library DB.',
+    );
   }
+
+  const db = await openLibraryDb({
+    url: tursoLibraryUrl,
+    ...(tursoLibraryAuthToken ? { authToken: tursoLibraryAuthToken } : {}),
+  });
 
   const sessionSecret = process.env.SESSION_SECRET;
   const tursoDatabaseUrl = process.env.TURSO_DATABASE_URL;

@@ -1,5 +1,15 @@
 [build]
-  command = "npm ci && npm run ingest-loc -- --limit 25 --reset && npm run build"
+  # Production builds run the ingest orchestrator before the TypeScript / Vite
+  # build. The orchestrator (scripts/run-build-ingest.mjs) is env-gated:
+  #   - If TURSO_LIBRARY_DATABASE_URL is set, run ingest-loc + ingest-tei
+  #     against the configured Turso DB (idempotent — a no-op rebuild
+  #     finishes in seconds).
+  #   - If not, log a warning and exit 0 so PR previews / forks without the
+  #     Turso secrets do not fail the build.
+  # Required Netlify environment variables for production:
+  #   - TURSO_LIBRARY_DATABASE_URL  (libsql:// URL of the library DB)
+  #   - TURSO_LIBRARY_AUTH_TOKEN    (Turso auth token, secret)
+  command = "npm ci && npm run ingest && npm run build"
   publish = "client/dist"
 
 [build.environment]
