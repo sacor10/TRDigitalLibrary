@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { AuthUser } from '@tr/shared';
 
 import type { LibsqlClient } from '../annotations-db.js';
+
 import type { GoogleProfile } from './google.js';
 
 export interface UserRow {

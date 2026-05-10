@@ -1,5 +1,3 @@
-import { Router } from 'express';
-
 import type {
   Topic,
   TopicDriftPoint,
@@ -8,6 +6,8 @@ import type {
   TopicMember,
   TopicsResponse,
 } from '@tr/shared';
+import { Router } from 'express';
+
 
 import type { LibsqlClient } from '../db.js';
 

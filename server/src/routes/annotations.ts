@@ -1,7 +1,5 @@
 import { randomUUID } from 'node:crypto';
 
-import { Router } from 'express';
-
 import {
   ANNOTATION_JSONLD_CONTEXT,
   AnnotationCreateInputSchema,
@@ -12,10 +10,12 @@ import {
   type AnnotationSelector,
   type AnnotationTextualBody,
 } from '@tr/shared';
+import { Router } from 'express';
+
 
 import type { LibsqlClient as AnnotationsClient } from '../annotations-db.js';
-import type { LibsqlClient } from '../db.js';
 import { findUserById, rowToAuthUser } from '../auth/users.js';
+import type { LibsqlClient } from '../db.js';
 import { requireUser } from '../middleware/requireUser.js';
 
 interface AnnotationRow {

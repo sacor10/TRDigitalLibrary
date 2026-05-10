@@ -1,6 +1,6 @@
+import { SearchQuerySchema } from '@tr/shared';
 import { Router } from 'express';
 
-import { SearchQuerySchema } from '@tr/shared';
 
 import { rowToDocument, rowToDocumentRow, type LibsqlClient } from '../db.js';
 

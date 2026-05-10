@@ -1,6 +1,6 @@
+import type { Document } from '@tr/shared';
 import { describe, expect, it } from 'vitest';
 
-import type { Document } from '@tr/shared';
 
 import { buildCitation } from './citation';
 

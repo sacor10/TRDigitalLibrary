@@ -13,8 +13,8 @@ import {
 } from '../db.js';
 
 import { parseTei } from './tei-parser.js';
-import { validateTei } from './tei-validator.js';
 import { transformToDocument } from './tei-transformer.js';
+import { validateTei } from './tei-validator.js';
 
 export interface IngestOptions {
   recursive?: boolean;

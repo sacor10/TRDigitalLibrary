@@ -1,6 +1,6 @@
+import { GoogleSignInRequestSchema } from '@tr/shared';
 import { Router } from 'express';
 
-import { GoogleSignInRequestSchema } from '@tr/shared';
 
 import type { LibsqlClient } from '../annotations-db.js';
 import type { GoogleVerifier } from '../auth/google.js';

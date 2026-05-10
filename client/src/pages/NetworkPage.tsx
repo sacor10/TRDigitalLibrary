@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
+import type { CorrespondentEdge, CorrespondentLetter, CorrespondentNode } from '@tr/shared';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import type { CorrespondentEdge, CorrespondentLetter, CorrespondentNode } from '@tr/shared';
 
 import { fetchCorrespondentGraph } from '../api/client';
 import { CorrespondentGraph } from '../components/CorrespondentGraph';

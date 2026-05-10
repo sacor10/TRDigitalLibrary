@@ -3,8 +3,6 @@ import {
   OpenAPIRegistry,
   extendZodWithOpenApi,
 } from '@asteasolutions/zod-to-openapi';
-import { z } from 'zod';
-
 import {
   CorrespondentGraphResponseSchema,
   DocumentListQuerySchema,
@@ -23,6 +21,8 @@ import {
   SentimentTimelineResponseSchema,
   SentimentExtremesResponseSchema,
 } from '@tr/shared';
+import { z } from 'zod';
+
 
 extendZodWithOpenApi(z);
 

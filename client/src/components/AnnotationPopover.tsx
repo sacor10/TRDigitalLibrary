@@ -1,6 +1,6 @@
+import type { Annotation } from '@tr/shared';
 import { useState } from 'react';
 
-import type { Annotation } from '@tr/shared';
 
 import { annotationJsonLdUrl } from '../api/client';
 import { useAuth } from '../auth/AuthContext';

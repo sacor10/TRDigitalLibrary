@@ -1,6 +1,6 @@
+import type { Document } from '@tr/shared';
 import { useState } from 'react';
 
-import type { Document } from '@tr/shared';
 
 import { buildCitation, type CitationStyle } from '../lib/citation';
 

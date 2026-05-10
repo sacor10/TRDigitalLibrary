@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
+import type { Document } from '@tr/shared';
 import { describe, expect, it } from 'vitest';
 
-import type { Document } from '@tr/shared';
 
 import { ExportPanel } from './ExportPanel';
 

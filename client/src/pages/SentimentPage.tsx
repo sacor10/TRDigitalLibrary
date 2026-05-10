@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
+import type { SentimentBin, SentimentExtremeItem, SentimentTimelinePoint } from '@tr/shared';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import type { SentimentBin, SentimentExtremeItem, SentimentTimelinePoint } from '@tr/shared';
 
 import { fetchSentimentExtremes, fetchSentimentTimeline } from '../api/client';
 

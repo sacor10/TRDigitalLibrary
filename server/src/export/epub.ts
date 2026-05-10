@@ -1,6 +1,6 @@
+import type { Document, DocumentSection } from '@tr/shared';
 import JSZip from 'jszip';
 
-import type { Document, DocumentSection } from '@tr/shared';
 
 const EPUB_CSS = `body { font-family: Georgia, "Times New Roman", serif; line-height: 1.6; margin: 1em; color: #1a1612; }
 h1 { font-family: "Helvetica Neue", Arial, sans-serif; font-size: 1.6em; margin: 0 0 0.25em; }

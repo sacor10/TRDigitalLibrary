@@ -1,6 +1,6 @@
+import type { AnnotationCreateInput, AnnotationMotivation } from '@tr/shared';
 import { useEffect, useState, type RefObject } from 'react';
 
-import type { AnnotationCreateInput, AnnotationMotivation } from '@tr/shared';
 
 import { useAuth } from '../auth/AuthContext';
 import {

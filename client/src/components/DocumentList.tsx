@@ -1,6 +1,6 @@
+import type { Document } from '@tr/shared';
 import { Link } from 'react-router-dom';
 
-import type { Document } from '@tr/shared';
 
 const TYPE_LABEL: Record<Document['type'], string> = {
   letter: 'Letter',

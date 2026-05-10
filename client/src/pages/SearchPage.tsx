@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
+import { DocumentTypeSchema, type DocumentType } from '@tr/shared';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-import { DocumentTypeSchema, type DocumentType } from '@tr/shared';
 
 import { searchDocuments } from '../api/client';
 import { SearchBar } from '../components/SearchBar';

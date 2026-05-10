@@ -1,6 +1,6 @@
+import type { AnnotationSelector } from '@tr/shared';
 import { describe, expect, it } from 'vitest';
 
-import type { AnnotationSelector } from '@tr/shared';
 
 import { locateAnnotationRange } from './selection';
 

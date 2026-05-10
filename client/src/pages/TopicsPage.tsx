@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
+import type { TopicDriftPoint } from '@tr/shared';
 import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
-import type { TopicDriftPoint } from '@tr/shared';
 
 import { fetchTopic, fetchTopicDrift, fetchTopics } from '../api/client';
 

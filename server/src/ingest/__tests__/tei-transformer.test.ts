@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { DocumentSchema, DocumentSectionSchema } from '@tr/shared';
 import { describe, expect, it } from 'vitest';
 
-import { DocumentSchema, DocumentSectionSchema } from '@tr/shared';
 
 import { parseTei } from '../tei-parser.js';
 import { transformToDocument } from '../tei-transformer.js';
