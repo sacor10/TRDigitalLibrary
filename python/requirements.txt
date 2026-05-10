@@ -3,3 +3,7 @@ sentence-transformers>=2.7
 numpy>=1.26
 scikit-learn>=1.4
 vaderSentiment>=3.3.2
+# libsql client speaks the same wire protocol as @libsql/client (TypeScript).
+# Used by python/sentiment.py and python/topic_model.py to read/write the
+# library DB on Turso (or a local file: URL fallback for dev).
+libsql-client>=0.3.1

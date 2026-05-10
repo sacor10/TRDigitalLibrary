@@ -2,12 +2,18 @@
 """
 BERTopic sidecar for the TR Digital Library.
 
-Reads transcribed documents from `data/library.db`, fits BERTopic over
+Reads transcribed documents from the configured library DB (Turso in
+production, ``data/library.db`` locally), fits BERTopic over
 sentence-transformer embeddings, reduces to <= 60 topics, and writes
-topics, document_topics, and topic_drift in a single transaction
-(DELETE-then-INSERT). See docs/topic-modeling.md for design.
+``topics``, ``document_topics``, and ``topic_drift`` in a single transaction
+(DELETE-then-INSERT). See ``docs/topic-modeling.md`` for design.
 
-Invoked via `npm run topic-model` (which shells `scripts/run-topic-model.mjs`,
+Connection precedence (see ``python/_libsql.py``):
+  1. ``--db PATH`` (legacy local file flag)
+  2. ``TURSO_LIBRARY_DATABASE_URL`` + ``TURSO_LIBRARY_AUTH_TOKEN``
+  3. ``file:./data/library.db`` (local-dev fallback)
+
+Invoked via ``npm run topic-model`` (which shells ``scripts/run-topic-model.mjs``,
 which finds Python and invokes this script). Direct invocation:
 
     python python/topic_model.py [--db PATH] [--bin year]
@@ -21,15 +27,13 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import subprocess
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DB = REPO_ROOT / "data" / "library.db"
+from _libsql import REPO_ROOT, batch_statements, open_client, resolve_url
 
 TARGET_MIN = 30
 TARGET_MAX = 60
@@ -59,28 +63,25 @@ def model_version() -> str:
     return f"{git_sha()}:sentence-transformers=={st_version}"
 
 
-def load_corpus(db_path: Path) -> list[dict[str, str]]:
-    if not db_path.exists():
-        raise SystemExit(
-            f"[topic-model] Database not found at {db_path}. Run `npm run ingest-loc -- --limit 25` first."
+def load_corpus(client) -> list[dict[str, str]]:
+    rs = client.execute(
+        """
+        SELECT id, date, transcription
+          FROM documents
+         WHERE length(trim(transcription)) > 0
+         ORDER BY date ASC
+        """
+    )
+    out: list[dict[str, str]] = []
+    for row in rs.rows:
+        out.append(
+            {
+                "id": str(row["id"]),
+                "date": str(row["date"]),
+                "transcription": str(row["transcription"]),
+            }
         )
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        con.row_factory = sqlite3.Row
-        rows = con.execute(
-            """
-            SELECT id, date, transcription
-              FROM documents
-             WHERE length(trim(transcription)) > 0
-             ORDER BY date ASC
-            """
-        ).fetchall()
-    finally:
-        con.close()
-    return [
-        {"id": r["id"], "date": r["date"], "transcription": r["transcription"]}
-        for r in rows
-    ]
+    return out
 
 
 def year_of(iso_date: str) -> str | None:
@@ -181,7 +182,7 @@ def fit_topics(docs: list[dict[str, str]]) -> tuple[list[int], list[float], dict
 
 
 def write_results(
-    db_path: Path,
+    client,
     docs: list[dict[str, str]],
     assignments: list[int],
     probabilities: list[float],
@@ -230,30 +231,32 @@ def write_results(
         share = count / total if total else 0.0
         rows_drift.append((new_id, period, count, share))
 
-    con = sqlite3.connect(db_path)
-    try:
-        con.execute("PRAGMA foreign_keys = ON")
-        with con:
-            con.execute("DELETE FROM topic_drift")
-            con.execute("DELETE FROM document_topics")
-            con.execute("DELETE FROM topics")
-            con.executemany(
-                "INSERT INTO topics (id, label, keywords, size, computed_at, model_version) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                rows_topics,
-            )
-            con.executemany(
-                "INSERT INTO document_topics (document_id, topic_id, probability) "
-                "VALUES (?, ?, ?)",
-                rows_doc_topics,
-            )
-            con.executemany(
-                "INSERT INTO topic_drift (topic_id, period, document_count, share) "
-                "VALUES (?, ?, ?, ?)",
-                rows_drift,
-            )
-    finally:
-        con.close()
+    insert_topic = (
+        "INSERT INTO topics (id, label, keywords, size, computed_at, model_version) "
+        "VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    insert_doc_topic = (
+        "INSERT INTO document_topics (document_id, topic_id, probability) "
+        "VALUES (?, ?, ?)"
+    )
+    insert_drift = (
+        "INSERT INTO topic_drift (topic_id, period, document_count, share) "
+        "VALUES (?, ?, ?, ?)"
+    )
+
+    statements: list = [
+        # Order matters: drift FK references topics; document_topics FK references topics.
+        # libsql.batch runs them serially in one transaction, so the deletes
+        # below land before the corresponding inserts further down the list.
+        "DELETE FROM topic_drift",
+        "DELETE FROM document_topics",
+        "DELETE FROM topics",
+    ]
+    statements.extend((insert_topic, list(r)) for r in rows_topics)
+    statements.extend((insert_doc_topic, list(r)) for r in rows_doc_topics)
+    statements.extend((insert_drift, list(r)) for r in rows_drift)
+
+    batch_statements(client, statements)
 
     return len(rows_topics), len(rows_doc_topics), len(rows_drift)
 
@@ -263,8 +266,11 @@ def main() -> int:
     parser.add_argument(
         "--db",
         type=Path,
-        default=DEFAULT_DB,
-        help=f"Path to library.db (default: {DEFAULT_DB})",
+        default=None,
+        help=(
+            "Path to a local SQLite library DB (default: TURSO_LIBRARY_DATABASE_URL "
+            "or file:./data/library.db)"
+        ),
     )
     parser.add_argument(
         "--bin",
@@ -274,17 +280,21 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    docs = load_corpus(args.db)
-    if not docs:
-        print(
-            "[topic-model] No transcribed documents found. "
-            "Run `npm run ingest-loc -- --limit 25` from a connected environment, then retry."
-        )
-        return 1
+    print(f"[topic-model] connecting to {resolve_url(args.db)}")
+    with open_client(args.db) as client:
+        docs = load_corpus(client)
+        if not docs:
+            print(
+                "[topic-model] No transcribed documents found. "
+                "Run `npm run ingest` (or the underlying ingest-loc / ingest-tei) "
+                "from a connected environment, then retry."
+            )
+            return 1
 
-    print(f"[topic-model] loaded {len(docs)} transcribed document(s) from {args.db}")
-    assignments, probs, keywords = fit_topics(docs)
-    n_topics, n_dt, n_drift = write_results(args.db, docs, assignments, probs, keywords)
+        print(f"[topic-model] loaded {len(docs)} transcribed document(s)")
+        assignments, probs, keywords = fit_topics(docs)
+        n_topics, n_dt, n_drift = write_results(client, docs, assignments, probs, keywords)
+
     n_noise = sum(1 for a in assignments if a == -1)
     print(
         f"[topic-model] wrote {n_topics} topic(s), "

@@ -2,12 +2,18 @@
 """
 VADER sentiment sidecar for the TR Digital Library.
 
-Reads transcribed documents from `data/library.db`, scores each with
-NLTK VADER (sentence-level, length-weighted compound aggregation), and
-writes `document_sentiment` in a single transaction (DELETE-then-INSERT).
-Mirrors the design of `python/topic_model.py`.
+Reads transcribed documents from the configured library DB (Turso in
+production, ``data/library.db`` locally), scores each with NLTK VADER
+(sentence-level, length-weighted compound aggregation), and writes
+``document_sentiment`` in a single transaction (DELETE-then-INSERT).
+Mirrors the design of ``python/topic_model.py``.
 
-Invoked via `npm run sentiment` (which shells `scripts/run-sentiment.mjs`,
+Connection precedence (see ``python/_libsql.py``):
+  1. ``--db PATH`` (legacy local file flag)
+  2. ``TURSO_LIBRARY_DATABASE_URL`` + ``TURSO_LIBRARY_AUTH_TOKEN``
+  3. ``file:./data/library.db`` (local-dev fallback)
+
+Invoked via ``npm run sentiment`` (which shells ``scripts/run-sentiment.mjs``,
 which finds Python and invokes this script). Direct invocation:
 
     python python/sentiment.py [--db PATH]
@@ -21,14 +27,12 @@ from __future__ import annotations
 
 import argparse
 import re
-import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DB = REPO_ROOT / "data" / "library.db"
+from _libsql import REPO_ROOT, batch_statements, open_client, resolve_url
 
 POSITIVE_THRESHOLD = 0.05
 NEGATIVE_THRESHOLD = -0.05
@@ -63,25 +67,19 @@ def model_version() -> str:
     return f"{git_sha()}:vader=={vader_version}"
 
 
-def load_corpus(db_path: Path) -> list[dict[str, str]]:
-    if not db_path.exists():
-        raise SystemExit(
-            f"[sentiment] Database not found at {db_path}. Run `npm run ingest-loc -- --limit 25` first."
-        )
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    try:
-        con.row_factory = sqlite3.Row
-        rows = con.execute(
-            """
-            SELECT id, transcription
-              FROM documents
-             WHERE length(trim(transcription)) > 0
-             ORDER BY date ASC
-            """
-        ).fetchall()
-    finally:
-        con.close()
-    return [{"id": r["id"], "transcription": r["transcription"]} for r in rows]
+def load_corpus(client) -> list[dict[str, str]]:
+    rs = client.execute(
+        """
+        SELECT id, transcription
+          FROM documents
+         WHERE length(trim(transcription)) > 0
+         ORDER BY date ASC
+        """
+    )
+    out: list[dict[str, str]] = []
+    for row in rs.rows:
+        out.append({"id": str(row["id"]), "transcription": str(row["transcription"])})
+    return out
 
 
 def split_sentences(text: str) -> list[str]:
@@ -160,34 +158,29 @@ def fit_sentiment(docs: list[dict[str, str]]) -> list[tuple[str, float, float, f
 
 
 def write_results(
-    db_path: Path,
+    client,
     scored: list[tuple[str, float, float, float, float, str, int]],
 ) -> int:
     computed_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     version = model_version()
 
-    rows = [
-        (doc_id, pol, pos, neu, neg, label, count, computed_at, version)
-        for (doc_id, pol, pos, neu, neg, label, count) in scored
-    ]
+    insert_sql = (
+        "INSERT INTO document_sentiment "
+        "  (document_id, polarity, pos, neu, neg, label, sentence_count, "
+        "   computed_at, model_version) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
 
-    con = sqlite3.connect(db_path)
-    try:
-        con.execute("PRAGMA foreign_keys = ON")
-        with con:
-            con.execute("DELETE FROM document_sentiment")
-            con.executemany(
-                """
-                INSERT INTO document_sentiment
-                  (document_id, polarity, pos, neu, neg, label, sentence_count,
-                   computed_at, model_version)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
-            )
-    finally:
-        con.close()
-    return len(rows)
+    statements: list = ["DELETE FROM document_sentiment"]
+    for (doc_id, pol, pos, neu, neg, label, count) in scored:
+        statements.append(
+            (insert_sql, [doc_id, pol, pos, neu, neg, label, count, computed_at, version])
+        )
+
+    # ``client.batch`` runs the whole list as one atomic transaction, which
+    # is the libsql equivalent of ``with con: con.executemany(...)``.
+    batch_statements(client, statements)
+    return len(scored)
 
 
 def main() -> int:
@@ -195,22 +188,29 @@ def main() -> int:
     parser.add_argument(
         "--db",
         type=Path,
-        default=DEFAULT_DB,
-        help=f"Path to library.db (default: {DEFAULT_DB})",
+        default=None,
+        help=(
+            "Path to a local SQLite library DB (default: TURSO_LIBRARY_DATABASE_URL "
+            "or file:./data/library.db)"
+        ),
     )
     args = parser.parse_args()
 
-    docs = load_corpus(args.db)
-    if not docs:
-        print(
-            "[sentiment] No transcribed documents found. "
-            "Run `npm run ingest-loc -- --limit 25` from a connected environment, then retry."
-        )
-        return 1
+    print(f"[sentiment] connecting to {resolve_url(args.db)}")
+    with open_client(args.db) as client:
+        docs = load_corpus(client)
+        if not docs:
+            print(
+                "[sentiment] No transcribed documents found. "
+                "Run `npm run ingest` (or the underlying ingest-loc / ingest-tei) "
+                "from a connected environment, then retry."
+            )
+            return 1
 
-    print(f"[sentiment] loaded {len(docs)} transcribed document(s) from {args.db}")
-    scored = fit_sentiment(docs)
-    n = write_results(args.db, scored)
+        print(f"[sentiment] loaded {len(docs)} transcribed document(s)")
+        scored = fit_sentiment(docs)
+        n = write_results(client, scored)
+
     pos = sum(1 for r in scored if r[5] == "positive")
     neu = sum(1 for r in scored if r[5] == "neutral")
     neg = sum(1 for r in scored if r[5] == "negative")
