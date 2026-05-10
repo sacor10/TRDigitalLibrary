@@ -244,7 +244,7 @@ Legend: **S** = small (≤1 day) · **M** = medium (1–3 days) · **L** = large
 
 ### Pillar 3 — Scholarly Apparatus
 
-- [ ] **Annotations system (W3C Web Annotations)** — L — Acceptance: any user can highlight a passage; logged-in scholars can attach notes; notes are referenceable by URL and exportable as JSON-LD.
+- [x] **Annotations system (W3C Web Annotations)** — L — implemented behind a Google sign-in gate, with annotations persisted in a separate writable backend so the document database stays read-only in production. The `@tr/shared` package defines W3C-compliant Zod schemas for `Annotation`, `TextQuoteSelector`, `TextPositionSelector`, `FragmentSelector` and `AnnotationCollection` (`shared/src/schemas/annotation.ts`). Auth flows through Google Identity Services: the client renders the official `gsi/client` button, posts the credential to `POST /api/auth/google`, and the server verifies the ID token via `google-auth-library`, upserts a row in `users`, creates a row in `sessions`, and returns an HMAC-signed HTTP-only `tr_session` cookie (`server/src/auth/{google,session,users}.ts`). Annotations live in libSQL — local file (`data/annotations.db`) for dev, Turso for prod — opened via `@libsql/client` with migrations under `server/src/annotations-migrations/`. The CRUD endpoints are W3C-shaped: `POST /api/annotations` (auth required, validates `documentId` against the read-only doc DB), `GET /api/annotations/:id` (content-negotiates `application/ld+json` → adds `@context: http://www.w3.org/ns/anno.jsonld`), `GET /api/documents/:id/annotations` (returns an `AnnotationCollection`, public), `PATCH` and `DELETE` (author-only). Notes are public by default. The reader (`client/src/components/TranscriptionPane.tsx`) wraps existing annotation ranges in `<mark>` overlays located via TextQuoteSelector with TextPositionSelector fallback (`client/src/lib/selection.ts`); selecting any passage while signed in surfaces an `AnnotationToolbar` for **Highlight** / **Add note**. Each note is referenceable at `/annotations/:id` (via `client/src/pages/AnnotationPage.tsx`, which redirects to `/documents/:documentId#anno-:id` and flashes the highlight on arrival) and exportable as JSON-LD via the popover's "Open JSON-LD" / "Copy as JSON-LD" actions.
 - [ ] **Expert essay CMS** — M — MDX in repo or Sanity ($99+/mo). Acceptance: subject-matter experts can publish contextual essays linked to specific documents.
 - [ ] **Cross-reference linking engine** — L — Acceptance: when document A mentions document B by date or correspondent, a sidebar link appears automatically.
 - [ ] **Draft-vs-final diff viewer** — M — `diff-match-patch`. Acceptance: any document with multiple versions shows a side-by-side highlighted diff.
@@ -302,11 +302,16 @@ static host (Cloudflare Pages, Netlify, S3+CloudFront).
 
 ### Environment variables
 
-| Variable        | Default                  | Notes                                            |
-| --------------- | ------------------------ | ------------------------------------------------ |
-| `PORT`          | `3001`                   | Server listen port                               |
-| `DATABASE_URL`  | `data/library.db`        | SQLite path (production: switch to Postgres URL) |
-| `VITE_API_BASE` | empty (uses Vite proxy)  | Set for production client builds                 |
+| Variable                | Default                              | Notes                                                                                           |
+| ----------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `PORT`                  | `3001`                               | Server listen port                                                                              |
+| `DATABASE_URL`          | `data/library.db`                    | SQLite path (production: switch to Postgres URL)                                                |
+| `VITE_API_BASE`         | empty (uses Vite proxy)              | Set for production client builds                                                                |
+| `GOOGLE_CLIENT_ID`      | unset                                | Google OAuth 2.0 Web client id; required for `/api/auth/google` to be registered                |
+| `VITE_GOOGLE_CLIENT_ID` | unset                                | Same client id, exposed to the SPA so the Google Identity Services button can render            |
+| `SESSION_SECRET`        | dev-only fallback (insecure)         | HMAC key for signed `tr_session` cookies. Must be set in production. `openssl rand -hex 32`     |
+| `TURSO_DATABASE_URL`    | `file:data/annotations.db` (dev)     | libSQL/Turso URL holding `users` / `sessions` / `annotations`. Defaults to a local file in dev. |
+| `TURSO_AUTH_TOKEN`      | unset                                | Bearer token for Turso (production only; not needed for the local file URL)                     |
 
 ---
 
@@ -388,3 +393,7 @@ and the access date.
 - [x] Dark mode toggle persists across reloads (localStorage)
 - [x] `npm run test` passes (12 server + 4 client)
 - [x] `npm run build` succeeds for all three workspaces
+- [x] Sign in with Google succeeds (with `GOOGLE_CLIENT_ID` + `VITE_GOOGLE_CLIENT_ID` set)
+- [x] Selecting text in the transcription shows the annotation toolbar (signed in only)
+- [x] A saved note resolves at `/annotations/:id` and scrolls/flashes its highlight
+- [x] `GET /api/annotations/:id` with `Accept: application/ld+json` returns a JSON-LD body whose `@context` is `http://www.w3.org/ns/anno.jsonld`

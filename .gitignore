@@ -22,6 +22,10 @@ data/library.db
 data/library.db-journal
 data/library.db-wal
 data/library.db-shm
+data/annotations.db
+data/annotations.db-journal
+data/annotations.db-wal
+data/annotations.db-shm
 *.sqlite
 *.sqlite-journal
 
