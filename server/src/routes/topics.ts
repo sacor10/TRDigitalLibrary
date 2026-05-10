@@ -80,11 +80,18 @@ export function createTopicsRouter(db: DatabaseT): Router {
     const rows = db
       .prepare('SELECT topic_id, period, document_count, share FROM topic_drift ORDER BY period ASC, topic_id ASC')
       .all() as TopicDriftRow[];
+    const totalShareByPeriod = new Map<string, number>();
+    for (const row of rows) {
+      totalShareByPeriod.set(row.period, (totalShareByPeriod.get(row.period) ?? 0) + row.share);
+    }
     const points: TopicDriftPoint[] = rows.map((r) => ({
       topicId: r.topic_id,
       period: r.period,
       documentCount: r.document_count,
-      share: r.share,
+      share:
+        (totalShareByPeriod.get(r.period) ?? 0) > 1
+          ? r.share / (totalShareByPeriod.get(r.period) ?? 1)
+          : r.share,
     }));
     const payload: TopicDriftResponse = { points };
     return res.json(payload);

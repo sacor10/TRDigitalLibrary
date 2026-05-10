@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync } from 'node:fs';
+import { copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import serverless from 'serverless-http';
@@ -23,9 +23,7 @@ async function createHandler(): Promise<ServerlessHandler> {
   // Lambda's task root is read-only. SQLite (especially in WAL mode) needs to
   // write sidecar files (.wal/.shm) even for SELECTs, so copy the seeded DB into
   // /tmp on cold start and open from there.
-  if (!existsSync(TMP_DB_PATH)) {
-    copyFileSync(sourceDbPath(), TMP_DB_PATH);
-  }
+  copyFileSync(sourceDbPath(), TMP_DB_PATH);
 
   const db = openDatabase(TMP_DB_PATH, { readonly: true });
   const sessionSecret = process.env.SESSION_SECRET;

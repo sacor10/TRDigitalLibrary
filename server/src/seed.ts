@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import { z } from 'zod';
 
-import { DocumentSchema, type Document, type TranscriptionFormat } from '@tr/shared';
+import { DocumentSchema, type TranscriptionFormat } from '@tr/shared';
 
 import { openDatabase, upsertDocument } from './db.js';
 
@@ -15,9 +15,15 @@ const USER_AGENT =
 const FETCH_TIMEOUT_MS = 20_000;
 const MAX_TRANSCRIPTION_CHARS = 12_000;
 
-const SeedFileSchema = z.array(DocumentSchema);
+const SeedDocumentSchema = DocumentSchema.extend({
+  transcriptionStartMarker: z.string().min(1).optional(),
+  transcriptionEndMarker: z.string().min(1).optional(),
+});
+const SeedFileSchema = z.array(SeedDocumentSchema);
 
-function loadSeedDocuments(): Document[] {
+type SeedDocument = z.infer<typeof SeedDocumentSchema>;
+
+function loadSeedDocuments(): SeedDocument[] {
   const seedPath = join(__dirname, '..', '..', 'data', 'seed.json');
   const raw = readFileSync(seedPath, 'utf8');
   const parsed: unknown = JSON.parse(raw);
@@ -46,6 +52,35 @@ function stripHtml(html: string): string {
   return text;
 }
 
+function normalizeText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function applyMarkers(
+  text: string,
+  startMarker?: string,
+  endMarker?: string,
+): string {
+  let out = normalizeText(text);
+  if (startMarker) {
+    const marker = normalizeText(startMarker);
+    const idx = out.indexOf(marker);
+    if (idx === -1) {
+      throw new Error(`start marker not found: ${startMarker}`);
+    }
+    out = out.slice(idx);
+  }
+  if (endMarker) {
+    const marker = normalizeText(endMarker);
+    const idx = out.indexOf(marker);
+    if (idx === -1) {
+      throw new Error(`end marker not found: ${endMarker}`);
+    }
+    out = out.slice(0, idx).trim();
+  }
+  return out;
+}
+
 async function fetchWithTimeout(url: string): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -62,13 +97,19 @@ async function fetchWithTimeout(url: string): Promise<Response> {
 async function fetchTranscription(
   url: string,
   format: TranscriptionFormat,
+  markers: Pick<SeedDocument, 'transcriptionStartMarker' | 'transcriptionEndMarker'> = {},
 ): Promise<string> {
   const res = await fetchWithTimeout(url);
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} ${res.statusText}`);
   }
   const body = await res.text();
-  const text = format === 'wikisource-html' ? stripHtml(body) : body;
+  const baseText = format === 'wikisource-html' ? stripHtml(body) : body;
+  const text = applyMarkers(
+    baseText,
+    markers.transcriptionStartMarker,
+    markers.transcriptionEndMarker,
+  );
   return text.slice(0, MAX_TRANSCRIPTION_CHARS);
 }
 
@@ -82,19 +123,28 @@ async function seed(): Promise<void> {
 
   let fetched = 0;
   let failed = 0;
+  const failedIds: string[] = [];
+  const emptyIds: string[] = [];
 
   for (const doc of documents) {
     let transcription = doc.transcription;
     if (doc.transcriptionUrl) {
       try {
-        transcription = await fetchTranscription(doc.transcriptionUrl, doc.transcriptionFormat);
+        transcription = await fetchTranscription(doc.transcriptionUrl, doc.transcriptionFormat, {
+          transcriptionStartMarker: doc.transcriptionStartMarker,
+          transcriptionEndMarker: doc.transcriptionEndMarker,
+        });
         fetched += 1;
         console.log(`  fetched  ${doc.id}  (${transcription.length} chars)`);
       } catch (err) {
         failed += 1;
+        failedIds.push(doc.id);
         const message = err instanceof Error ? err.message : String(err);
         console.warn(`  skipped  ${doc.id}  (${message}) — metadata stored, transcription empty`);
       }
+    }
+    if (transcription.trim().length === 0) {
+      emptyIds.push(doc.id);
     }
     upsertDocument(
       db,
@@ -121,6 +171,12 @@ async function seed(): Promise<void> {
   db.pragma('wal_checkpoint(TRUNCATE)');
   db.pragma('journal_mode = DELETE');
   db.close();
+
+  if (process.env.TR_SEED_STRICT === '1' && (failedIds.length > 0 || emptyIds.length > 0)) {
+    throw new Error(
+      `Strict seed failed. fetch failures=[${failedIds.join(', ')}] empty transcriptions=[${emptyIds.join(', ')}]`,
+    );
+  }
 }
 
 await seed();

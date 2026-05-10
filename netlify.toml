@@ -1,5 +1,5 @@
 [build]
-  command = "npm ci && npm run seed && npm run build"
+  command = "npm ci && npm run verify-seed-sources && TR_SEED_STRICT=1 npm run seed && npm run build"
   publish = "client/dist"
 
 [build.environment]
@@ -34,7 +34,7 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data: blob: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data: blob: https://*.googleusercontent.com https://upload.wikimedia.org https://cdn.jsdelivr.net https://*.loc.gov https://iiif.archive.org https://*.archive.org; connect-src 'self' https://accounts.google.com/gsi/ https://*.loc.gov https://iiif.archive.org https://archive.org https://*.archive.org https://upload.wikimedia.org; frame-src https://accounts.google.com/gsi/; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
     Referrer-Policy = "strict-origin-when-cross-origin"
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "SAMEORIGIN"

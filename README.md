@@ -72,6 +72,14 @@ Open <http://localhost:5173> in a browser. The OpenAPI spec is at
 > titles, recipients, and tags only until you re-run `npm run seed` from a
 > connected environment.
 
+> **Production note:** do not run seed from the live server process. Seed during
+> CI/build, then ship the generated `data/library.db` with the deployment
+> artifact. The Netlify build already follows this pattern by running
+> `npm run verify-seed-sources` and `TR_SEED_STRICT=1 npm run seed` before
+> `npm run build`, then bundling `data/library.db` into the API function. The
+> verification and strict seed steps fail the deployment if any source,
+> facsimile, or remote transcription cannot be loaded.
+
 ### Ingesting TEI documents
 
 Validate and ingest a folder of TEI/XML documents into the library:

@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json --noEmit",
     "start": "tsx src/index.ts",
     "seed": "tsx src/seed.ts",
+    "verify-seed-sources": "tsx src/verify-seed-sources.ts",
     "ingest-tei": "tsx src/ingest-tei.ts",
     "validate-tei": "tsx scripts/validate-tei.ts",
     "validate-epub": "tsx scripts/validate-epub.ts",

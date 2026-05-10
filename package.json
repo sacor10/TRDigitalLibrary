@@ -14,6 +14,7 @@
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
     "test": "npm run test -w shared --if-present && npm run test -w server && npm run test -w client",
     "seed": "npm run seed -w server",
+    "verify-seed-sources": "npm run verify-seed-sources -w server",
     "ingest-tei": "npm run ingest-tei -w server --",
     "topic-model": "node scripts/run-topic-model.mjs",
     "sentiment": "node scripts/run-sentiment.mjs",
