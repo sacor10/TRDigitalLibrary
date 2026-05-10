@@ -13,7 +13,14 @@ import {
 } from '../db.js';
 import { FORMAT_BY_EXT, generateExport } from '../export/index.js';
 
-export function createDocumentsRouter(db: DatabaseT): Router {
+export interface CreateDocumentsRouterOptions {
+  readonly?: boolean | undefined;
+}
+
+export function createDocumentsRouter(
+  db: DatabaseT,
+  opts: CreateDocumentsRouterOptions = {},
+): Router {
   const router = Router();
 
   router.get('/', (req, res) => {
@@ -100,33 +107,35 @@ export function createDocumentsRouter(db: DatabaseT): Router {
     return res.json(rowToDocumentWithProvenance(db, row));
   });
 
-  router.patch('/:id', (req, res) => {
-    const editorHeader = req.header('x-editor');
-    const editor = typeof editorHeader === 'string' ? editorHeader.trim() : '';
-    if (!editor) {
-      return res.status(400).json({
-        error: 'Missing X-Editor header',
-        details: 'Corrections require an X-Editor header identifying the editor.',
-      });
-    }
+  if (!opts.readonly) {
+    router.patch('/:id', (req, res) => {
+      const editorHeader = req.header('x-editor');
+      const editor = typeof editorHeader === 'string' ? editorHeader.trim() : '';
+      if (!editor) {
+        return res.status(400).json({
+          error: 'Missing X-Editor header',
+          details: 'Corrections require an X-Editor header identifying the editor.',
+        });
+      }
 
-    const parsed = DocumentPatchSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: 'Invalid body', details: parsed.error.flatten() });
-    }
+      const parsed = DocumentPatchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ error: 'Invalid body', details: parsed.error.flatten() });
+      }
 
-    const ctx: ProvenanceContext = {
-      sourceUrl: null,
-      fetchedAt: new Date().toISOString(),
-      editor,
-    };
+      const ctx: ProvenanceContext = {
+        sourceUrl: null,
+        fetchedAt: new Date().toISOString(),
+        editor,
+      };
 
-    const updated = patchDocumentFields(db, req.params.id, parsed.data, ctx);
-    if (!updated) {
-      return res.status(404).json({ error: 'Document not found' });
-    }
-    return res.json(updated);
-  });
+      const updated = patchDocumentFields(db, req.params.id, parsed.data, ctx);
+      if (!updated) {
+        return res.status(404).json({ error: 'Document not found' });
+      }
+      return res.json(updated);
+    });
+  }
 
   return router;
 }

@@ -12,13 +12,18 @@ import { createSearchRouter } from './routes/search.js';
 import { createSentimentRouter } from './routes/sentiment.js';
 import { createTopicsRouter } from './routes/topics.js';
 
-export function createApp(db: DatabaseT): Express {
+export interface CreateAppOptions {
+  readonly?: boolean;
+  corsOrigins?: string[];
+}
+
+export function createApp(db: DatabaseT, opts: CreateAppOptions = {}): Express {
   const app = express();
 
   app.use(helmet());
   app.use(
     cors({
-      origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+      origin: opts.corsOrigins ?? ['http://localhost:5173', 'http://127.0.0.1:5173'],
     }),
   );
   app.use(express.json());
@@ -29,7 +34,7 @@ export function createApp(db: DatabaseT): Express {
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
   app.get('/api/openapi.json', (_req, res) => res.json(buildOpenApiDocument()));
 
-  app.use('/api/documents', createDocumentsRouter(db));
+  app.use('/api/documents', createDocumentsRouter(db, { readonly: opts.readonly }));
   app.use('/api/search', createSearchRouter(db));
   app.use('/api/correspondents', createCorrespondentsRouter(db));
   app.use('/api/topics', createTopicsRouter(db));
