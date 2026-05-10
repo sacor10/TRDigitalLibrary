@@ -16,6 +16,7 @@
     "ingest": "node scripts/run-build-ingest.mjs",
     "ingest-loc": "npm run ingest-loc -w server --",
     "ingest-tei": "npm run ingest-tei -w server --",
+    "upload-library-to-turso": "npm run upload-library-to-turso -w server --",
     "topic-model": "node scripts/run-topic-model.mjs",
     "sentiment": "node scripts/run-sentiment.mjs",
     "lint": "eslint \"{shared,server,client}/src/**/*.{ts,tsx}\"",
