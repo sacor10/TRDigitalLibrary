@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: '/search', label: 'Search' },
   { to: '/timeline', label: 'Timeline' },
   { to: '/network', label: 'Network' },
+  { to: '/topics', label: 'Topics' },
 ];
 
 export function Layout({ children }: { children: ReactNode }) {

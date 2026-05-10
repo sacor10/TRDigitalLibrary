@@ -1,0 +1,4 @@
+bertopic>=0.16
+sentence-transformers>=2.7
+numpy>=1.26
+scikit-learn>=1.4

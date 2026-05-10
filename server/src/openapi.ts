@@ -15,6 +15,10 @@ import {
   FieldProvenanceSchema,
   SearchQuerySchema,
   SearchResponseSchema,
+  TopicDetailResponseSchema,
+  TopicDriftResponseSchema,
+  TopicSchema,
+  TopicsResponseSchema,
 } from '@tr/shared';
 
 extendZodWithOpenApi(z);
@@ -28,6 +32,10 @@ export function buildOpenApiDocument(): object {
   registry.register('FieldProvenance', FieldProvenanceSchema);
   registry.register('SearchResponse', SearchResponseSchema);
   registry.register('CorrespondentGraphResponse', CorrespondentGraphResponseSchema);
+  registry.register('Topic', TopicSchema);
+  registry.register('TopicsResponse', TopicsResponseSchema);
+  registry.register('TopicDetailResponse', TopicDetailResponseSchema);
+  registry.register('TopicDriftResponse', TopicDriftResponseSchema);
   registry.register('Error', ErrorResponseSchema);
 
   registry.registerPath({
@@ -128,6 +136,64 @@ export function buildOpenApiDocument(): object {
       200: {
         description: 'Nodes (people), undirected edges (co-occurrence in letters), and the underlying letter index.',
         content: { 'application/json': { schema: CorrespondentGraphResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/topics',
+    summary: 'List all topics produced by the most recent BERTopic run, ordered by size.',
+    responses: {
+      200: {
+        description: 'Topics with labels, top keywords, document counts, and the model version that produced them.',
+        content: { 'application/json': { schema: TopicsResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/topics/{id}',
+    summary: 'Get a single topic plus its top member documents (highest probability first).',
+    request: {
+      params: z.object({ id: z.string().describe('Numeric topic id') }),
+      query: z.object({
+        limit: z
+          .string()
+          .optional()
+          .describe('Max member documents to return; default 25, capped at 200.'),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Topic + member documents.',
+        content: { 'application/json': { schema: TopicDetailResponseSchema } },
+      },
+      404: {
+        description: 'Topic not found.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/topics/drift',
+    summary: 'Per-period share of each topic across the corpus, precomputed at sidecar run time.',
+    request: {
+      query: z.object({
+        bin: z.enum(['year']).optional().describe('Drift binning granularity (only `year` supported).'),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Drift points; per-period shares sum to <= 1 (HDBSCAN noise excluded).',
+        content: { 'application/json': { schema: TopicDriftResponseSchema } },
+      },
+      400: {
+        description: 'Unsupported bin granularity.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
       },
     },
   });
