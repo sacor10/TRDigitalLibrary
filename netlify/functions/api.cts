@@ -3,9 +3,7 @@ import { join } from 'node:path';
 
 import serverless from 'serverless-http';
 
-import { openAnnotationsDb } from '../../server/src/annotations-db.js';
 import { createApp } from '../../server/src/app.js';
-import { createGoogleVerifier } from '../../server/src/auth/google.js';
 import { openDatabase } from '../../server/src/db.js';
 
 type ServerlessHandler = ReturnType<typeof serverless>;
@@ -37,26 +35,28 @@ async function createHandler(): Promise<ServerlessHandler> {
 
   // Auth and annotations need a writable production store. If either required
   // piece is missing, keep the read-only document API online and leave auth off.
-  const annotationsDb =
-    sessionSecret && tursoDatabaseUrl
-      ? await openAnnotationsDb({
-          url: tursoDatabaseUrl,
-          ...(tursoAuthToken ? { authToken: tursoAuthToken } : {}),
-        })
-      : undefined;
+  let annotationsOptions = {};
+  if (sessionSecret && tursoDatabaseUrl) {
+    const [{ openAnnotationsDb }, { createGoogleVerifier }] = await Promise.all([
+      import('../../server/src/annotations-db.js'),
+      import('../../server/src/auth/google.js'),
+    ]);
+    const annotationsDb = await openAnnotationsDb({
+      url: tursoDatabaseUrl,
+      ...(tursoAuthToken ? { authToken: tursoAuthToken } : {}),
+    });
+
+    annotationsOptions = {
+      annotationsDb,
+      sessionSecret,
+      ...(googleClientId ? { verifyGoogleIdToken: createGoogleVerifier(googleClientId) } : {}),
+    };
+  }
 
   const app = createApp(db, {
     readonly: true,
     corsOrigins: [],
-    ...(annotationsDb && sessionSecret
-      ? {
-          annotationsDb,
-          sessionSecret,
-          ...(googleClientId
-            ? { verifyGoogleIdToken: createGoogleVerifier(googleClientId) }
-            : {}),
-        }
-      : {}),
+    ...annotationsOptions,
   });
 
   return serverless(app);

@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { createClient, type Client as LibsqlClient } from '@libsql/client';
+import type { Client as LibsqlClient, Config as LibsqlConfig } from '@libsql/client';
 
 const __dirname = (() => {
   try {
@@ -25,15 +25,28 @@ export async function openAnnotationsDb(
   const url = opts.url ?? process.env.TURSO_DATABASE_URL ?? DEFAULT_LOCAL_URL;
   const authToken = opts.authToken ?? process.env.TURSO_AUTH_TOKEN;
 
-  const client = createClient(authToken ? { url, authToken } : { url });
+  const client = await createLibsqlClient(url, authToken);
   await runMigrations(client);
   return client;
 }
 
 export async function openInMemoryAnnotationsDb(): Promise<LibsqlClient> {
-  const client = createClient({ url: ':memory:' });
+  const client = await createLibsqlClient(':memory:');
   await runMigrations(client);
   return client;
+}
+
+async function createLibsqlClient(
+  url: string,
+  authToken?: string,
+): Promise<LibsqlClient> {
+  const config: LibsqlConfig = authToken ? { url, authToken } : { url };
+  if (/^(?:libsql|https?):/i.test(url)) {
+    const { createClient } = await import('@libsql/client/http');
+    return createClient(config);
+  }
+  const { createClient } = await import('@libsql/client');
+  return createClient(config);
 }
 
 async function runMigrations(client: LibsqlClient): Promise<void> {
