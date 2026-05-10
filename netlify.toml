@@ -45,11 +45,13 @@
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["better-sqlite3"]
 
 [functions."api"]
+  # Library data lives in Turso (TURSO_LIBRARY_DATABASE_URL); we no longer
+  # bundle data/library.db with the function. Migration SQL files are still
+  # bundled so openLibraryDb / openAnnotationsDb can apply pending migrations
+  # on cold start against an upstream Turso DB that pre-dates a new schema.
   included_files = [
-    "data/library.db",
     "server/src/migrations/*.sql",
     "server/src/annotations-migrations/*.sql",
   ]
