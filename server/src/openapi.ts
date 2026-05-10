@@ -19,6 +19,9 @@ import {
   TopicDriftResponseSchema,
   TopicSchema,
   TopicsResponseSchema,
+  DocumentSentimentSchema,
+  SentimentTimelineResponseSchema,
+  SentimentExtremesResponseSchema,
 } from '@tr/shared';
 
 extendZodWithOpenApi(z);
@@ -36,6 +39,9 @@ export function buildOpenApiDocument(): object {
   registry.register('TopicsResponse', TopicsResponseSchema);
   registry.register('TopicDetailResponse', TopicDetailResponseSchema);
   registry.register('TopicDriftResponse', TopicDriftResponseSchema);
+  registry.register('DocumentSentiment', DocumentSentimentSchema);
+  registry.register('SentimentTimelineResponse', SentimentTimelineResponseSchema);
+  registry.register('SentimentExtremesResponse', SentimentExtremesResponseSchema);
   registry.register('Error', ErrorResponseSchema);
 
   registry.registerPath({
@@ -193,6 +199,69 @@ export function buildOpenApiDocument(): object {
       },
       400: {
         description: 'Unsupported bin granularity.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/sentiment/timeline',
+    summary: 'Mean per-document VADER polarity, grouped by month or year, optionally bounded by a date range.',
+    request: {
+      query: z.object({
+        bin: z.enum(['month', 'year']).optional().describe("Aggregation granularity; default 'month'."),
+        from: z.string().optional().describe('Inclusive lower bound (YYYY-MM-DD).'),
+        to: z.string().optional().describe('Inclusive upper bound (YYYY-MM-DD).'),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Aggregated polarity points.',
+        content: { 'application/json': { schema: SentimentTimelineResponseSchema } },
+      },
+      400: {
+        description: 'Invalid bin or date.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/sentiment/extremes',
+    summary: 'Most positive and most negative documents in an optional date range.',
+    request: {
+      query: z.object({
+        from: z.string().optional().describe('Inclusive lower bound (YYYY-MM-DD).'),
+        to: z.string().optional().describe('Inclusive upper bound (YYYY-MM-DD).'),
+        limit: z.string().optional().describe('Items per side; default 10, capped at 100.'),
+      }),
+    },
+    responses: {
+      200: {
+        description: 'Two ranked lists: mostPositive and mostNegative.',
+        content: { 'application/json': { schema: SentimentExtremesResponseSchema } },
+      },
+      400: {
+        description: 'Invalid date.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/sentiment/documents/{id}',
+    summary: 'Per-document VADER sentiment record.',
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: {
+        description: 'Document sentiment.',
+        content: { 'application/json': { schema: DocumentSentimentSchema } },
+      },
+      404: {
+        description: 'No sentiment record (run `npm run sentiment`).',
         content: { 'application/json': { schema: ErrorResponseSchema } },
       },
     },

@@ -9,6 +9,7 @@ import { buildOpenApiDocument } from './openapi.js';
 import { createCorrespondentsRouter } from './routes/correspondents.js';
 import { createDocumentsRouter } from './routes/documents.js';
 import { createSearchRouter } from './routes/search.js';
+import { createSentimentRouter } from './routes/sentiment.js';
 import { createTopicsRouter } from './routes/topics.js';
 
 export function createApp(db: DatabaseT): Express {
@@ -32,6 +33,7 @@ export function createApp(db: DatabaseT): Express {
   app.use('/api/search', createSearchRouter(db));
   app.use('/api/correspondents', createCorrespondentsRouter(db));
   app.use('/api/topics', createTopicsRouter(db));
+  app.use('/api/sentiment', createSentimentRouter(db));
 
   app.use((req, res) => {
     res.status(404).json({ error: `Not found: ${req.method} ${req.path}` });

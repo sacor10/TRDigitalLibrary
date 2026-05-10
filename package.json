@@ -16,6 +16,7 @@
     "seed": "npm run seed -w server",
     "ingest-tei": "npm run ingest-tei -w server --",
     "topic-model": "node scripts/run-topic-model.mjs",
+    "sentiment": "node scripts/run-sentiment.mjs",
     "lint": "eslint \"{shared,server,client}/src/**/*.{ts,tsx}\"",
     "format": "prettier --write \"{shared,server,client}/src/**/*.{ts,tsx,css,json}\" \"*.{json,md}\""
   },

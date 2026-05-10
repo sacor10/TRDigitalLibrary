@@ -8,6 +8,7 @@ import { DocumentPage } from './pages/DocumentPage';
 import { HomePage } from './pages/HomePage';
 import { NetworkPage } from './pages/NetworkPage';
 import { SearchPage } from './pages/SearchPage';
+import { SentimentPage } from './pages/SentimentPage';
 import { TimelinePage } from './pages/TimelinePage';
 import { TopicsPage } from './pages/TopicsPage';
 
@@ -30,6 +31,7 @@ export function App() {
             <Route path="/network" element={<NetworkPage />} />
             <Route path="/topics" element={<TopicsPage />} />
             <Route path="/topics/:id" element={<TopicsPage />} />
+            <Route path="/sentiment" element={<SentimentPage />} />
             <Route path="/documents/:id" element={<DocumentPage />} />
             <Route
               path="*"

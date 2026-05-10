@@ -27,6 +27,16 @@ export {
   TopicDriftResponseSchema,
 } from './schemas/topic.js';
 
+export {
+  SentimentLabelSchema,
+  SentimentBinSchema,
+  DocumentSentimentSchema,
+  SentimentTimelinePointSchema,
+  SentimentTimelineResponseSchema,
+  SentimentExtremeItemSchema,
+  SentimentExtremesResponseSchema,
+} from './schemas/sentiment.js';
+
 export type {
   Document,
   DocumentType,
@@ -55,3 +65,13 @@ export type {
   TopicDetailResponse,
   TopicDriftResponse,
 } from './schemas/topic.js';
+
+export type {
+  SentimentLabel,
+  SentimentBin,
+  DocumentSentiment,
+  SentimentTimelinePoint,
+  SentimentTimelineResponse,
+  SentimentExtremeItem,
+  SentimentExtremesResponse,
+} from './schemas/sentiment.js';

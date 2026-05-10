@@ -2,7 +2,10 @@ import {
   CorrespondentGraphResponseSchema,
   DocumentListResponseSchema,
   DocumentSchema,
+  DocumentSentimentSchema,
   SearchResponseSchema,
+  SentimentExtremesResponseSchema,
+  SentimentTimelineResponseSchema,
   TopicDetailResponseSchema,
   TopicDriftResponseSchema,
   TopicsResponseSchema,
@@ -10,8 +13,12 @@ import {
   type Document,
   type DocumentListQuery,
   type DocumentListResponse,
+  type DocumentSentiment,
   type SearchQuery,
   type SearchResponse,
+  type SentimentBin,
+  type SentimentExtremesResponse,
+  type SentimentTimelineResponse,
   type TopicDetailResponse,
   type TopicDriftResponse,
   type TopicsResponse,
@@ -82,6 +89,41 @@ export async function fetchTopic(id: number, limit?: number): Promise<TopicDetai
 
 export async function fetchTopicDrift(): Promise<TopicDriftResponse> {
   return getJson('/api/topics/drift?bin=year', (raw) => TopicDriftResponseSchema.parse(raw));
+}
+
+export interface SentimentTimelineQuery {
+  bin?: SentimentBin;
+  from?: string;
+  to?: string;
+}
+
+export async function fetchSentimentTimeline(
+  query: SentimentTimelineQuery = {},
+): Promise<SentimentTimelineResponse> {
+  const qs = buildQuery({ bin: query.bin, from: query.from, to: query.to });
+  return getJson(`/api/sentiment/timeline${qs}`, (raw) =>
+    SentimentTimelineResponseSchema.parse(raw),
+  );
+}
+
+export async function fetchSentimentExtremes(query: {
+  from?: string;
+  to?: string;
+  limit?: number;
+}): Promise<SentimentExtremesResponse> {
+  const qs = buildQuery({ from: query.from, to: query.to, limit: query.limit });
+  return getJson(`/api/sentiment/extremes${qs}`, (raw) =>
+    SentimentExtremesResponseSchema.parse(raw),
+  );
+}
+
+export async function fetchDocumentSentiment(id: string): Promise<DocumentSentiment | null> {
+  const res = await fetch(`${API_BASE}/api/sentiment/documents/${encodeURIComponent(id)}`);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`Request failed: ${res.status} ${res.statusText}`);
+  }
+  return DocumentSentimentSchema.parse(await res.json());
 }
 
 export async function searchDocuments(query: SearchQuery): Promise<SearchResponse> {
