@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -57,7 +57,15 @@ async function runMigrations(client: LibsqlClient): Promise<void> {
      )`,
   );
 
-  const migrationsDir = join(__dirname, 'annotations-migrations');
+  const migrationsDir = [
+    join(__dirname, 'annotations-migrations'),
+    join(__dirname, 'server', 'src', 'annotations-migrations'),
+    join(process.cwd(), 'server', 'src', 'annotations-migrations'),
+  ].find((candidate) => existsSync(candidate));
+  if (!migrationsDir) {
+    throw new Error('Could not locate annotations migration files');
+  }
+
   const files = readdirSync(migrationsDir)
     .filter((f) => f.endsWith('.sql'))
     .sort();
