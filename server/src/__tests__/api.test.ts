@@ -70,6 +70,27 @@ describe('TR Digital Library API', () => {
       const res = await request(app).get('/api/documents?dateFrom=not-a-date');
       expect(res.status).toBe(400);
     });
+
+    it('sorts ascending by date', async () => {
+      const res = await request(app).get('/api/documents?sort=date&order=asc');
+      expect(res.status).toBe(200);
+      const dates = res.body.items.map((d: Document) => d.date);
+      expect(dates).toEqual([...dates].sort());
+    });
+
+    it('returns 500 (not a hang) when the database errors', async () => {
+      const brokenDb = {
+        execute: async () => {
+          throw new Error('simulated turso outage');
+        },
+        close: () => {},
+      } as unknown as LibsqlClient;
+      const brokenApp = createApp(brokenDb);
+      const res = await request(brokenApp).get('/api/documents?sort=date&order=asc');
+      expect(res.status).toBe(500);
+      expect(res.body.error).toMatch(/failed to list/i);
+      expect(res.body.details).toContain('simulated turso outage');
+    });
   });
 
   describe('GET /api/documents/:id', () => {
