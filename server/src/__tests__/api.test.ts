@@ -90,6 +90,11 @@ describe('TR Digital Library API', () => {
       await upsertDocument(db, {
         ...TEST_DOCUMENTS[0]!,
         id: 'iiif-fixture',
+        // The 008 migration added a partial UNIQUE INDEX on documents.source_url
+        // (rejects duplicate non-null source URLs). The fixture rows already
+        // populate the source_url space, so this synthetic row gets a null
+        // sourceUrl to stay distinct.
+        sourceUrl: null,
         iiifManifestUrl: manifest,
         transcription: 'fixture',
       });
@@ -161,7 +166,16 @@ describe('TR Digital Library API', () => {
       const fixture = TEST_DOCUMENTS[0]!;
       await upsertDocument(
         db,
-        { ...fixture, id: fixtureId, transcription: 'original transcription text' },
+        {
+          ...fixture,
+          id: fixtureId,
+          // 008's partial UNIQUE INDEX on documents.source_url rejects
+          // duplicates against the fixture rows seeded above. The provenance
+          // ProvenanceContext.sourceUrl below is still tracked separately
+          // in document_field_provenance, which is what these tests assert on.
+          sourceUrl: null,
+          transcription: 'original transcription text',
+        },
         { sourceUrl, fetchedAt, editor: 'loc-ingest' },
       );
     });

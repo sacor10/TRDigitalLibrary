@@ -42,6 +42,8 @@ export interface DocumentRow {
   tags: string;
   mentions: string;
   tei_xml: string | null;
+  /** SHA-256 of the raw TEI XML used for change detection in ingest-tei. */
+  tei_source_hash: string | null;
 }
 
 export const PROVENANCE_FIELDS = [
@@ -124,6 +126,7 @@ export function rowToDocumentRow(row: Row): DocumentRow {
     tags: asString(row.tags),
     mentions: asString(row.mentions),
     tei_xml: asNullableString(row.tei_xml),
+    tei_source_hash: asNullableString(row.tei_source_hash),
   };
 }
 
