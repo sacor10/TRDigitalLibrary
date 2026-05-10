@@ -7,7 +7,13 @@ import type { Database as DatabaseT } from 'better-sqlite3';
 
 import type { Document, DocumentPatch, DocumentSection, FieldProvenance } from '@tr/shared';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+const __dirname = (() => {
+  try {
+    return dirname(fileURLToPath(import.meta.url));
+  } catch {
+    return process.cwd();
+  }
+})();
 
 const DEFAULT_DB_PATH = join(__dirname, '..', '..', 'data', 'library.db');
 
