@@ -111,6 +111,15 @@ async function seed(): Promise<void> {
   console.log(
     `\nSeeded ${count} documents into ${dbPath}.  fetched=${fetched}  failed=${failed}`,
   );
+
+  // Make the on-disk file self-contained so deploys / readonly opens don't
+  // need -wal / -shm sidecars. Truncate-checkpoint flushes WAL into the main
+  // DB, and switching journal_mode to DELETE removes the sidecar files
+  // entirely. Without this, the bundled library.db ends up missing rows that
+  // are still in the (un-bundled) WAL file, causing 500s in the Netlify
+  // function with "no such table: documents".
+  db.pragma('wal_checkpoint(TRUNCATE)');
+  db.pragma('journal_mode = DELETE');
   db.close();
 }
 
