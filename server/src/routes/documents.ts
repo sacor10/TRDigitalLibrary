@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import type { Database as DatabaseT } from 'better-sqlite3';
+import type { InValue } from '@libsql/client';
 
 import { DocumentListQuerySchema, DocumentPatchSchema } from '@tr/shared';
 
@@ -7,8 +7,9 @@ import {
   getSectionsByDocumentId,
   patchDocumentFields,
   rowToDocument,
+  rowToDocumentRow,
   rowToDocumentWithProvenance,
-  type DocumentRow,
+  type LibsqlClient,
   type ProvenanceContext,
 } from '../db.js';
 import { FORMAT_BY_EXT, generateExport } from '../export/index.js';
@@ -17,13 +18,17 @@ export interface CreateDocumentsRouterOptions {
   readonly?: boolean | undefined;
 }
 
+function asNumber(v: unknown): number {
+  return typeof v === 'bigint' ? Number(v) : Number(v ?? 0);
+}
+
 export function createDocumentsRouter(
-  db: DatabaseT,
+  db: LibsqlClient,
   opts: CreateDocumentsRouterOptions = {},
 ): Router {
   const router = Router();
 
-  router.get('/', (req, res) => {
+  router.get('/', async (req, res) => {
     const parsed = DocumentListQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
@@ -31,7 +36,7 @@ export function createDocumentsRouter(
     const { type, dateFrom, dateTo, recipient, sort, order, limit, offset } = parsed.data;
 
     const where: string[] = [];
-    const params: Record<string, string | number> = {};
+    const params: Record<string, InValue> = {};
     if (type) {
       where.push('type = @type');
       params.type = type;
@@ -51,20 +56,21 @@ export function createDocumentsRouter(
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const orderSql = `ORDER BY ${sort} ${order.toUpperCase()}`;
 
-    const totalRow = db
-      .prepare(`SELECT COUNT(*) as c FROM documents ${whereSql}`)
-      .get(params) as { c: number };
-
-    const rows = db
-      .prepare(
-        `SELECT * FROM documents ${whereSql} ${orderSql} LIMIT @limit OFFSET @offset`,
-      )
-      .all({ ...params, limit, offset }) as DocumentRow[];
-
-    return res.json({
-      items: rows.map((row) => rowToDocumentWithProvenance(db, row)),
-      total: totalRow.c,
+    const totalResult = await db.execute({
+      sql: `SELECT COUNT(*) as c FROM documents ${whereSql}`,
+      args: params,
     });
+    const total = asNumber(totalResult.rows[0]?.c);
+
+    const listResult = await db.execute({
+      sql: `SELECT * FROM documents ${whereSql} ${orderSql} LIMIT @limit OFFSET @offset`,
+      args: { ...params, limit, offset },
+    });
+    const rows = listResult.rows.map(rowToDocumentRow);
+
+    const items = await Promise.all(rows.map((row) => rowToDocumentWithProvenance(db, row)));
+
+    return res.json({ items, total });
   });
 
   router.get('/:id/export.:ext', async (req, res) => {
@@ -73,14 +79,16 @@ export function createDocumentsRouter(
     if (!format) {
       return res.status(404).json({ error: `Unsupported export extension: ${ext}` });
     }
-    const row = db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as
-      | DocumentRow
-      | undefined;
-    if (!row) {
+    const result = await db.execute({
+      sql: 'SELECT * FROM documents WHERE id = ?',
+      args: [id],
+    });
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Document not found' });
     }
-    const doc = rowToDocument(row);
-    const sections = getSectionsByDocumentId(db, id);
+    const docRow = rowToDocumentRow(result.rows[0]!);
+    const doc = rowToDocument(docRow);
+    const sections = await getSectionsByDocumentId(db, id);
     try {
       const artifact = await generateExport(doc, sections, format);
       res.setHeader('Content-Type', artifact.contentType);
@@ -96,19 +104,21 @@ export function createDocumentsRouter(
     }
   });
 
-  router.get('/:id', (req, res) => {
+  router.get('/:id', async (req, res) => {
     const id = req.params.id;
-    const row = db.prepare('SELECT * FROM documents WHERE id = ?').get(id) as
-      | DocumentRow
-      | undefined;
-    if (!row) {
+    const result = await db.execute({
+      sql: 'SELECT * FROM documents WHERE id = ?',
+      args: [id],
+    });
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Document not found' });
     }
-    return res.json(rowToDocumentWithProvenance(db, row));
+    const docRow = rowToDocumentRow(result.rows[0]!);
+    return res.json(await rowToDocumentWithProvenance(db, docRow));
   });
 
   if (!opts.readonly) {
-    router.patch('/:id', (req, res) => {
+    router.patch('/:id', async (req, res) => {
       const editorHeader = req.header('x-editor');
       const editor = typeof editorHeader === 'string' ? editorHeader.trim() : '';
       if (!editor) {
@@ -129,7 +139,7 @@ export function createDocumentsRouter(
         editor,
       };
 
-      const updated = patchDocumentFields(db, req.params.id, parsed.data, ctx);
+      const updated = await patchDocumentFields(db, req.params.id, parsed.data, ctx);
       if (!updated) {
         return res.status(404).json({ error: 'Document not found' });
       }

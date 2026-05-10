@@ -1,9 +1,8 @@
 import { Router } from 'express';
-import type { Database as DatabaseT } from 'better-sqlite3';
 
 import { SearchQuerySchema } from '@tr/shared';
 
-import { rowToDocument, type DocumentRow } from '../db.js';
+import { rowToDocument, rowToDocumentRow, type LibsqlClient } from '../db.js';
 
 function buildFtsQuery(raw: string): string {
   const tokens = raw
@@ -17,10 +16,18 @@ function buildFtsQuery(raw: string): string {
   return tokens.join(' AND ');
 }
 
-export function createSearchRouter(db: DatabaseT): Router {
+function asNumber(v: unknown): number {
+  return typeof v === 'bigint' ? Number(v) : Number(v ?? 0);
+}
+
+function asString(v: unknown): string {
+  return v == null ? '' : String(v);
+}
+
+export function createSearchRouter(db: LibsqlClient): Router {
   const router = Router();
 
-  router.get('/', (req, res) => {
+  router.get('/', async (req, res) => {
     const parsed = SearchQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
@@ -60,31 +67,28 @@ export function createSearchRouter(db: DatabaseT): Router {
       LIMIT @limit
     `;
 
-    type Row = DocumentRow & { snippet: string; rank: number };
-    let rows: Row[];
     try {
-      rows = db.prepare(sql).all(params) as Row[];
+      const result = await db.execute({ sql, args: params });
+      const countResult = await db.execute({
+        sql: `SELECT COUNT(*) as c
+              FROM documents_fts
+              JOIN documents ON documents.rowid = documents_fts.rowid
+              ${whereSql}`,
+        args: params,
+      });
+      const total = asNumber(countResult.rows[0]?.c);
+
+      return res.json({
+        results: result.rows.map((row) => ({
+          document: rowToDocument(rowToDocumentRow(row)),
+          snippet: asString(row.snippet),
+        })),
+        total,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return res.status(400).json({ error: 'Invalid search', details: message });
     }
-
-    const totalRow = db
-      .prepare(
-        `SELECT COUNT(*) as c
-         FROM documents_fts
-         JOIN documents ON documents.rowid = documents_fts.rowid
-         ${whereSql}`,
-      )
-      .get(params) as { c: number };
-
-    return res.json({
-      results: rows.map((row) => ({
-        document: rowToDocument(row),
-        snippet: row.snippet ?? '',
-      })),
-      total: totalRow.c,
-    });
   });
 
   return router;

@@ -13,7 +13,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { openDatabase, getSectionsByDocumentId, rowToDocument, type DocumentRow } from '../src/db.js';
+import {
+  getSectionsByDocumentId,
+  openLibraryDb,
+  rowToDocument,
+  rowToDocumentRow,
+} from '../src/db.js';
 import { generateExport } from '../src/export/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -60,31 +65,36 @@ async function main(): Promise<number> {
   if (!rng) return 2;
 
   const dbPath = process.env.DATABASE_URL ?? join(__dirname, '..', '..', 'data', 'library.db');
-  if (!existsSync(dbPath)) {
+  // openLibraryDb prefers TURSO_LIBRARY_DATABASE_URL → falls back to file:./data/library.db.
+  // We pass the legacy DATABASE_URL through as a file: URL so this script keeps working
+  // unchanged from a developer shell.
+  const url = process.env.TURSO_LIBRARY_DATABASE_URL ?? `file:${dbPath}`;
+  if (url.startsWith('file:') && !existsSync(url.replace(/^file:/, ''))) {
     console.error(`[validate-tei] Database not found at ${dbPath}. Run \`npm run ingest-loc -- --limit 25\` first.`);
     return 2;
   }
-  const db = openDatabase(dbPath);
-  const rows = db.prepare('SELECT * FROM documents ORDER BY id').all() as DocumentRow[];
+  const db = await openLibraryDb({ url });
+  const result = await db.execute('SELECT * FROM documents ORDER BY id');
+  const rows = result.rows.map(rowToDocumentRow);
 
   let failures = 0;
   const tmp = tmpdir();
   for (const row of rows) {
     const doc = rowToDocument(row);
-    const sections = getSectionsByDocumentId(db, doc.id);
+    const sections = await getSectionsByDocumentId(db, doc.id);
     const artifact = await generateExport(doc, sections, 'tei');
     const file = join(tmp, `${doc.id}.tei.xml`);
     writeFileSync(file, artifact.body);
-    const result = spawnSync(
+    const validationResult = spawnSync(
       'xmllint',
       ['--noout', '--relaxng', rng, file],
       { encoding: 'utf8' },
     );
-    if (result.status === 0) {
+    if (validationResult.status === 0) {
       console.log(`[validate-tei] OK   ${doc.id}`);
     } else {
       failures += 1;
-      console.error(`[validate-tei] FAIL ${doc.id}\n${result.stderr || result.stdout}`);
+      console.error(`[validate-tei] FAIL ${doc.id}\n${validationResult.stderr || validationResult.stdout}`);
     }
   }
 

@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
 import { Router } from 'express';
-import type { Database as DatabaseT } from 'better-sqlite3';
 
 import {
   ANNOTATION_JSONLD_CONTEXT,
@@ -14,7 +13,8 @@ import {
   type AnnotationTextualBody,
 } from '@tr/shared';
 
-import type { LibsqlClient } from '../annotations-db.js';
+import type { LibsqlClient as AnnotationsClient } from '../annotations-db.js';
+import type { LibsqlClient } from '../db.js';
 import { findUserById, rowToAuthUser } from '../auth/users.js';
 import { requireUser } from '../middleware/requireUser.js';
 
@@ -83,7 +83,7 @@ function shouldRespondJsonLd(req: { headers: Record<string, unknown> }): boolean
 }
 
 async function fetchCreator(
-  annotationsDb: LibsqlClient,
+  annotationsDb: AnnotationsClient,
   creatorId: string,
 ): Promise<AnnotationCreator> {
   const row = await findUserById(annotationsDb, creatorId);
@@ -95,17 +95,20 @@ async function fetchCreator(
 }
 
 export interface CreateAnnotationsRouterOptions {
-  documentsDb: DatabaseT;
-  annotationsDb: LibsqlClient;
+  documentsDb: LibsqlClient;
+  annotationsDb: AnnotationsClient;
 }
 
 export function createAnnotationsRouter(opts: CreateAnnotationsRouterOptions): Router {
   const router = Router();
   const { documentsDb, annotationsDb } = opts;
 
-  const documentExists = (id: string): boolean => {
-    const row = documentsDb.prepare('SELECT 1 AS x FROM documents WHERE id = ?').get(id);
-    return Boolean(row);
+  const documentExists = async (id: string): Promise<boolean> => {
+    const result = await documentsDb.execute({
+      sql: 'SELECT 1 AS x FROM documents WHERE id = ?',
+      args: [id],
+    });
+    return result.rows.length > 0;
   };
 
   const fetchAnnotationRow = async (id: string): Promise<AnnotationRow | null> => {
@@ -136,7 +139,7 @@ export function createAnnotationsRouter(opts: CreateAnnotationsRouterOptions): R
       return res.status(400).json({ error: 'Invalid body', details: parsed.error.flatten() });
     }
     const input = parsed.data;
-    if (!documentExists(input.documentId)) {
+    if (!(await documentExists(input.documentId))) {
       return res.status(404).json({ error: 'Document not found' });
     }
     if (input.motivation === 'commenting' && !input.bodyText) {
@@ -257,8 +260,8 @@ export function createAnnotationsRouter(opts: CreateAnnotationsRouterOptions): R
 }
 
 export interface CreateDocumentAnnotationsRouterOptions {
-  documentsDb: DatabaseT;
-  annotationsDb: LibsqlClient;
+  documentsDb: LibsqlClient;
+  annotationsDb: AnnotationsClient;
 }
 
 export function createDocumentAnnotationsRouter(
@@ -270,10 +273,11 @@ export function createDocumentAnnotationsRouter(
   router.get('/', async (req, res) => {
     const documentId = (req.params as { id?: string }).id;
     if (!documentId) return res.status(400).json({ error: 'Missing document id' });
-    const docRow = documentsDb
-      .prepare('SELECT 1 AS x FROM documents WHERE id = ?')
-      .get(documentId);
-    if (!docRow) return res.status(404).json({ error: 'Document not found' });
+    const docResult = await documentsDb.execute({
+      sql: 'SELECT 1 AS x FROM documents WHERE id = ?',
+      args: [documentId],
+    });
+    if (docResult.rows.length === 0) return res.status(404).json({ error: 'Document not found' });
 
     const result = await annotationsDb.execute({
       sql: `SELECT id, document_id, section_id, creator_id, motivation, body_text,

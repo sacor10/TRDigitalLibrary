@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import type { Database as DatabaseT } from 'better-sqlite3';
 
 import type {
   DocumentSentiment,
@@ -10,6 +9,8 @@ import type {
   SentimentTimelinePoint,
   SentimentTimelineResponse,
 } from '@tr/shared';
+
+import type { LibsqlClient } from '../db.js';
 
 interface SentimentRow {
   document_id: string;
@@ -41,6 +42,14 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 100;
 
+function asString(v: unknown): string {
+  return v == null ? '' : String(v);
+}
+
+function asNumber(v: unknown): number {
+  return typeof v === 'bigint' ? Number(v) : Number(v ?? 0);
+}
+
 function rowToSentiment(row: SentimentRow): DocumentSentiment {
   return {
     documentId: row.document_id,
@@ -55,10 +64,10 @@ function rowToSentiment(row: SentimentRow): DocumentSentiment {
   };
 }
 
-export function createSentimentRouter(db: DatabaseT): Router {
+export function createSentimentRouter(db: LibsqlClient): Router {
   const router = Router();
 
-  router.get('/timeline', (req, res) => {
+  router.get('/timeline', async (req, res) => {
     const binRaw = typeof req.query.bin === 'string' ? req.query.bin : 'month';
     if (binRaw !== 'month' && binRaw !== 'year') {
       return res.status(400).json({
@@ -98,7 +107,12 @@ export function createSentimentRouter(db: DatabaseT): Router {
        GROUP BY period
        ORDER BY period ASC
     `;
-    const rows = db.prepare(sql).all(...params) as TimelineRow[];
+    const result = await db.execute({ sql, args: params });
+    const rows: TimelineRow[] = result.rows.map((r) => ({
+      period: asString(r.period),
+      mean_polarity: asNumber(r.mean_polarity),
+      document_count: asNumber(r.document_count),
+    }));
     const points: SentimentTimelinePoint[] = rows.map((r) => ({
       period: r.period,
       meanPolarity: r.mean_polarity,
@@ -108,7 +122,7 @@ export function createSentimentRouter(db: DatabaseT): Router {
     return res.json(payload);
   });
 
-  router.get('/extremes', (req, res) => {
+  router.get('/extremes', async (req, res) => {
     const from = typeof req.query.from === 'string' ? req.query.from : undefined;
     const to = typeof req.query.to === 'string' ? req.query.to : undefined;
     if (from && !ISO_DATE.test(from)) {
@@ -143,12 +157,24 @@ export function createSentimentRouter(db: DatabaseT): Router {
         JOIN documents d ON d.id = s.document_id
         ${whereSql}
     `;
-    const positiveRows = db
-      .prepare(`${select} ORDER BY s.polarity DESC, s.document_id ASC LIMIT ?`)
-      .all(...params, limit) as ExtremeRow[];
-    const negativeRows = db
-      .prepare(`${select} ORDER BY s.polarity ASC, s.document_id ASC LIMIT ?`)
-      .all(...params, limit) as ExtremeRow[];
+    const positiveResult = await db.execute({
+      sql: `${select} ORDER BY s.polarity DESC, s.document_id ASC LIMIT ?`,
+      args: [...params, limit],
+    });
+    const negativeResult = await db.execute({
+      sql: `${select} ORDER BY s.polarity ASC, s.document_id ASC LIMIT ?`,
+      args: [...params, limit],
+    });
+
+    const toRow = (r: import('@libsql/client').Row): ExtremeRow => ({
+      document_id: asString(r.document_id),
+      title: asString(r.title),
+      date: asString(r.date),
+      polarity: asNumber(r.polarity),
+      label: asString(r.label),
+    });
+    const positiveRows = positiveResult.rows.map(toRow);
+    const negativeRows = negativeResult.rows.map(toRow);
 
     const toItem = (r: ExtremeRow): SentimentExtremeItem => ({
       documentId: r.document_id,
@@ -166,18 +192,29 @@ export function createSentimentRouter(db: DatabaseT): Router {
     return res.json(payload);
   });
 
-  router.get('/documents/:id', (req, res) => {
-    const row = db
-      .prepare(
-        `SELECT document_id, polarity, pos, neu, neg, label,
-                sentence_count, computed_at, model_version
-           FROM document_sentiment
-          WHERE document_id = ?`,
-      )
-      .get(req.params.id) as SentimentRow | undefined;
-    if (!row) {
+  router.get('/documents/:id', async (req, res) => {
+    const result = await db.execute({
+      sql: `SELECT document_id, polarity, pos, neu, neg, label,
+                   sentence_count, computed_at, model_version
+              FROM document_sentiment
+             WHERE document_id = ?`,
+      args: [req.params.id],
+    });
+    if (result.rows.length === 0) {
       return res.status(404).json({ error: 'No sentiment record for this document.' });
     }
+    const r = result.rows[0]!;
+    const row: SentimentRow = {
+      document_id: asString(r.document_id),
+      polarity: asNumber(r.polarity),
+      pos: asNumber(r.pos),
+      neu: asNumber(r.neu),
+      neg: asNumber(r.neg),
+      label: asString(r.label),
+      sentence_count: asNumber(r.sentence_count),
+      computed_at: asString(r.computed_at),
+      model_version: asString(r.model_version),
+    };
     return res.json(rowToSentiment(row));
   });
 

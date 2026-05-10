@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
-import type { Database as DatabaseT } from 'better-sqlite3';
+import type { InStatement } from '@libsql/client';
 
 import {
   DocumentSentimentSchema,
@@ -10,7 +10,7 @@ import {
 } from '@tr/shared';
 
 import { createApp } from '../app.js';
-import { openInMemoryDatabase, upsertDocument } from '../db.js';
+import { openInMemoryDatabase, upsertDocument, type LibsqlClient } from '../db.js';
 
 interface FixtureDoc {
   id: string;
@@ -72,30 +72,36 @@ const SEEDS: SentimentSeed[] = [
   { documentId: 'doc-1912-oct', polarity: -0.65, pos: 0.05, neu: 0.45, neg: 0.5, label: 'negative', sentenceCount: 20 },
 ];
 
-function seedSentiment(db: DatabaseT): void {
-  const insert = db.prepare(
-    `INSERT INTO document_sentiment
-       (document_id, polarity, pos, neu, neg, label, sentence_count, computed_at, model_version)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
-  const tx = db.transaction(() => {
-    for (const s of SEEDS) {
-      insert.run(s.documentId, s.polarity, s.pos, s.neu, s.neg, s.label, s.sentenceCount, COMPUTED_AT, MODEL_VERSION);
-    }
-  });
-  tx();
+async function seedSentiment(db: LibsqlClient): Promise<void> {
+  const stmts: InStatement[] = SEEDS.map((s) => ({
+    sql: `INSERT INTO document_sentiment
+            (document_id, polarity, pos, neu, neg, label, sentence_count, computed_at, model_version)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    args: [
+      s.documentId,
+      s.polarity,
+      s.pos,
+      s.neu,
+      s.neg,
+      s.label,
+      s.sentenceCount,
+      COMPUTED_AT,
+      MODEL_VERSION,
+    ],
+  }));
+  await db.batch(stmts, 'write');
 }
 
 describe('Sentiment API', () => {
-  let db: DatabaseT;
+  let db: LibsqlClient;
   let app: ReturnType<typeof createApp>;
 
-  beforeAll(() => {
-    db = openInMemoryDatabase();
+  beforeAll(async () => {
+    db = await openInMemoryDatabase();
     for (const fixture of DOCS) {
-      upsertDocument(db, baseDoc(fixture));
+      await upsertDocument(db, baseDoc(fixture));
     }
-    seedSentiment(db);
+    await seedSentiment(db);
     app = createApp(db);
   });
 

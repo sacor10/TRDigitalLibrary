@@ -1,6 +1,5 @@
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Database as DatabaseT } from 'better-sqlite3';
 
 import {
   ANNOTATION_JSONLD_CONTEXT,
@@ -10,10 +9,10 @@ import {
   type AnnotationCreateInput,
 } from '@tr/shared';
 
-import { openAnnotationsDb, type LibsqlClient } from '../annotations-db.js';
+import { openAnnotationsDb, type LibsqlClient as AnnotationsClient } from '../annotations-db.js';
 import { createApp } from '../app.js';
 import type { GoogleVerifier } from '../auth/google.js';
-import { openInMemoryDatabase, upsertDocument } from '../db.js';
+import { openInMemoryDatabase, upsertDocument, type LibsqlClient } from '../db.js';
 import { cloneTestDocuments } from './fixtures/documents.js';
 
 const baseInput: AnnotationCreateInput = {
@@ -36,8 +35,8 @@ const baseInput: AnnotationCreateInput = {
 };
 
 describe('Annotations API', () => {
-  let db: DatabaseT;
-  let annotationsDb: LibsqlClient;
+  let db: LibsqlClient;
+  let annotationsDb: AnnotationsClient;
   let app: ReturnType<typeof createApp>;
 
   const verifyGoogleIdToken: GoogleVerifier = async (idToken: string) => {
@@ -51,9 +50,9 @@ describe('Annotations API', () => {
   };
 
   beforeAll(async () => {
-    db = openInMemoryDatabase();
+    db = await openInMemoryDatabase();
     for (const doc of cloneTestDocuments()) {
-      upsertDocument(db, { ...doc, transcription: `Stub for ${doc.title}` });
+      await upsertDocument(db, { ...doc, transcription: `Stub for ${doc.title}` });
     }
     annotationsDb = await openAnnotationsDb({ url: ':memory:' });
     app = createApp(db, {

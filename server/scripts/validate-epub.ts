@@ -13,7 +13,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { openDatabase, getSectionsByDocumentId, rowToDocument, type DocumentRow } from '../src/db.js';
+import {
+  getSectionsByDocumentId,
+  openLibraryDb,
+  rowToDocument,
+  rowToDocumentRow,
+} from '../src/db.js';
 import { generateExport } from '../src/export/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -50,28 +55,30 @@ async function main(): Promise<number> {
   if (!runner) return 2;
 
   const dbPath = process.env.DATABASE_URL ?? join(__dirname, '..', '..', 'data', 'library.db');
-  if (!existsSync(dbPath)) {
+  const url = process.env.TURSO_LIBRARY_DATABASE_URL ?? `file:${dbPath}`;
+  if (url.startsWith('file:') && !existsSync(url.replace(/^file:/, ''))) {
     console.error(`[validate-epub] Database not found at ${dbPath}. Run \`npm run ingest-loc -- --limit 25\` first.`);
     return 2;
   }
-  const db = openDatabase(dbPath);
-  const rows = db.prepare('SELECT * FROM documents ORDER BY id').all() as DocumentRow[];
+  const db = await openLibraryDb({ url });
+  const queryResult = await db.execute('SELECT * FROM documents ORDER BY id');
+  const rows = queryResult.rows.map(rowToDocumentRow);
 
   let failures = 0;
   const tmp = tmpdir();
   for (const row of rows) {
     const doc = rowToDocument(row);
-    const sections = getSectionsByDocumentId(db, doc.id);
+    const sections = await getSectionsByDocumentId(db, doc.id);
     const artifact = await generateExport(doc, sections, 'epub');
     const file = join(tmp, `${doc.id}.epub`);
     writeFileSync(file, artifact.body);
-    const result = spawnSync(runner.cmd, runner.args(file), { encoding: 'utf8' });
-    if (result.status === 0) {
+    const validationResult = spawnSync(runner.cmd, runner.args(file), { encoding: 'utf8' });
+    if (validationResult.status === 0) {
       console.log(`[validate-epub] OK   ${doc.id}`);
     } else {
       failures += 1;
       console.error(
-        `[validate-epub] FAIL ${doc.id}\n${result.stdout}\n${result.stderr}`,
+        `[validate-epub] FAIL ${doc.id}\n${validationResult.stdout}\n${validationResult.stderr}`,
       );
     }
   }

@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import type { Database as DatabaseT } from 'better-sqlite3';
 
 import type {
   Topic,
@@ -9,6 +8,8 @@ import type {
   TopicMember,
   TopicsResponse,
 } from '@tr/shared';
+
+import type { LibsqlClient } from '../db.js';
 
 interface TopicRow {
   id: number;
@@ -36,6 +37,14 @@ interface TopicDriftRow {
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 200;
 
+function asString(v: unknown): string {
+  return v == null ? '' : String(v);
+}
+
+function asNumber(v: unknown): number {
+  return typeof v === 'bigint' ? Number(v) : Number(v ?? 0);
+}
+
 function rowToTopic(row: TopicRow): Topic {
   let keywords: string[] = [];
   try {
@@ -56,13 +65,21 @@ function rowToTopic(row: TopicRow): Topic {
   };
 }
 
-export function createTopicsRouter(db: DatabaseT): Router {
+export function createTopicsRouter(db: LibsqlClient): Router {
   const router = Router();
 
-  router.get('/', (_req, res) => {
-    const rows = db
-      .prepare('SELECT id, label, keywords, size, computed_at, model_version FROM topics ORDER BY size DESC, id ASC')
-      .all() as TopicRow[];
+  router.get('/', async (_req, res) => {
+    const result = await db.execute(
+      'SELECT id, label, keywords, size, computed_at, model_version FROM topics ORDER BY size DESC, id ASC',
+    );
+    const rows: TopicRow[] = result.rows.map((row) => ({
+      id: asNumber(row.id),
+      label: asString(row.label),
+      keywords: asString(row.keywords),
+      size: asNumber(row.size),
+      computed_at: asString(row.computed_at),
+      model_version: asString(row.model_version),
+    }));
     const payload: TopicsResponse = {
       items: rows.map(rowToTopic),
       total: rows.length,
@@ -70,16 +87,22 @@ export function createTopicsRouter(db: DatabaseT): Router {
     return res.json(payload);
   });
 
-  router.get('/drift', (req, res) => {
+  router.get('/drift', async (req, res) => {
     const bin = typeof req.query.bin === 'string' ? req.query.bin : 'year';
     if (bin !== 'year') {
       return res.status(400).json({
         error: `Unsupported bin: ${bin}. Only 'year' is supported in this release.`,
       });
     }
-    const rows = db
-      .prepare('SELECT topic_id, period, document_count, share FROM topic_drift ORDER BY period ASC, topic_id ASC')
-      .all() as TopicDriftRow[];
+    const result = await db.execute(
+      'SELECT topic_id, period, document_count, share FROM topic_drift ORDER BY period ASC, topic_id ASC',
+    );
+    const rows: TopicDriftRow[] = result.rows.map((row) => ({
+      topic_id: asNumber(row.topic_id),
+      period: asString(row.period),
+      document_count: asNumber(row.document_count),
+      share: asNumber(row.share),
+    }));
     const totalShareByPeriod = new Map<string, number>();
     for (const row of rows) {
       totalShareByPeriod.set(row.period, (totalShareByPeriod.get(row.period) ?? 0) + row.share);
@@ -97,7 +120,7 @@ export function createTopicsRouter(db: DatabaseT): Router {
     return res.json(payload);
   });
 
-  router.get('/:id', (req, res) => {
+  router.get('/:id', async (req, res) => {
     const id = Number.parseInt(req.params.id, 10);
     if (!Number.isFinite(id) || id < 0) {
       return res.status(400).json({ error: `Invalid topic id: ${req.params.id}` });
@@ -105,26 +128,41 @@ export function createTopicsRouter(db: DatabaseT): Router {
     const limitRaw = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : DEFAULT_LIMIT;
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, MAX_LIMIT) : DEFAULT_LIMIT;
 
-    const row = db
-      .prepare('SELECT id, label, keywords, size, computed_at, model_version FROM topics WHERE id = ?')
-      .get(id) as TopicRow | undefined;
-    if (!row) {
+    const topicResult = await db.execute({
+      sql: 'SELECT id, label, keywords, size, computed_at, model_version FROM topics WHERE id = ?',
+      args: [id],
+    });
+    if (topicResult.rows.length === 0) {
       return res.status(404).json({ error: 'Topic not found' });
     }
+    const tRow = topicResult.rows[0]!;
+    const row: TopicRow = {
+      id: asNumber(tRow.id),
+      label: asString(tRow.label),
+      keywords: asString(tRow.keywords),
+      size: asNumber(tRow.size),
+      computed_at: asString(tRow.computed_at),
+      model_version: asString(tRow.model_version),
+    };
 
-    const memberRows = db
-      .prepare(
-        `SELECT dt.document_id AS document_id,
-                dt.probability  AS probability,
-                d.title         AS title,
-                d.date          AS date
-           FROM document_topics dt
-           JOIN documents d ON d.id = dt.document_id
-          WHERE dt.topic_id = ?
-          ORDER BY dt.probability DESC, dt.document_id ASC
-          LIMIT ?`,
-      )
-      .all(id, limit) as TopicMemberRow[];
+    const memberResult = await db.execute({
+      sql: `SELECT dt.document_id AS document_id,
+                   dt.probability  AS probability,
+                   d.title         AS title,
+                   d.date          AS date
+              FROM document_topics dt
+              JOIN documents d ON d.id = dt.document_id
+             WHERE dt.topic_id = ?
+             ORDER BY dt.probability DESC, dt.document_id ASC
+             LIMIT ?`,
+      args: [id, limit],
+    });
+    const memberRows: TopicMemberRow[] = memberResult.rows.map((m) => ({
+      document_id: asString(m.document_id),
+      probability: asNumber(m.probability),
+      title: asString(m.title),
+      date: asString(m.date),
+    }));
 
     const members: TopicMember[] = memberRows.map((m) => ({
       documentId: m.document_id,

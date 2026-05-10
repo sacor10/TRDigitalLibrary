@@ -1,8 +1,6 @@
-import type { Database as DatabaseT } from 'better-sqlite3';
-
 import { DocumentSchema, type Document } from '@tr/shared';
 
-import { upsertDocument, type ProvenanceContext } from '../db.js';
+import { upsertDocument, type LibsqlClient, type ProvenanceContext } from '../db.js';
 
 export const LOC_COLLECTION_SLUG = 'theodore-roosevelt-papers';
 export const LOC_SOURCE = 'Library of Congress Theodore Roosevelt Papers';
@@ -18,7 +16,7 @@ type JsonObject = Record<string, unknown>;
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface LocIngestOptions {
-  db: DatabaseT | null;
+  db: LibsqlClient | null;
   dryRun?: boolean;
   reset?: boolean;
   limit?: number;
@@ -385,19 +383,22 @@ async function fetchItem(fetchImpl: FetchLike, result: JsonObject): Promise<Json
   return item;
 }
 
-export function resetLibraryCorpus(db: DatabaseT): void {
-  db.transaction(() => {
-    db.prepare('DELETE FROM topic_drift').run();
-    db.prepare('DELETE FROM document_topics').run();
-    db.prepare('DELETE FROM topics').run();
-    db.prepare('DELETE FROM document_sentiment').run();
-    db.prepare('DELETE FROM document_field_provenance_history').run();
-    db.prepare('DELETE FROM document_field_provenance').run();
-    db.prepare('DELETE FROM document_sections').run();
-    db.prepare('DELETE FROM documents').run();
-    db.prepare("INSERT INTO documents_fts(documents_fts) VALUES ('rebuild')").run();
-    db.prepare("INSERT INTO sections_fts(sections_fts) VALUES ('rebuild')").run();
-  })();
+export async function resetLibraryCorpus(db: LibsqlClient): Promise<void> {
+  await db.batch(
+    [
+      'DELETE FROM topic_drift',
+      'DELETE FROM document_topics',
+      'DELETE FROM topics',
+      'DELETE FROM document_sentiment',
+      'DELETE FROM document_field_provenance_history',
+      'DELETE FROM document_field_provenance',
+      'DELETE FROM document_sections',
+      'DELETE FROM documents',
+      "INSERT INTO documents_fts(documents_fts) VALUES ('rebuild')",
+      "INSERT INTO sections_fts(sections_fts) VALUES ('rebuild')",
+    ],
+    'write',
+  );
 }
 
 export async function ingestLocCollection(options: LocIngestOptions): Promise<LocIngestReport> {
@@ -414,7 +415,7 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
   }
 
   if (!dryRun && options.reset && options.db) {
-    resetLibraryCorpus(options.db);
+    await resetLibraryCorpus(options.db);
     logger.log('Reset existing corpus rows.');
   } else if (dryRun && options.reset) {
     logger.log('Dry run: reset requested, but no database rows were changed.');
@@ -474,7 +475,7 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
             fetchedAt: now().toISOString(),
             editor,
           };
-          upsertDocument(options.db, document, ctx);
+          await upsertDocument(options.db, document, ctx);
           report.written += 1;
         }
 

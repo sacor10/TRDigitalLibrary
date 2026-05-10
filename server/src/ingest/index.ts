@@ -1,11 +1,14 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-import type { Database as DatabaseT } from 'better-sqlite3';
-
 import type { DocumentType } from '@tr/shared';
 
-import { replaceSections, upsertDocument, type ProvenanceContext } from '../db.js';
+import {
+  replaceSections,
+  upsertDocument,
+  type LibsqlClient,
+  type ProvenanceContext,
+} from '../db.js';
 
 import { parseTei } from './tei-parser.js';
 import { validateTei } from './tei-validator.js';
@@ -55,11 +58,11 @@ function listXmlFiles(folder: string, recursive: boolean): string[] {
   return out;
 }
 
-export function ingestTeiFolder(
+export async function ingestTeiFolder(
   folder: string,
-  db: DatabaseT | null,
+  db: LibsqlClient | null,
   options: IngestOptions = {},
-): IngestReport {
+): Promise<IngestReport> {
   const files = listXmlFiles(folder, options.recursive ?? false);
   const report: IngestReport = {
     scanned: files.length,
@@ -115,11 +118,12 @@ export function ingestTeiFolder(
           fetchedAt: statSync(file).mtime.toISOString(),
           editor: options.editor ?? 'tei-ingest',
         };
-        const tx = db.transaction(() => {
-          upsertDocument(db, transformed.document, ctx);
-          replaceSections(db, transformed.document.id, transformed.sections);
-        });
-        tx();
+        // upsertDocument and replaceSections each open their own write batch.
+        // Running them sequentially is correct: per-document atomicity is
+        // sufficient for re-ingest because the documents.id PK gates the row,
+        // and replaceSections is itself atomic (DELETE + INSERT in one batch).
+        await upsertDocument(db, transformed.document, ctx);
+        await replaceSections(db, transformed.document.id, transformed.sections);
         report.written += 1;
       }
     } catch (err) {

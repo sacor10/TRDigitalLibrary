@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 
 import { DocumentTypeSchema, type DocumentType } from '@tr/shared';
 
-import { openDatabase } from './db.js';
+import { openLibraryDb, type LibsqlClient } from './db.js';
 import { ingestTeiFolder, type IngestReport } from './ingest/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -117,10 +117,10 @@ function printReport(report: IngestReport, dryRun: boolean): void {
 async function main(): Promise<void> {
   const opts = parseCliArgs(process.argv.slice(2));
 
-  let db = null;
+  let db: LibsqlClient | null = null;
   if (!opts.dryRun) {
     mkdirSync(dirname(opts.dbPath), { recursive: true });
-    db = openDatabase(opts.dbPath);
+    db = await openLibraryDb({ url: `file:${opts.dbPath}` });
   }
 
   try {
@@ -131,7 +131,7 @@ async function main(): Promise<void> {
     };
     if (opts.defaultSource) ingestOpts.defaultSource = opts.defaultSource;
     if (opts.editor) ingestOpts.editor = opts.editor;
-    const report = ingestTeiFolder(opts.folder, db, ingestOpts);
+    const report = await ingestTeiFolder(opts.folder, db, ingestOpts);
 
     printReport(report, opts.dryRun);
     process.exit(report.invalid > 0 ? 1 : 0);

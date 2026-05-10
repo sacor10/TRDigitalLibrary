@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { openDatabase } from './db.js';
+import { openLibraryDb, type LibsqlClient } from './db.js';
 import { ingestLocCollection, type LocIngestReport } from './sources/loc.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -95,10 +95,15 @@ function printReport(report: LocIngestReport): void {
 
 async function main(): Promise<void> {
   const opts = parseCliArgs(process.argv.slice(2));
-  let db = null;
+  let db: LibsqlClient | null = null;
   if (!opts.dryRun) {
     mkdirSync(dirname(opts.dbPath), { recursive: true });
-    db = openDatabase(opts.dbPath);
+    // The CLI's --db flag stays a path for backwards compatibility with the
+    // pre-Turso workflow; route it through openLibraryDb as a file: URL so
+    // local-dev devs without Turso credentials keep working unchanged. Setting
+    // TURSO_LIBRARY_DATABASE_URL still wins because openLibraryDb prefers
+    // explicit opts.url over its env-var fallback chain.
+    db = await openLibraryDb({ url: `file:${opts.dbPath}` });
   }
 
   try {
@@ -114,8 +119,6 @@ async function main(): Promise<void> {
     printReport(report);
     process.exit(report.failed > 0 ? 1 : 0);
   } finally {
-    db?.pragma('wal_checkpoint(TRUNCATE)');
-    db?.pragma('journal_mode = DELETE');
     db?.close();
   }
 }

@@ -1,24 +1,23 @@
 import request from 'supertest';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
-import type { Database as DatabaseT } from 'better-sqlite3';
 
 import { DocumentSchema, type Document } from '@tr/shared';
 
 import { createApp } from '../app.js';
-import { openInMemoryDatabase, upsertDocument } from '../db.js';
+import { openInMemoryDatabase, upsertDocument, type LibsqlClient } from '../db.js';
 import { cloneTestDocuments, TEST_DOCUMENTS } from './fixtures/documents.js';
 
 describe('TR Digital Library API', () => {
-  let db: DatabaseT;
+  let db: LibsqlClient;
   let app: ReturnType<typeof createApp>;
 
-  beforeAll(() => {
-    db = openInMemoryDatabase();
+  beforeAll(async () => {
+    db = await openInMemoryDatabase();
     const fixtureDocs = cloneTestDocuments();
     // Inject deterministic transcription stubs so FTS tests don't need network access.
     // The token "alpenglow" is unique and lets us reliably exercise the highlighter.
     for (const doc of fixtureDocs) {
-      upsertDocument(db, {
+      await upsertDocument(db, {
         ...doc,
         transcription: `Stub content for ${doc.title}. unique-token-alpenglow ${doc.id}.`,
       });
@@ -44,7 +43,6 @@ describe('TR Digital Library API', () => {
       expect(res.status).toBe(200);
       expect(res.body.total).toBe(TEST_DOCUMENTS.length);
       expect(res.body.items).toHaveLength(TEST_DOCUMENTS.length);
-      // every item validates against the shared schema
       for (const item of res.body.items) {
         expect(() => DocumentSchema.parse(item)).not.toThrow();
       }
@@ -89,7 +87,7 @@ describe('TR Digital Library API', () => {
 
     it('round-trips iiifManifestUrl through the database', async () => {
       const manifest = 'https://iiif.archive.org/iiif/3/theroughriders00roosrich/manifest.json';
-      upsertDocument(db, {
+      await upsertDocument(db, {
         ...TEST_DOCUMENTS[0]!,
         id: 'iiif-fixture',
         iiifManifestUrl: manifest,
@@ -159,9 +157,9 @@ describe('TR Digital Library API', () => {
     const fetchedAt = '2024-01-15T10:30:00.000Z';
     const sourceUrl = 'https://example.org/source';
 
-    beforeAll(() => {
+    beforeAll(async () => {
       const fixture = TEST_DOCUMENTS[0]!;
-      upsertDocument(
+      await upsertDocument(
         db,
         { ...fixture, id: fixtureId, transcription: 'original transcription text' },
         { sourceUrl, fetchedAt, editor: 'loc-ingest' },
@@ -228,31 +226,25 @@ describe('TR Digital Library API', () => {
       expect(res.body.fieldProvenance.title.editor).toBe('loc-ingest');
       expect(() => DocumentSchema.parse(res.body)).not.toThrow();
 
-      const historyRows = db
-        .prepare(
-          `SELECT field, previous_value, new_value, editor
-           FROM document_field_provenance_history
-           WHERE document_id = ? AND field = 'location'
-           ORDER BY recorded_at DESC`,
-        )
-        .all(fixtureId) as Array<{
-        field: string;
-        previous_value: string;
-        new_value: string;
-        editor: string;
-      }>;
-      expect(historyRows.length).toBeGreaterThanOrEqual(1);
-      const latest = historyRows[0]!;
-      expect(latest.editor).toBe(editor);
-      expect(JSON.parse(latest.new_value)).toBe('Sorbonne, Paris');
+      const historyResult = await db.execute({
+        sql: `SELECT field, previous_value, new_value, editor
+              FROM document_field_provenance_history
+              WHERE document_id = ? AND field = 'location'
+              ORDER BY recorded_at DESC`,
+        args: [fixtureId],
+      });
+      expect(historyResult.rows.length).toBeGreaterThanOrEqual(1);
+      const latest = historyResult.rows[0]!;
+      expect(String(latest.editor)).toBe(editor);
+      expect(JSON.parse(String(latest.new_value))).toBe('Sorbonne, Paris');
     });
 
     it('does not append history when the value is unchanged', async () => {
-      const beforeRows = db
-        .prepare(
-          'SELECT COUNT(*) AS c FROM document_field_provenance_history WHERE document_id = ? AND field = ?',
-        )
-        .get(fixtureId, 'location') as { c: number };
+      const beforeResult = await db.execute({
+        sql: 'SELECT COUNT(*) AS c FROM document_field_provenance_history WHERE document_id = ? AND field = ?',
+        args: [fixtureId, 'location'],
+      });
+      const beforeCount = Number(beforeResult.rows[0]?.c ?? 0);
 
       const res = await request(app)
         .patch(`/api/documents/${fixtureId}`)
@@ -260,12 +252,12 @@ describe('TR Digital Library API', () => {
         .send({ location: 'Sorbonne, Paris' });
       expect(res.status).toBe(200);
 
-      const afterRows = db
-        .prepare(
-          'SELECT COUNT(*) AS c FROM document_field_provenance_history WHERE document_id = ? AND field = ?',
-        )
-        .get(fixtureId, 'location') as { c: number };
-      expect(afterRows.c).toBe(beforeRows.c);
+      const afterResult = await db.execute({
+        sql: 'SELECT COUNT(*) AS c FROM document_field_provenance_history WHERE document_id = ? AND field = ?',
+        args: [fixtureId, 'location'],
+      });
+      const afterCount = Number(afterResult.rows[0]?.c ?? 0);
+      expect(afterCount).toBe(beforeCount);
     });
   });
 });

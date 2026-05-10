@@ -1,17 +1,16 @@
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Database as DatabaseT } from 'better-sqlite3';
 
-import { openAnnotationsDb, type LibsqlClient } from '../annotations-db.js';
+import { openAnnotationsDb, type LibsqlClient as AnnotationsClient } from '../annotations-db.js';
 import { createApp } from '../app.js';
 import type { GoogleVerifier } from '../auth/google.js';
-import { openInMemoryDatabase } from '../db.js';
+import { openInMemoryDatabase, type LibsqlClient } from '../db.js';
 
 const TEST_SESSION_SECRET = 'test-secret-deterministic';
 
 describe('Auth API', () => {
-  let db: DatabaseT;
-  let annotationsDb: LibsqlClient;
+  let db: LibsqlClient;
+  let annotationsDb: AnnotationsClient;
   let app: ReturnType<typeof createApp>;
 
   const stubProfile = {
@@ -26,7 +25,7 @@ describe('Auth API', () => {
   };
 
   beforeAll(async () => {
-    db = openInMemoryDatabase();
+    db = await openInMemoryDatabase();
     annotationsDb = await openAnnotationsDb({ url: ':memory:' });
     app = createApp(db, {
       annotationsDb,
@@ -98,11 +97,11 @@ describe('Auth API', () => {
 });
 
 describe('Auth API when auth is not configured', () => {
-  let db: DatabaseT;
+  let db: LibsqlClient;
   let app: ReturnType<typeof createApp>;
 
-  beforeAll(() => {
-    db = openInMemoryDatabase();
+  beforeAll(async () => {
+    db = await openInMemoryDatabase();
     app = createApp(db);
   });
 

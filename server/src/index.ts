@@ -1,12 +1,12 @@
 import { openAnnotationsDb } from './annotations-db.js';
 import { createApp } from './app.js';
 import { createGoogleVerifier } from './auth/google.js';
-import { openDatabase } from './db.js';
+import { openLibraryDb } from './db.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 
 async function main(): Promise<void> {
-  const db = openDatabase();
+  const db = await openLibraryDb();
 
   const annotationsDb = await openAnnotationsDb();
   const sessionSecret =

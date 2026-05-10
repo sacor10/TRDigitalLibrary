@@ -6,10 +6,14 @@ import JSZip from 'jszip';
 import request from 'supertest';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { XMLParser } from 'fast-xml-parser';
-import type { Database as DatabaseT } from 'better-sqlite3';
 
 import { createApp } from '../app.js';
-import { openInMemoryDatabase, replaceSections, upsertDocument } from '../db.js';
+import {
+  openInMemoryDatabase,
+  replaceSections,
+  upsertDocument,
+  type LibsqlClient,
+} from '../db.js';
 import { parseTei } from '../ingest/tei-parser.js';
 import { transformToDocument } from '../ingest/tei-transformer.js';
 import { cloneTestDocuments } from './fixtures/documents.js';
@@ -21,22 +25,21 @@ function fixturePath(name: string): string {
 }
 
 describe('Multi-format exports', () => {
-  let db: DatabaseT;
+  let db: LibsqlClient;
   let app: ReturnType<typeof createApp>;
   const fixtureDocs = cloneTestDocuments();
   const plainTextDoc = fixtureDocs[0]!; // man-in-the-arena, no teiXml
   let teiSourceXml: string;
   let teiDocId: string;
 
-  beforeAll(() => {
-    db = openInMemoryDatabase();
+  beforeAll(async () => {
+    db = await openInMemoryDatabase();
     for (const doc of fixtureDocs) {
-      upsertDocument(db, {
+      await upsertDocument(db, {
         ...doc,
         transcription: `Stub paragraph one for ${doc.title}.\n\nStub paragraph two with detail.`,
       });
     }
-    // Ingest a TEI fixture so we can exercise the passthrough + section-rendering paths.
     const fixtureFile = fixturePath('letter-valid.xml');
     teiSourceXml = readFileSync(fixtureFile, 'utf8');
     const parsed = parseTei(teiSourceXml);
@@ -44,8 +47,8 @@ describe('Multi-format exports', () => {
       filename: fixtureFile,
       rawXml: teiSourceXml,
     });
-    upsertDocument(db, transformed.document);
-    replaceSections(db, transformed.document.id, transformed.sections);
+    await upsertDocument(db, transformed.document);
+    await replaceSections(db, transformed.document.id, transformed.sections);
     teiDocId = transformed.document.id;
     app = createApp(db);
   });
@@ -217,7 +220,7 @@ describe('Multi-format exports', () => {
     it('404 for unsupported extension', async () => {
       // Ensure the document exists; it's the extension that's bad.
       // Use a fixture that we know exists:
-      replaceSections(db, plainTextDoc.id, []);
+      await replaceSections(db, plainTextDoc.id, []);
       const res = await request(app).get(
         `/api/documents/${plainTextDoc.id}/export.docx`,
       );

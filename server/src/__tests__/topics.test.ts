@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
-import type { Database as DatabaseT } from 'better-sqlite3';
+import type { InStatement } from '@libsql/client';
 
 import {
   TopicDetailResponseSchema,
@@ -10,7 +10,7 @@ import {
 } from '@tr/shared';
 
 import { createApp } from '../app.js';
-import { openInMemoryDatabase, upsertDocument } from '../db.js';
+import { openInMemoryDatabase, upsertDocument, type LibsqlClient } from '../db.js';
 
 interface FixtureDoc {
   id: string;
@@ -103,16 +103,8 @@ const TOPIC_SEEDS: TopicSeed[] = [
   },
 ];
 
-function seedTopics(db: DatabaseT): void {
-  const insertTopic = db.prepare(
-    'INSERT INTO topics (id, label, keywords, size, computed_at, model_version) VALUES (?, ?, ?, ?, ?, ?)',
-  );
-  const insertDocTopic = db.prepare(
-    'INSERT INTO document_topics (document_id, topic_id, probability) VALUES (?, ?, ?)',
-  );
-  const insertDrift = db.prepare(
-    'INSERT INTO topic_drift (topic_id, period, document_count, share) VALUES (?, ?, ?, ?)',
-  );
+async function seedTopics(db: LibsqlClient): Promise<void> {
+  const stmts: InStatement[] = [];
 
   // Total docs per period across all topics (deduplicated by document).
   const docsPerPeriod = new Map<string, Set<string>>();
@@ -126,48 +118,55 @@ function seedTopics(db: DatabaseT): void {
     }
   }
 
-  const tx = db.transaction(() => {
-    for (const seed of TOPIC_SEEDS) {
-      insertTopic.run(
+  for (const seed of TOPIC_SEEDS) {
+    stmts.push({
+      sql: 'INSERT INTO topics (id, label, keywords, size, computed_at, model_version) VALUES (?, ?, ?, ?, ?, ?)',
+      args: [
         seed.id,
         seed.label,
         JSON.stringify(seed.keywords),
         seed.members.length,
         COMPUTED_AT,
         MODEL_VERSION,
-      );
-      for (const m of seed.members) {
-        insertDocTopic.run(m.documentId, seed.id, m.probability);
-      }
-
-      // drift = (docs in topic for that period) / (total docs in any topic for that period)
-      const perTopicPeriodCounts = new Map<string, number>();
-      for (const m of seed.members) {
-        const fixture = DOCS.find((d) => d.id === m.documentId);
-        if (!fixture) continue;
-        const period = fixture.date.slice(0, 4);
-        perTopicPeriodCounts.set(period, (perTopicPeriodCounts.get(period) ?? 0) + 1);
-      }
-      for (const [period, count] of perTopicPeriodCounts) {
-        const totalForPeriod = docsPerPeriod.get(period)?.size ?? 0;
-        const share = totalForPeriod > 0 ? count / totalForPeriod : 0;
-        insertDrift.run(seed.id, period, count, share);
-      }
+      ],
+    });
+    for (const m of seed.members) {
+      stmts.push({
+        sql: 'INSERT INTO document_topics (document_id, topic_id, probability) VALUES (?, ?, ?)',
+        args: [m.documentId, seed.id, m.probability],
+      });
     }
-  });
-  tx();
+    // drift = (docs in topic for that period) / (total docs in any topic for that period)
+    const perTopicPeriodCounts = new Map<string, number>();
+    for (const m of seed.members) {
+      const fixture = DOCS.find((d) => d.id === m.documentId);
+      if (!fixture) continue;
+      const period = fixture.date.slice(0, 4);
+      perTopicPeriodCounts.set(period, (perTopicPeriodCounts.get(period) ?? 0) + 1);
+    }
+    for (const [period, count] of perTopicPeriodCounts) {
+      const totalForPeriod = docsPerPeriod.get(period)?.size ?? 0;
+      const share = totalForPeriod > 0 ? count / totalForPeriod : 0;
+      stmts.push({
+        sql: 'INSERT INTO topic_drift (topic_id, period, document_count, share) VALUES (?, ?, ?, ?)',
+        args: [seed.id, period, count, share],
+      });
+    }
+  }
+
+  await db.batch(stmts, 'write');
 }
 
 describe('Topics API', () => {
-  let db: DatabaseT;
+  let db: LibsqlClient;
   let app: ReturnType<typeof createApp>;
 
-  beforeAll(() => {
-    db = openInMemoryDatabase();
+  beforeAll(async () => {
+    db = await openInMemoryDatabase();
     for (const fixture of DOCS) {
-      upsertDocument(db, baseDoc(fixture));
+      await upsertDocument(db, baseDoc(fixture));
     }
-    seedTopics(db);
+    await seedTopics(db);
     app = createApp(db);
   });
 

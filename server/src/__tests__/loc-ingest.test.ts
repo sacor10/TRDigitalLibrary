@@ -1,11 +1,10 @@
 import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Database as DatabaseT } from 'better-sqlite3';
 
 import { DocumentSchema } from '@tr/shared';
 
 import { createApp } from '../app.js';
-import { openInMemoryDatabase } from '../db.js';
+import { openInMemoryDatabase, type LibsqlClient } from '../db.js';
 import {
   ingestLocCollection,
   mapLocItemToDocument,
@@ -93,7 +92,7 @@ const silentLogger = {
 };
 
 describe('LoC ingestion', () => {
-  let db: DatabaseT | null = null;
+  let db: LibsqlClient | null = null;
 
   afterEach(() => {
     db?.close();
@@ -122,7 +121,7 @@ describe('LoC ingestion', () => {
   });
 
   it('does not write rows during dry run', async () => {
-    db = openInMemoryDatabase();
+    db = await openInMemoryDatabase();
     const report = await ingestLocCollection({
       db,
       dryRun: true,
@@ -134,12 +133,12 @@ describe('LoC ingestion', () => {
     expect(report.scanned).toBe(1);
     expect(report.mapped).toBe(1);
     expect(report.written).toBe(0);
-    const count = db.prepare('SELECT COUNT(*) AS c FROM documents').get() as { c: number };
-    expect(count.c).toBe(0);
+    const result = await db.execute('SELECT COUNT(*) AS c FROM documents');
+    expect(Number(result.rows[0]?.c ?? 0)).toBe(0);
   });
 
   it('ingests LoC text into the existing document and FTS search APIs', async () => {
-    db = openInMemoryDatabase();
+    db = await openInMemoryDatabase();
     const report = await ingestLocCollection({
       db,
       limit: 1,

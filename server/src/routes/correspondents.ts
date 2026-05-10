@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import type { Database as DatabaseT } from 'better-sqlite3';
 
 import type {
   CorrespondentEdge,
@@ -7,6 +6,8 @@ import type {
   CorrespondentLetter,
   CorrespondentNode,
 } from '@tr/shared';
+
+import type { LibsqlClient } from '../db.js';
 
 const TR_NODE_ID = 'theodore-roosevelt';
 const TR_NODE_LABEL = 'Theodore Roosevelt';
@@ -34,18 +35,31 @@ function normalizeName(raw: string): string | null {
   return trimmed;
 }
 
-export function createCorrespondentsRouter(db: DatabaseT): Router {
+function asString(v: unknown): string {
+  return v == null ? '' : String(v);
+}
+
+function asNullableString(v: unknown): string | null {
+  return v == null ? null : String(v);
+}
+
+export function createCorrespondentsRouter(db: LibsqlClient): Router {
   const router = Router();
 
-  router.get('/graph', (_req, res) => {
-    const rows = db
-      .prepare(
-        `SELECT id, title, date, recipient, mentions
+  router.get('/graph', async (_req, res) => {
+    const result = await db.execute(
+      `SELECT id, title, date, recipient, mentions
          FROM documents
          WHERE type = 'letter'
          ORDER BY date ASC`,
-      )
-      .all() as LetterRow[];
+    );
+    const rows: LetterRow[] = result.rows.map((row) => ({
+      id: asString(row.id),
+      title: asString(row.title),
+      date: asString(row.date),
+      recipient: asNullableString(row.recipient),
+      mentions: asString(row.mentions),
+    }));
 
     const nodes = new Map<string, CorrespondentNode>();
     const edges = new Map<string, CorrespondentEdge>();

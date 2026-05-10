@@ -4,9 +4,9 @@ import express from 'express';
 import type { Express } from 'express';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import type { Database as DatabaseT } from 'better-sqlite3';
 
-import type { LibsqlClient } from './annotations-db.js';
+import type { LibsqlClient as AnnotationsClient } from './annotations-db.js';
+import type { LibsqlClient } from './db.js';
 import type { GoogleVerifier } from './auth/google.js';
 import { loadUser } from './middleware/requireUser.js';
 import { buildOpenApiDocument } from './openapi.js';
@@ -24,12 +24,12 @@ import { createTopicsRouter } from './routes/topics.js';
 export interface CreateAppOptions {
   readonly?: boolean;
   corsOrigins?: string[];
-  annotationsDb?: LibsqlClient;
+  annotationsDb?: AnnotationsClient;
   verifyGoogleIdToken?: GoogleVerifier;
   sessionSecret?: string;
 }
 
-export function createApp(db: DatabaseT, opts: CreateAppOptions = {}): Express {
+export function createApp(db: LibsqlClient, opts: CreateAppOptions = {}): Express {
   const app = express();
 
   app.use(helmet());
