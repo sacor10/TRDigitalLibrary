@@ -13,6 +13,7 @@ const TYPE_COLORS: Record<Document['type'], string> = {
   diary: 'fill-emerald-500',
   article: 'fill-purple-500',
   autobiography: 'fill-rose-500',
+  manuscript: 'fill-amber-500',
 };
 
 interface Plotted {

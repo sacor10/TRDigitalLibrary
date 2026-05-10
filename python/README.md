@@ -42,14 +42,14 @@ The script:
 
 | Corpus | Docs | Wall time (CPU) |
 |--------|------|-----------------|
-| POC (current `npm run seed`) | 8 | ~10 s |
+| LoC pilot (`npm run ingest-loc -- --limit 25`) | 25 | ~10-30 s |
 | Full Morison/Blum letters | ~150,000 | 1–3 hr |
 
 GPU embedding gets the latter under 15 min if it ever matters.
 
 ## POC corpus caveat
 
-BERTopic's HDBSCAN backend will not form clusters smaller than `min_cluster_size=10`. The seeded POC corpus has 8 documents — the script automatically lowers the threshold so the pipeline runs end to end, but expect **<= 1 real topic** on this corpus. The README acceptance target of 30–60 themes assumes the full ~150k Morison corpus.
+BERTopic's HDBSCAN backend will not form clusters smaller than `min_cluster_size=10`. A small LoC pilot corpus may still be too small for stable themes — the script automatically lowers the threshold so the pipeline runs end to end, but expect sparse topics until the corpus grows. The README acceptance target of 30–60 themes assumes the full ~150k Morison corpus.
 
 ## Verification
 
@@ -61,4 +61,4 @@ sqlite3 data/library.db "SELECT topic_id, period, document_count, share FROM top
 curl http://localhost:3001/api/topics
 ```
 
-The drift acceptance check (per `docs/topic-modeling.md`): a topic populated only with post-1900 letters has `share = 0` for every pre-1900 period. The integration test `server/src/__tests__/topics.test.ts` verifies this with seeded fixtures so it passes regardless of the live corpus.
+The drift acceptance check (per `docs/topic-modeling.md`): a topic populated only with post-1900 letters has `share = 0` for every pre-1900 period. The integration test `server/src/__tests__/topics.test.ts` verifies this with local fixtures so it passes regardless of the live corpus.

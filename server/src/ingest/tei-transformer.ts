@@ -42,6 +42,7 @@ const GENRE_TO_TYPE: Record<string, DocumentType> = {
   essay: 'article',
   autobiography: 'autobiography',
   memoir: 'autobiography',
+  manuscript: 'manuscript',
 };
 
 function inferType(metadata: TeiMetadata, fallback: DocumentType): DocumentType {

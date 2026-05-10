@@ -1,7 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Database as DatabaseT } from 'better-sqlite3';
@@ -10,24 +6,15 @@ import {
   ANNOTATION_JSONLD_CONTEXT,
   AnnotationCollectionSchema,
   AnnotationSchema,
-  DocumentSchema,
   type Annotation,
   type AnnotationCreateInput,
-  type Document,
 } from '@tr/shared';
 
 import { openAnnotationsDb, type LibsqlClient } from '../annotations-db.js';
 import { createApp } from '../app.js';
 import type { GoogleVerifier } from '../auth/google.js';
 import { openInMemoryDatabase, upsertDocument } from '../db.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-function loadSeed(): Document[] {
-  const seedPath = join(__dirname, '..', '..', '..', 'data', 'seed.json');
-  const raw = JSON.parse(readFileSync(seedPath, 'utf8')) as unknown;
-  return DocumentSchema.array().parse(raw);
-}
+import { cloneTestDocuments } from './fixtures/documents.js';
 
 const baseInput: AnnotationCreateInput = {
   documentId: 'man-in-the-arena',
@@ -65,7 +52,7 @@ describe('Annotations API', () => {
 
   beforeAll(async () => {
     db = openInMemoryDatabase();
-    for (const doc of loadSeed()) {
+    for (const doc of cloneTestDocuments()) {
       upsertDocument(db, { ...doc, transcription: `Stub for ${doc.title}` });
     }
     annotationsDb = await openAnnotationsDb({ url: ':memory:' });

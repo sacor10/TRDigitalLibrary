@@ -62,7 +62,7 @@ def model_version() -> str:
 def load_corpus(db_path: Path) -> list[dict[str, str]]:
     if not db_path.exists():
         raise SystemExit(
-            f"[topic-model] Database not found at {db_path}. Run `npm run seed` first."
+            f"[topic-model] Database not found at {db_path}. Run `npm run ingest-loc -- --limit 25` first."
         )
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
@@ -278,7 +278,7 @@ def main() -> int:
     if not docs:
         print(
             "[topic-model] No transcribed documents found. "
-            "Re-run `npm run seed` from a connected environment, then retry."
+            "Run `npm run ingest-loc -- --limit 25` from a connected environment, then retry."
         )
         return 1
 

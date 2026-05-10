@@ -8,20 +8,13 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { XMLParser } from 'fast-xml-parser';
 import type { Database as DatabaseT } from 'better-sqlite3';
 
-import { DocumentSchema, type Document } from '@tr/shared';
-
 import { createApp } from '../app.js';
 import { openInMemoryDatabase, replaceSections, upsertDocument } from '../db.js';
 import { parseTei } from '../ingest/tei-parser.js';
 import { transformToDocument } from '../ingest/tei-transformer.js';
+import { cloneTestDocuments } from './fixtures/documents.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-function loadSeedDocs(): Document[] {
-  const seedPath = join(__dirname, '..', '..', '..', 'data', 'seed.json');
-  const raw = JSON.parse(readFileSync(seedPath, 'utf8')) as unknown;
-  return DocumentSchema.array().parse(raw);
-}
 
 function fixturePath(name: string): string {
   return join(__dirname, '..', 'ingest', '__tests__', 'fixtures', name);
@@ -30,14 +23,14 @@ function fixturePath(name: string): string {
 describe('Multi-format exports', () => {
   let db: DatabaseT;
   let app: ReturnType<typeof createApp>;
-  const seedDocs = loadSeedDocs();
-  const seededDoc = seedDocs[0]!; // man-in-the-arena, no teiXml
+  const fixtureDocs = cloneTestDocuments();
+  const plainTextDoc = fixtureDocs[0]!; // man-in-the-arena, no teiXml
   let teiSourceXml: string;
   let teiDocId: string;
 
   beforeAll(() => {
     db = openInMemoryDatabase();
-    for (const doc of seedDocs) {
+    for (const doc of fixtureDocs) {
       upsertDocument(db, {
         ...doc,
         transcription: `Stub paragraph one for ${doc.title}.\n\nStub paragraph two with detail.`,
@@ -64,7 +57,7 @@ describe('Multi-format exports', () => {
   describe('GET /api/documents/:id/export.pdf', () => {
     it('returns a PDF with the magic header and attachment headers', async () => {
       const res = await request(app)
-        .get(`/api/documents/${seededDoc.id}/export.pdf`)
+        .get(`/api/documents/${plainTextDoc.id}/export.pdf`)
         .buffer(true)
         .parse((response, callback) => {
           const chunks: Buffer[] = [];
@@ -103,7 +96,7 @@ describe('Multi-format exports', () => {
   describe('GET /api/documents/:id/export.epub', () => {
     it('returns a structurally valid EPUB 3 zip', async () => {
       const res = await request(app)
-        .get(`/api/documents/${seededDoc.id}/export.epub`)
+        .get(`/api/documents/${plainTextDoc.id}/export.epub`)
         .buffer(true)
         .parse((response, callback) => {
           const chunks: Buffer[] = [];
@@ -142,15 +135,15 @@ describe('Multi-format exports', () => {
           };
         };
       };
-      expect(opf.package.metadata['dc:title']).toBe(seededDoc.title);
-      expect(opf.package.metadata['dc:creator']).toBe(seededDoc.author);
-      expect(opf.package.metadata['dc:date']).toBe(seededDoc.date);
+      expect(opf.package.metadata['dc:title']).toBe(plainTextDoc.title);
+      expect(opf.package.metadata['dc:creator']).toBe(plainTextDoc.author);
+      expect(opf.package.metadata['dc:date']).toBe(plainTextDoc.date);
       expect(opf.package.metadata['dc:language']).toBe('en');
 
       // Content xhtml is well-formed and includes the title
       const docXhtml = await zip.file('OEBPS/document.xhtml')!.async('string');
       expect(docXhtml).toContain('<?xml version="1.0"');
-      expect(docXhtml).toContain(seededDoc.title);
+      expect(docXhtml).toContain(plainTextDoc.title);
 
       // Nav is present and marks itself as nav
       const navXhtml = await zip.file('OEBPS/nav.xhtml')!.async('string');
@@ -183,7 +176,7 @@ describe('Multi-format exports', () => {
     });
 
     it('synthesizes a P5-shaped TEI when the document has no tei_xml', async () => {
-      const res = await request(app).get(`/api/documents/${seededDoc.id}/export.xml`);
+      const res = await request(app).get(`/api/documents/${plainTextDoc.id}/export.xml`);
       expect(res.status).toBe(200);
       const xml = res.text;
       expect(xml.startsWith('<?xml')).toBe(true);
@@ -203,12 +196,12 @@ describe('Multi-format exports', () => {
         };
       };
       expect(tree.TEI.xmlns).toBe('http://www.tei-c.org/ns/1.0');
-      expect(tree.TEI.teiHeader.fileDesc.titleStmt.title).toBe(seededDoc.title);
-      expect(tree.TEI.teiHeader.fileDesc.titleStmt.author).toBe(seededDoc.author);
+      expect(tree.TEI.teiHeader.fileDesc.titleStmt.title).toBe(plainTextDoc.title);
+      expect(tree.TEI.teiHeader.fileDesc.titleStmt.author).toBe(plainTextDoc.author);
       expect(tree.TEI.teiHeader.fileDesc.publicationStmt.publisher).toBe(
         'TR Digital Library',
       );
-      expect(tree.TEI.teiHeader.fileDesc.sourceDesc.bibl.title).toBe(seededDoc.source);
+      expect(tree.TEI.teiHeader.fileDesc.sourceDesc.bibl.title).toBe(plainTextDoc.source);
       // Body has at least one paragraph
       const paras = tree.TEI.text.body.p;
       expect(Array.isArray(paras) ? paras.length : paras.length > 0).toBeTruthy();
@@ -224,9 +217,9 @@ describe('Multi-format exports', () => {
     it('404 for unsupported extension', async () => {
       // Ensure the document exists; it's the extension that's bad.
       // Use a fixture that we know exists:
-      replaceSections(db, seededDoc.id, []);
+      replaceSections(db, plainTextDoc.id, []);
       const res = await request(app).get(
-        `/api/documents/${seededDoc.id}/export.docx`,
+        `/api/documents/${plainTextDoc.id}/export.docx`,
       );
       // Express won't match the route at all if the param regex constraint were used,
       // but with a free :ext we return 404 from the handler.

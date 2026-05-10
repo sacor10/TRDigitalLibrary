@@ -8,6 +8,7 @@ const TYPE_LABEL: Record<Document['type'], string> = {
   diary: 'Diary',
   article: 'Memoir / Article',
   autobiography: 'Autobiography',
+  manuscript: 'Manuscript',
 };
 
 interface DocumentListProps {

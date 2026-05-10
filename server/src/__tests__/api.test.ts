@@ -1,7 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
 import request from 'supertest';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import type { Database as DatabaseT } from 'better-sqlite3';
@@ -10,14 +6,7 @@ import { DocumentSchema, type Document } from '@tr/shared';
 
 import { createApp } from '../app.js';
 import { openInMemoryDatabase, upsertDocument } from '../db.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-function loadSeed(): Document[] {
-  const seedPath = join(__dirname, '..', '..', '..', 'data', 'seed.json');
-  const raw = JSON.parse(readFileSync(seedPath, 'utf8')) as unknown;
-  return DocumentSchema.array().parse(raw);
-}
+import { cloneTestDocuments, TEST_DOCUMENTS } from './fixtures/documents.js';
 
 describe('TR Digital Library API', () => {
   let db: DatabaseT;
@@ -25,10 +14,10 @@ describe('TR Digital Library API', () => {
 
   beforeAll(() => {
     db = openInMemoryDatabase();
-    const seedDocs = loadSeed();
+    const fixtureDocs = cloneTestDocuments();
     // Inject deterministic transcription stubs so FTS tests don't need network access.
     // The token "alpenglow" is unique and lets us reliably exercise the highlighter.
-    for (const doc of seedDocs) {
+    for (const doc of fixtureDocs) {
       upsertDocument(db, {
         ...doc,
         transcription: `Stub content for ${doc.title}. unique-token-alpenglow ${doc.id}.`,
@@ -50,11 +39,11 @@ describe('TR Digital Library API', () => {
   });
 
   describe('GET /api/documents', () => {
-    it('lists all seeded documents', async () => {
+    it('lists all documents', async () => {
       const res = await request(app).get('/api/documents');
       expect(res.status).toBe(200);
-      expect(res.body.total).toBe(8);
-      expect(res.body.items).toHaveLength(8);
+      expect(res.body.total).toBe(TEST_DOCUMENTS.length);
+      expect(res.body.items).toHaveLength(TEST_DOCUMENTS.length);
       // every item validates against the shared schema
       for (const item of res.body.items) {
         expect(() => DocumentSchema.parse(item)).not.toThrow();
@@ -101,7 +90,7 @@ describe('TR Digital Library API', () => {
     it('round-trips iiifManifestUrl through the database', async () => {
       const manifest = 'https://iiif.archive.org/iiif/3/theroughriders00roosrich/manifest.json';
       upsertDocument(db, {
-        ...loadSeed()[0]!,
+        ...TEST_DOCUMENTS[0]!,
         id: 'iiif-fixture',
         iiifManifestUrl: manifest,
         transcription: 'fixture',
@@ -171,15 +160,15 @@ describe('TR Digital Library API', () => {
     const sourceUrl = 'https://example.org/source';
 
     beforeAll(() => {
-      const seed = loadSeed()[0]!;
+      const fixture = TEST_DOCUMENTS[0]!;
       upsertDocument(
         db,
-        { ...seed, id: fixtureId, transcription: 'original transcription text' },
-        { sourceUrl, fetchedAt, editor: 'seed' },
+        { ...fixture, id: fixtureId, transcription: 'original transcription text' },
+        { sourceUrl, fetchedAt, editor: 'loc-ingest' },
       );
     });
 
-    it('records origin URL, fetched-at, and editor for every tracked field on seed', async () => {
+    it('records origin URL, fetched-at, and editor for every tracked field on ingest', async () => {
       const res = await request(app).get(`/api/documents/${fixtureId}`);
       expect(res.status).toBe(200);
       expect(res.body.fieldProvenance).toBeDefined();
@@ -195,7 +184,7 @@ describe('TR Digital Library API', () => {
         'tags',
         'iiifManifestUrl',
       ]) {
-        expect(fp[field]).toEqual({ sourceUrl, fetchedAt, editor: 'seed' });
+        expect(fp[field]).toEqual({ sourceUrl, fetchedAt, editor: 'loc-ingest' });
       }
     });
 
@@ -235,8 +224,8 @@ describe('TR Digital Library API', () => {
       expect(res.body.fieldProvenance.location.editor).toBe(editor);
       expect(res.body.fieldProvenance.location.sourceUrl).toBeNull();
       expect(typeof res.body.fieldProvenance.location.fetchedAt).toBe('string');
-      // Untouched fields keep their seed-time provenance.
-      expect(res.body.fieldProvenance.title.editor).toBe('seed');
+      // Untouched fields keep their ingest-time provenance.
+      expect(res.body.fieldProvenance.title.editor).toBe('loc-ingest');
       expect(() => DocumentSchema.parse(res.body)).not.toThrow();
 
       const historyRows = db

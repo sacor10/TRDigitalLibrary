@@ -61,7 +61,7 @@ async function main(): Promise<number> {
 
   const dbPath = process.env.DATABASE_URL ?? join(__dirname, '..', '..', 'data', 'library.db');
   if (!existsSync(dbPath)) {
-    console.error(`[validate-tei] Database not found at ${dbPath}. Run \`npm run seed\` first.`);
+    console.error(`[validate-tei] Database not found at ${dbPath}. Run \`npm run ingest-loc -- --limit 25\` first.`);
     return 2;
   }
   const db = openDatabase(dbPath);

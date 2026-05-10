@@ -14,7 +14,7 @@ export function TimelinePage() {
       <header className="mb-6">
         <h1 className="text-3xl font-semibold">Timeline</h1>
         <p className="text-ink-700 dark:text-parchment-100 mt-1">
-          A chronological view of the seeded documents. Click a marker — or focus it and press
+          A chronological view of imported documents. Click a marker — or focus it and press
           Enter — to open the document.
         </p>
       </header>

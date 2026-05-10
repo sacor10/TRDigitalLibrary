@@ -1,5 +1,5 @@
 [build]
-  command = "npm ci && npm run verify-seed-sources && TR_SEED_STRICT=1 npm run seed && npm run build"
+  command = "npm ci && npm run ingest-loc -- --limit 25 --reset && npm run build"
   publish = "client/dist"
 
 [build.environment]

@@ -42,7 +42,7 @@ export function HomePage() {
         <div className="card">
           <h2 className="text-lg font-semibold">Open</h2>
           <p className="text-sm text-ink-700 dark:text-parchment-100 mt-2">
-            Code is MIT. Content is public-domain TR text fetched at seed time from Wikisource —
+            Code is MIT. Content is public-domain TR text imported from Library of Congress records —
             never re-bundled, always linkable to the canonical record.
           </p>
         </div>

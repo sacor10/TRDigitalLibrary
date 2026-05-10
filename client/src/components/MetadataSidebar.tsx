@@ -26,6 +26,7 @@ const TYPE_LABEL: Record<Document['type'], string> = {
   diary: 'Diary entry',
   article: 'Article / Memoir',
   autobiography: 'Autobiography',
+  manuscript: 'Manuscript',
 };
 
 export function MetadataSidebar({ document }: MetadataSidebarProps) {

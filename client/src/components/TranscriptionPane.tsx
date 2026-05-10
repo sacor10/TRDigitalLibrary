@@ -145,8 +145,8 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
       <article className="max-w-none p-6 rounded-md border border-dashed border-ink-700/20 dark:border-parchment-50/20 space-y-3">
         {import.meta.env.DEV ? (
           <p>
-            No cached transcription is available. This document is seeded from a remote source. Run
-            <code className="mx-1">npm run seed</code> with network access, or read it directly at the
+            No cached transcription is available. This document was imported from a remote source. Run
+            <code className="mx-1">npm run ingest-loc -- --limit 25</code> with network access, or read it directly at the
             source:
           </p>
         ) : (

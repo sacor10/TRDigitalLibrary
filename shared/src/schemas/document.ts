@@ -6,6 +6,7 @@ export const DocumentTypeSchema = z.enum([
   'diary',
   'article',
   'autobiography',
+  'manuscript',
 ]);
 
 export type DocumentType = z.infer<typeof DocumentTypeSchema>;
