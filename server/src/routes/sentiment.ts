@@ -1,5 +1,4 @@
-import { Router } from 'express';
-
+import type { Row } from '@libsql/client';
 import type {
   DocumentSentiment,
   SentimentBin,
@@ -9,6 +8,7 @@ import type {
   SentimentTimelinePoint,
   SentimentTimelineResponse,
 } from '@tr/shared';
+import { Router } from 'express';
 
 import type { LibsqlClient } from '../db.js';
 
@@ -166,7 +166,7 @@ export function createSentimentRouter(db: LibsqlClient): Router {
       args: [...params, limit],
     });
 
-    const toRow = (r: import('@libsql/client').Row): ExtremeRow => ({
+    const toRow = (r: Row): ExtremeRow => ({
       document_id: asString(r.document_id),
       title: asString(r.title),
       date: asString(r.date),

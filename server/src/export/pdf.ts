@@ -1,12 +1,11 @@
+import type { Document, DocumentSection } from '@tr/shared';
 import PDFDocument from 'pdfkit';
 
-import type { Document, DocumentSection } from '@tr/shared';
 
 const PAGE_MARGIN = 72;
 const BODY_FONT = 'Times-Roman';
 const BODY_ITALIC = 'Times-Italic';
 const BODY_BOLD = 'Times-Bold';
-const SANS_BOLD = 'Helvetica-Bold';
 const SANS_REGULAR = 'Helvetica';
 
 function stripTags(html: string): string {

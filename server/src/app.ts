@@ -1,13 +1,13 @@
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
-import express from 'express';
+import express, { json } from 'express';
 import type { Express } from 'express';
 import helmet from 'helmet';
 import morgan from 'morgan';
 
 import type { LibsqlClient as AnnotationsClient } from './annotations-db.js';
-import type { LibsqlClient } from './db.js';
 import type { GoogleVerifier } from './auth/google.js';
+import type { LibsqlClient } from './db.js';
 import { loadUser } from './middleware/requireUser.js';
 import { buildOpenApiDocument } from './openapi.js';
 import {
@@ -39,7 +39,7 @@ export function createApp(db: LibsqlClient, opts: CreateAppOptions = {}): Expres
       credentials: true,
     }),
   );
-  app.use(express.json());
+  app.use(json());
   app.use(cookieParser());
   if (process.env.NODE_ENV !== 'test') {
     app.use(morgan('dev'));
