@@ -14,7 +14,7 @@ export function FacsimilePane({ iiifManifestUrl, url, alt }: FacsimilePaneProps)
   }
   if (!url) {
     return (
-      <div className="flex h-[60vh] items-center justify-center rounded-md border border-dashed border-ink-700/20 dark:border-parchment-50/20 text-ink-700/70 dark:text-parchment-50/70 p-8 text-center">
+      <div className="flex min-h-[18rem] items-center justify-center rounded-md border border-dashed border-ink-700/20 p-6 text-center text-ink-700/70 dark:border-parchment-50/20 dark:text-parchment-50/70 sm:h-[60vh] sm:p-8">
         No facsimile available for this document. The transcription tab shows the full text.
       </div>
     );
@@ -24,7 +24,7 @@ export function FacsimilePane({ iiifManifestUrl, url, alt }: FacsimilePaneProps)
       <TransformWrapper minScale={0.5} maxScale={5} initialScale={1} centerOnInit>
         {({ zoomIn, zoomOut, resetTransform }) => (
           <>
-            <div className="flex gap-2 p-2 border-b border-ink-700/10 dark:border-parchment-50/10 bg-parchment-50/60 dark:bg-ink-800">
+            <div className="flex flex-wrap gap-2 border-b border-ink-700/10 bg-parchment-50/60 p-2 dark:border-parchment-50/10 dark:bg-ink-800">
               <button type="button" className="btn" onClick={() => zoomIn()} aria-label="Zoom in">
                 +
               </button>
@@ -40,7 +40,10 @@ export function FacsimilePane({ iiifManifestUrl, url, alt }: FacsimilePaneProps)
                 Reset
               </button>
             </div>
-            <TransformComponent wrapperClass="!w-full !h-[60vh]" contentClass="!w-full !h-full">
+            <TransformComponent
+              wrapperClass="!w-full !h-[50vh] sm:!h-[60vh]"
+              contentClass="!w-full !h-full"
+            >
               <img
                 src={url}
                 alt={alt}

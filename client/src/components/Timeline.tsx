@@ -100,75 +100,77 @@ export function Timeline({ documents }: TimelineProps) {
       <figcaption className="sr-only">
         Timeline of {plotted.length} documents. Use Tab to focus a marker and Enter to open it.
       </figcaption>
-      <svg
-        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="w-full h-auto"
-        aria-label="Document timeline"
-        role="group"
-      >
-        <line
-          x1={MARGIN.left}
-          x2={WIDTH - MARGIN.right}
-          y1={axisY}
-          y2={axisY}
-          className="stroke-ink-700/30 dark:stroke-parchment-50/30"
-          strokeWidth="1"
-        />
-        {ticks.map((year) => {
-          const ts = Date.UTC(year, 0, 1);
-          const x = MARGIN.left + ((ts - minTs) / span) * PLOT_W;
-          return (
-            <g key={year}>
+      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <svg
+          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+          className="h-auto min-w-[48rem] sm:min-w-0 sm:w-full"
+          aria-label="Document timeline"
+          role="group"
+        >
+          <line
+            x1={MARGIN.left}
+            x2={WIDTH - MARGIN.right}
+            y1={axisY}
+            y2={axisY}
+            className="stroke-ink-700/30 dark:stroke-parchment-50/30"
+            strokeWidth="1"
+          />
+          {ticks.map((year) => {
+            const ts = Date.UTC(year, 0, 1);
+            const x = MARGIN.left + ((ts - minTs) / span) * PLOT_W;
+            return (
+              <g key={year}>
+                <line
+                  x1={x}
+                  x2={x}
+                  y1={axisY - 4}
+                  y2={axisY + 4}
+                  className="stroke-ink-700/40 dark:stroke-parchment-50/40"
+                  strokeWidth="1"
+                />
+                <text
+                  x={x}
+                  y={axisY + 22}
+                  textAnchor="middle"
+                  className="fill-ink-700 dark:fill-parchment-100"
+                  style={{ fontSize: '14px' }}
+                >
+                  {year}
+                </text>
+              </g>
+            );
+          })}
+          {plotted.map(({ doc, x, y }) => (
+            <g key={doc.id} className="cursor-pointer">
+              <title>{`${doc.title} (${doc.date})`}</title>
               <line
                 x1={x}
                 x2={x}
-                y1={axisY - 4}
-                y2={axisY + 4}
-                className="stroke-ink-700/40 dark:stroke-parchment-50/40"
+                y1={y + MARKER_R}
+                y2={axisY}
+                className="stroke-ink-700/25 dark:stroke-parchment-50/25"
                 strokeWidth="1"
               />
-              <text
-                x={x}
-                y={axisY + 22}
-                textAnchor="middle"
-                className="fill-ink-700 dark:fill-parchment-100"
-                style={{ fontSize: '14px' }}
-              >
-                {year}
-              </text>
+              <circle
+                cx={x}
+                cy={y}
+                r={MARKER_R}
+                className={`${TYPE_COLORS[doc.type]} transition-opacity hover:opacity-80`}
+                tabIndex={0}
+                role="button"
+                aria-label={`${doc.title}, ${doc.date}`}
+                onClick={() => navigate(`/documents/${doc.id}`)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    navigate(`/documents/${doc.id}`);
+                  }
+                }}
+              />
             </g>
-          );
-        })}
-        {plotted.map(({ doc, x, y }) => (
-          <g key={doc.id} className="cursor-pointer">
-            <title>{`${doc.title} (${doc.date})`}</title>
-            <line
-              x1={x}
-              x2={x}
-              y1={y + MARKER_R}
-              y2={axisY}
-              className="stroke-ink-700/25 dark:stroke-parchment-50/25"
-              strokeWidth="1"
-            />
-            <circle
-              cx={x}
-              cy={y}
-              r={MARKER_R}
-              className={`${TYPE_COLORS[doc.type]} transition-opacity hover:opacity-80`}
-              tabIndex={0}
-              role="button"
-              aria-label={`${doc.title}, ${doc.date}`}
-              onClick={() => navigate(`/documents/${doc.id}`)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  navigate(`/documents/${doc.id}`);
-                }
-              }}
-            />
-          </g>
-        ))}
-      </svg>
+          ))}
+        </svg>
+      </div>
       <div className="mt-4 flex flex-wrap gap-3 text-xs">
         {(Object.entries(TYPE_COLORS) as [Document['type'], string][]).map(([type, color]) => (
           <span key={type} className="inline-flex items-center gap-1.5">

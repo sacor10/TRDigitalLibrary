@@ -9,7 +9,7 @@ interface Props {
   edges: CorrespondentEdge[];
   selectedId: string | null;
   onSelect: (nodeId: string) => void;
-  height?: number;
+  height?: number | string;
 }
 
 const STYLESHEET: cytoscape.StylesheetJsonBlock[] = [
@@ -74,7 +74,7 @@ export function CorrespondentGraph({
   edges,
   selectedId,
   onSelect,
-  height = 520,
+  height = 'min(70vh, 520px)',
 }: Props) {
   const cyRef = useRef<cytoscape.Core | null>(null);
 
@@ -114,13 +114,15 @@ export function CorrespondentGraph({
     <CytoscapeComponent
       elements={elements}
       stylesheet={STYLESHEET}
-      layout={{
-        name: 'cose',
-        animate: false,
-        padding: 24,
-        nodeRepulsion: () => 8000,
-        idealEdgeLength: () => 90,
-      } as cytoscape.LayoutOptions}
+      layout={
+        {
+          name: 'cose',
+          animate: false,
+          padding: 24,
+          nodeRepulsion: () => 8000,
+          idealEdgeLength: () => 90,
+        } as cytoscape.LayoutOptions
+      }
       style={{ width: '100%', height }}
       cy={(cy) => {
         cyRef.current = cy;

@@ -3,15 +3,15 @@ import { Link } from 'react-router-dom';
 export function HomePage() {
   return (
     <div className="max-w-none">
-      <section className="text-center py-12">
-        <h1 className="text-4xl md:text-5xl font-semibold tracking-tight">
+      <section className="py-8 text-center sm:py-12">
+        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
           The works and correspondence of Theodore Roosevelt
         </h1>
-        <p className="mt-4 max-w-2xl mx-auto text-ink-700 dark:text-parchment-100">
-          A scholarly, accessible, open archive of TR’s speeches, letters, diaries, and books — searchable
-          end-to-end and linked back to its public-domain sources.
+        <p className="mx-auto mt-4 max-w-2xl text-ink-700 dark:text-parchment-100">
+          A scholarly, accessible, open archive of TR’s speeches, letters, diaries, and books —
+          searchable end-to-end and linked back to its public-domain sources.
         </p>
-        <div className="mt-8 flex flex-wrap justify-center gap-3">
+        <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row sm:flex-wrap">
           <Link to="/browse" className="btn btn-primary">
             Browse the collection
           </Link>
@@ -24,7 +24,7 @@ export function HomePage() {
         </div>
       </section>
 
-      <section className="grid md:grid-cols-3 gap-4 mt-8">
+      <section className="mt-8 grid gap-4 md:grid-cols-3">
         <div className="card">
           <h2 className="text-lg font-semibold">Documents</h2>
           <p className="text-sm text-ink-700 dark:text-parchment-100 mt-2">

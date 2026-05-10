@@ -16,15 +16,19 @@ interface DocumentListProps {
 
 export function DocumentList({ documents }: DocumentListProps) {
   if (documents.length === 0) {
-    return <p className="py-12 text-center text-ink-700/80 dark:text-parchment-100/80">No documents match these filters.</p>;
+    return (
+      <p className="py-12 text-center text-ink-700/80 dark:text-parchment-100/80">
+        No documents match these filters.
+      </p>
+    );
   }
   return (
     <ul className="grid gap-3">
       {documents.map((doc) => (
         <li key={doc.id} className="card hover:shadow-md transition-shadow">
           <Link to={`/documents/${doc.id}`} className="block">
-            <div className="flex items-start justify-between gap-4">
-              <div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <div className="min-w-0">
                 <h3 className="font-semibold text-lg leading-tight">{doc.title}</h3>
                 <p className="mt-1 text-sm text-ink-700 dark:text-parchment-100">
                   {doc.date}
@@ -32,7 +36,7 @@ export function DocumentList({ documents }: DocumentListProps) {
                   {doc.recipient && <> &middot; To {doc.recipient}</>}
                 </p>
               </div>
-              <span className="chip whitespace-nowrap">{TYPE_LABEL[doc.type]}</span>
+              <span className="chip w-fit whitespace-nowrap">{TYPE_LABEL[doc.type]}</span>
             </div>
             {doc.tags.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1">

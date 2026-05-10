@@ -20,11 +20,7 @@ interface ToolbarState {
   rect: { left: number; top: number };
 }
 
-export function AnnotationToolbar({
-  documentId,
-  rootRef,
-  onSave,
-}: AnnotationToolbarProps) {
+export function AnnotationToolbar({ documentId, rootRef, onSave }: AnnotationToolbarProps) {
   const { user } = useAuth();
   const [state, setState] = useState<ToolbarState | null>(null);
   const [editing, setEditing] = useState<{ motivation: AnnotationMotivation } | null>(null);
@@ -99,10 +95,10 @@ export function AnnotationToolbar({
         transform: 'translateX(-50%)',
         zIndex: 40,
       }}
-      className="rounded-md border border-ink-700/20 bg-white shadow-lg dark:border-parchment-50/20 dark:bg-ink-800"
+      className="max-w-[calc(100vw-1rem)] rounded-md border border-ink-700/20 bg-white shadow-lg dark:border-parchment-50/20 dark:bg-ink-800"
     >
       {!editing ? (
-        <div className="flex items-center gap-1 p-1">
+        <div className="flex flex-wrap items-center gap-1 p-1">
           <button
             type="button"
             className="btn"
@@ -123,7 +119,7 @@ export function AnnotationToolbar({
           </button>
         </div>
       ) : (
-        <div className="p-2 w-72 space-y-2">
+        <div className="w-[min(calc(100vw-2rem),18rem)] space-y-2 p-2">
           <textarea
             autoFocus
             value={body}

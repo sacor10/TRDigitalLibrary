@@ -34,7 +34,7 @@ export function CitationGenerator({ document }: CitationGeneratorProps) {
       <h3 id="cite-heading" className="text-sm font-semibold uppercase tracking-wide">
         Cite this document
       </h3>
-      <div role="radiogroup" aria-label="Citation style" className="mt-3 flex gap-1">
+      <div role="radiogroup" aria-label="Citation style" className="mt-3 flex flex-wrap gap-1">
         {STYLES.map((s) => (
           <button
             key={s.id}
@@ -42,7 +42,7 @@ export function CitationGenerator({ document }: CitationGeneratorProps) {
             role="radio"
             aria-checked={style === s.id}
             onClick={() => setStyle(s.id)}
-            className={`px-3 py-1 text-xs rounded ${
+            className={`min-h-9 rounded px-3 py-1 text-xs ${
               style === s.id ? 'bg-accent-500 text-white' : 'bg-parchment-200/60 dark:bg-ink-700'
             }`}
           >
@@ -50,7 +50,7 @@ export function CitationGenerator({ document }: CitationGeneratorProps) {
           </button>
         ))}
       </div>
-      <p className="mt-3 text-sm font-sans bg-parchment-100/70 dark:bg-ink-900/60 p-3 rounded leading-relaxed">
+      <p className="mt-3 rounded bg-parchment-100/70 p-3 font-sans text-sm leading-relaxed dark:bg-ink-900/60">
         {citation}
       </p>
       <button type="button" className="btn mt-3" onClick={handleCopy}>

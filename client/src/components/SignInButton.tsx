@@ -39,9 +39,7 @@ function loadGisScript(): Promise<void> {
   if (window.google?.accounts?.id) return Promise.resolve();
   if (scriptPromise) return scriptPromise;
   scriptPromise = new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(
-      `script[src="${GIS_SRC}"]`,
-    );
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${GIS_SRC}"]`);
     if (existing) {
       existing.addEventListener('load', () => resolve());
       existing.addEventListener('error', () =>
@@ -134,7 +132,7 @@ export function SignInButton() {
   if (!clientId) {
     return (
       <span
-        className="text-xs text-ink-700/60 dark:text-parchment-50/60"
+        className="hidden text-xs text-ink-700/60 dark:text-parchment-50/60 sm:inline"
         title="Set VITE_GOOGLE_CLIENT_ID to enable sign-in"
       >
         Sign-in disabled
