@@ -2,6 +2,7 @@ import { type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 
 import { useTheme } from '../context/ThemeContext';
+import { SignInButton } from './SignInButton';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Home', end: true },
@@ -49,6 +50,9 @@ export function Layout({ children }: { children: ReactNode }) {
             >
               {theme === 'dark' ? 'Light' : 'Dark'}
             </button>
+            <span className="ml-2">
+              <SignInButton />
+            </span>
           </nav>
         </div>
       </header>

@@ -37,6 +37,25 @@ export {
   SentimentExtremesResponseSchema,
 } from './schemas/sentiment.js';
 
+export {
+  AnnotationMotivationSchema,
+  TextQuoteSelectorSchema,
+  TextPositionSelectorSchema,
+  FragmentSelectorSchema,
+  SelectorSchema,
+  AnnotationTextualBodySchema,
+  AnnotationCreatorSchema,
+  AnnotationTargetSchema,
+  AnnotationSchema,
+  AnnotationCreateInputSchema,
+  AnnotationPatchSchema,
+  AnnotationCollectionSchema,
+  AuthUserSchema,
+  AuthMeResponseSchema,
+  GoogleSignInRequestSchema,
+  ANNOTATION_JSONLD_CONTEXT,
+} from './schemas/annotation.js';
+
 export type {
   Document,
   DocumentType,
@@ -75,3 +94,21 @@ export type {
   SentimentExtremeItem,
   SentimentExtremesResponse,
 } from './schemas/sentiment.js';
+
+export type {
+  AnnotationMotivation,
+  TextQuoteSelector,
+  TextPositionSelector,
+  FragmentSelector,
+  AnnotationSelector,
+  AnnotationTextualBody,
+  AnnotationCreator,
+  AnnotationTarget,
+  Annotation,
+  AnnotationCreateInput,
+  AnnotationPatch,
+  AnnotationCollection,
+  AuthUser,
+  AuthMeResponse,
+  GoogleSignInRequest,
+} from './schemas/annotation.js';

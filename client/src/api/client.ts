@@ -1,4 +1,7 @@
 import {
+  AnnotationCollectionSchema,
+  AnnotationSchema,
+  AuthMeResponseSchema,
   CorrespondentGraphResponseSchema,
   DocumentListResponseSchema,
   DocumentSchema,
@@ -9,6 +12,11 @@ import {
   TopicDetailResponseSchema,
   TopicDriftResponseSchema,
   TopicsResponseSchema,
+  type Annotation,
+  type AnnotationCollection,
+  type AnnotationCreateInput,
+  type AnnotationPatch,
+  type AuthUser,
   type CorrespondentGraphResponse,
   type Document,
   type DocumentListQuery,
@@ -37,12 +45,39 @@ function buildQuery(params: Record<string, string | number | undefined>): string
 }
 
 async function getJson<T>(path: string, parser: (raw: unknown) => T): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
   if (!res.ok) {
     throw new Error(`Request failed: ${res.status} ${res.statusText} (${path})`);
   }
   const body = (await res.json()) as unknown;
   return parser(body);
+}
+
+async function sendJson<T>(
+  method: 'POST' | 'PATCH' | 'DELETE',
+  path: string,
+  body: unknown,
+  parser: ((raw: unknown) => T) | null,
+): Promise<T | null> {
+  const init: RequestInit = { method, credentials: 'include' };
+  if (body != null) {
+    init.headers = { 'Content-Type': 'application/json' };
+    init.body = JSON.stringify(body);
+  }
+  const res = await fetch(`${API_BASE}${path}`, init);
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const errBody = (await res.json()) as { error?: string };
+      if (errBody.error) detail = errBody.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`${method} ${path} failed: ${detail}`);
+  }
+  if (res.status === 204 || !parser) return null;
+  const raw = (await res.json()) as unknown;
+  return parser(raw);
 }
 
 export async function fetchDocuments(
@@ -136,4 +171,74 @@ export async function searchDocuments(query: SearchQuery): Promise<SearchRespons
     limit: query.limit,
   });
   return getJson(`/api/search${qs}`, (raw) => SearchResponseSchema.parse(raw));
+}
+
+export async function fetchMe(): Promise<AuthUser | null> {
+  const res = await fetch(`${API_BASE}/api/auth/me`, { credentials: 'include' });
+  if (res.status === 401) return null;
+  if (!res.ok) {
+    throw new Error(`Request failed: ${res.status} ${res.statusText}`);
+  }
+  const parsed = AuthMeResponseSchema.parse(await res.json());
+  return parsed.user;
+}
+
+export async function googleSignIn(idToken: string): Promise<AuthUser> {
+  const result = await sendJson(
+    'POST',
+    '/api/auth/google',
+    { idToken },
+    (raw) => AuthMeResponseSchema.parse(raw),
+  );
+  if (!result) throw new Error('Empty sign-in response');
+  return result.user;
+}
+
+export async function logout(): Promise<void> {
+  await sendJson('POST', '/api/auth/logout', null, null);
+}
+
+export async function listDocumentAnnotations(
+  documentId: string,
+): Promise<AnnotationCollection> {
+  return getJson(
+    `/api/documents/${encodeURIComponent(documentId)}/annotations`,
+    (raw) => AnnotationCollectionSchema.parse(raw),
+  );
+}
+
+export async function getAnnotation(id: string): Promise<Annotation> {
+  return getJson(`/api/annotations/${encodeURIComponent(id)}`, (raw) =>
+    AnnotationSchema.parse(raw),
+  );
+}
+
+export async function createAnnotation(input: AnnotationCreateInput): Promise<Annotation> {
+  const result = await sendJson('POST', '/api/annotations', input, (raw) =>
+    AnnotationSchema.parse(raw),
+  );
+  if (!result) throw new Error('Empty create response');
+  return result;
+}
+
+export async function patchAnnotation(
+  id: string,
+  patch: AnnotationPatch,
+): Promise<Annotation> {
+  const result = await sendJson(
+    'PATCH',
+    `/api/annotations/${encodeURIComponent(id)}`,
+    patch,
+    (raw) => AnnotationSchema.parse(raw),
+  );
+  if (!result) throw new Error('Empty patch response');
+  return result;
+}
+
+export async function deleteAnnotation(id: string): Promise<void> {
+  await sendJson('DELETE', `/api/annotations/${encodeURIComponent(id)}`, null, null);
+}
+
+export function annotationJsonLdUrl(id: string): string {
+  return `${API_BASE}/api/annotations/${encodeURIComponent(id)}`;
 }

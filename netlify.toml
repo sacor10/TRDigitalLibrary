@@ -10,7 +10,11 @@
   external_node_modules = ["better-sqlite3"]
 
 [functions."api"]
-  included_files = ["data/library.db", "server/src/migrations/*.sql"]
+  included_files = [
+    "data/library.db",
+    "server/src/migrations/*.sql",
+    "server/src/annotations-migrations/*.sql",
+  ]
 
 [[redirects]]
   from = "/api/*"
@@ -30,7 +34,7 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data: blob: https://*.googleusercontent.com; connect-src 'self' https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
     Referrer-Policy = "strict-origin-when-cross-origin"
     X-Content-Type-Options = "nosniff"
     X-Frame-Options = "SAMEORIGIN"
