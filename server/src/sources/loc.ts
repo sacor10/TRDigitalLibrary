@@ -8,12 +8,72 @@ export const LOC_SOURCE = 'Library of Congress Theodore Roosevelt Papers';
 const LOC_COLLECTION_URL = `https://www.loc.gov/collections/${LOC_COLLECTION_SLUG}/`;
 const USER_AGENT =
   'TRDigitalLibrary/0.1 (LoC ingestion; contact via https://github.com/sacor10/trdigitallibrary)';
-const FETCH_TIMEOUT_MS = 30_000;
+
+// Per-stage timeouts: collection-page + item JSON are usually small, but
+// fulltext transcription files can be several MB and were tripping the
+// previous shared 30s timeout under load.
+const COLLECTION_PAGE_TIMEOUT_MS = 30_000;
+const ITEM_TIMEOUT_MS = 30_000;
+const FULLTEXT_TIMEOUT_MS = 60_000;
+
+const MAX_FETCH_ATTEMPTS = 3;
+const BASE_BACKOFF_MS = 1_000;        // backoff schedule: 1s, 2s, 4s (+jitter)
+const MAX_RETRY_AFTER_MS = 30_000;    // cap honoring server Retry-After
 const DEFAULT_PAGE_SIZE = 25;
 
 type JsonObject = Record<string, unknown>;
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+export type Logger = Pick<Console, 'log' | 'warn' | 'error'>;
+
+export type FetchStage = 'collection-page' | 'item' | 'fulltext';
+
+interface StageConfig {
+  stage: FetchStage;
+  timeoutMs: number;
+  accept: string;
+}
+
+const STAGE_CONFIG: Record<FetchStage, StageConfig> = {
+  'collection-page': {
+    stage: 'collection-page',
+    timeoutMs: COLLECTION_PAGE_TIMEOUT_MS,
+    accept: 'application/json',
+  },
+  item: { stage: 'item', timeoutMs: ITEM_TIMEOUT_MS, accept: 'application/json' },
+  fulltext: { stage: 'fulltext', timeoutMs: FULLTEXT_TIMEOUT_MS, accept: 'text/plain' },
+};
+
+export interface LocFetchErrorInfo {
+  stage: FetchStage;
+  url: string;
+  /** Predicted (collection-page) or known document id when available. */
+  documentId: string | null;
+  /** Final attempt count, 1..MAX_FETCH_ATTEMPTS. */
+  attempts: number;
+  errorName: string;
+  errorMessage: string;
+  /** String(err.cause) when present — undici exposes UND_ERR_* here. */
+  cause?: string;
+  httpStatus?: number;
+  httpStatusText?: string;
+  /** Was the *final* error classified as retryable (i.e. retries exhausted)? */
+  retryable: boolean;
+}
+
+export class LocFetchError extends Error {
+  readonly info: LocFetchErrorInfo;
+  constructor(info: LocFetchErrorInfo, cause?: unknown) {
+    super(
+      `[${info.stage}] ${info.errorName}: ${info.errorMessage} ` +
+        `(url=${info.url} attempts=${info.attempts})`,
+    );
+    this.name = 'LocFetchError';
+    this.info = info;
+    if (cause !== undefined) (this as { cause?: unknown }).cause = cause;
+  }
+}
 
 export interface LocIngestOptions {
   db: LibsqlClient | null;
@@ -33,7 +93,12 @@ export interface LocIngestOptions {
   editor?: string;
   fetchImpl?: FetchLike;
   now?: () => Date;
-  logger?: Pick<Console, 'log' | 'warn'>;
+  logger?: Logger;
+  /**
+   * Override the backoff sleeper. Tests inject a no-op to avoid waiting through
+   * real 1s/2s/4s delays; production uses the default setTimeout-based sleep.
+   */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface LocIngestResult {
@@ -42,7 +107,10 @@ export interface LocIngestResult {
   status: 'ok' | 'skipped' | 'error';
   title?: string;
   transcriptionLength?: number;
+  /** Human-readable error summary (one line, key=value pairs for grep). */
   error?: string;
+  /** Structured error context when the failure came from a fetch. */
+  errorInfo?: LocFetchErrorInfo;
 }
 
 export interface LocIngestReport {
@@ -368,13 +436,13 @@ function collectionUrl(page: number, count: number): string {
 async function fetchWithTimeout(
   fetchImpl: FetchLike,
   url: string,
-  accept: string,
+  stage: StageConfig,
 ): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), stage.timeoutMs);
   try {
     return await fetchImpl(url, {
-      headers: { 'User-Agent': USER_AGENT, Accept: accept },
+      headers: { 'User-Agent': USER_AGENT, Accept: stage.accept },
       signal: controller.signal,
     });
   } finally {
@@ -382,24 +450,174 @@ async function fetchWithTimeout(
   }
 }
 
-async function fetchJson(fetchImpl: FetchLike, url: string): Promise<unknown> {
-  const res = await fetchWithTimeout(fetchImpl, url, 'application/json');
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+function isRetryableNetworkError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (err.name === 'AbortError' || err.name === 'TimeoutError') return true;
+  // undici surfaces network failures as TypeError('fetch failed') with the
+  // real reason on .cause (UND_ERR_*, ECONNRESET, etc.).
+  if (err.name === 'TypeError' && /fetch/i.test(err.message)) return true;
+  const cause = (err as { cause?: unknown }).cause;
+  if (cause instanceof Error) {
+    const code = (cause as { code?: string }).code;
+    if (
+      code &&
+      (code.startsWith('UND_ERR_') ||
+        code === 'ECONNRESET' ||
+        code === 'ECONNREFUSED' ||
+        code === 'ETIMEDOUT' ||
+        code === 'ENOTFOUND' ||
+        code === 'EAI_AGAIN')
+    ) {
+      return true;
+    }
+    if (/terminated|socket hang up|aborted/i.test(cause.message)) return true;
+  }
+  return /terminated|aborted|network/i.test(err.message);
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status < 600);
+}
+
+function parseRetryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const secs = Number(header);
+  if (Number.isFinite(secs) && secs >= 0) {
+    return Math.min(secs * 1000, MAX_RETRY_AFTER_MS);
+  }
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) {
+    return Math.min(Math.max(0, date - Date.now()), MAX_RETRY_AFTER_MS);
+  }
+  return null;
+}
+
+function backoffMs(attempt: number): number {
+  // attempt is 1-indexed; wait BEFORE the next attempt.
+  // attempt=1 -> 1s, attempt=2 -> 2s, attempt=3 -> 4s (won't normally fire).
+  const base = BASE_BACKOFF_MS * 2 ** (attempt - 1);
+  const jitter = Math.floor(Math.random() * 250);
+  return base + jitter;
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function describeError(err: unknown): { name: string; message: string; cause?: string } {
+  const e = err instanceof Error ? err : new Error(String(err));
+  const causeRaw = (e as { cause?: unknown }).cause;
+  const cause =
+    causeRaw === undefined
+      ? undefined
+      : causeRaw instanceof Error
+        ? `${causeRaw.name}: ${causeRaw.message}` +
+          ((causeRaw as { code?: string }).code ? ` (code=${(causeRaw as { code?: string }).code})` : '')
+        : String(causeRaw);
+  const out: { name: string; message: string; cause?: string } = { name: e.name, message: e.message };
+  if (cause !== undefined) out.cause = cause;
+  return out;
+}
+
+interface RetryDeps {
+  fetchImpl: FetchLike;
+  logger: Logger;
+  sleep: (ms: number) => Promise<void>;
+  /** Best-known document id for log context; null when unknown. */
+  documentId: string | null;
+}
+
+async function fetchWithRetry(
+  deps: RetryDeps,
+  url: string,
+  stage: FetchStage,
+): Promise<Response> {
+  const cfg = STAGE_CONFIG[stage];
+  const docLabel = deps.documentId ?? 'unknown';
+  for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
+    let res: Response | null = null;
+    try {
+      res = await fetchWithTimeout(deps.fetchImpl, url, cfg);
+    } catch (err) {
+      const retryable = isRetryableNetworkError(err);
+      if (!retryable || attempt === MAX_FETCH_ATTEMPTS) {
+        const d = describeError(err);
+        throw new LocFetchError(
+          {
+            stage,
+            url,
+            documentId: deps.documentId,
+            attempts: attempt,
+            errorName: d.name,
+            errorMessage: d.message,
+            ...(d.cause !== undefined ? { cause: d.cause } : {}),
+            retryable,
+          },
+          err,
+        );
+      }
+      const wait = backoffMs(attempt);
+      const d = describeError(err);
+      deps.logger.log(
+        `[ingest-loc] retry ${stage} attempt ${attempt}/${MAX_FETCH_ATTEMPTS} after ${wait}ms ` +
+          `(error=${d.name}: ${d.message}${d.cause ? ` cause=${d.cause}` : ''} ` +
+          `url=${url} docId=${docLabel})`,
+      );
+      await deps.sleep(wait);
+      continue;
+    }
+
+    if (res.ok) return res;
+
+    // Drain the body so the underlying socket can be reused.
+    try {
+      await res.text();
+    } catch {
+      /* ignore */
+    }
+
+    const retryable = isRetryableStatus(res.status);
+    if (!retryable || attempt === MAX_FETCH_ATTEMPTS) {
+      throw new LocFetchError({
+        stage,
+        url,
+        documentId: deps.documentId,
+        attempts: attempt,
+        errorName: 'HttpError',
+        errorMessage: `HTTP ${res.status} ${res.statusText}`,
+        httpStatus: res.status,
+        httpStatusText: res.statusText,
+        retryable,
+      });
+    }
+    const retryAfter = parseRetryAfterMs(res.headers.get('retry-after'));
+    const wait = retryAfter ?? backoffMs(attempt);
+    deps.logger.log(
+      `[ingest-loc] retry ${stage} attempt ${attempt}/${MAX_FETCH_ATTEMPTS} after ${wait}ms ` +
+        `(status=${res.status} ${res.statusText} url=${url} docId=${docLabel})`,
+    );
+    await deps.sleep(wait);
+  }
+  // Unreachable: every iteration either returns or throws.
+  throw new Error('fetchWithRetry exited loop without resolution');
+}
+
+async function fetchJson(deps: RetryDeps, url: string, stage: FetchStage): Promise<unknown> {
+  const res = await fetchWithRetry(deps, url, stage);
   return (await res.json()) as unknown;
 }
 
-async function fetchText(fetchImpl: FetchLike, url: string): Promise<string> {
-  const res = await fetchWithTimeout(fetchImpl, url, 'text/plain');
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+async function fetchText(deps: RetryDeps, url: string, stage: FetchStage): Promise<string> {
+  const res = await fetchWithRetry(deps, url, stage);
   return (await res.text()).trim();
 }
 
 async function fetchCollectionPage(
-  fetchImpl: FetchLike,
+  deps: RetryDeps,
   page: number,
   pageSize: number,
 ): Promise<LocCollectionPage> {
-  const json = asObject(await fetchJson(fetchImpl, collectionUrl(page, pageSize)));
+  const json = asObject(await fetchJson(deps, collectionUrl(page, pageSize), 'collection-page'));
   if (!json) throw new Error('LoC collection response was not an object');
   const results = arrayAt(json, 'results').flatMap((value) => {
     const result = asObject(value);
@@ -409,10 +627,10 @@ async function fetchCollectionPage(
   return { results, hasNext: Boolean(stringAt(pagination, 'next')) };
 }
 
-async function fetchItem(fetchImpl: FetchLike, result: JsonObject): Promise<JsonObject> {
+async function fetchItem(deps: RetryDeps, result: JsonObject): Promise<JsonObject> {
   const rawUrl = stringAt(result, 'id') ?? stringAt(result, 'url');
   if (!rawUrl) throw new Error('LoC result did not include id or url');
-  const json = asObject(await fetchJson(fetchImpl, locJsonUrl(rawUrl)));
+  const json = asObject(await fetchJson(deps, locJsonUrl(rawUrl), 'item'));
   const item = objectAt(json, 'item');
   if (!item) throw new Error('LoC item response did not include item');
   return item;
@@ -442,8 +660,16 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
   const pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? (() => new Date());
-  const logger = options.logger ?? console;
+  const logger: Logger = options.logger ?? console;
+  const sleep = options.sleep ?? defaultSleep;
   const editor = options.editor ?? 'loc-ingest';
+
+  const makeDeps = (documentId: string | null): RetryDeps => ({
+    fetchImpl,
+    logger,
+    sleep,
+    documentId,
+  });
 
   if (!dryRun && !options.db) {
     throw new Error('A database is required unless --dry-run is set');
@@ -475,7 +701,7 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
   let remaining = options.limit ?? Number.POSITIVE_INFINITY;
 
   while (remaining > 0) {
-    const collection = await fetchCollectionPage(fetchImpl, page, pageSize);
+    const collection = await fetchCollectionPage(makeDeps(null), page, pageSize);
     report.pagesFetched += 1;
     logger.log(`Fetched LoC page ${page} (${collection.results.length} result(s)).`);
     if (collection.results.length === 0) {
@@ -490,13 +716,17 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
       processedOnPage += 1;
       report.scanned += 1;
 
+      // Predict the document id from the collection-page result so retry +
+      // error logs carry a stable, grep-able identifier even when the item
+      // fetch itself fails.
+      const predictedId = predictDocumentIdFromCollectionResult(result);
+
       try {
         // Fast no-op: predict the document id from the collection-page result
         // alone and skip the (expensive) item-details fetch + full-text
         // download if it's already in the DB. `--force` bypasses the check;
         // `--reset` already wiped the DB so nothing will exist to skip.
         if (!options.force && options.db) {
-          const predictedId = predictDocumentIdFromCollectionResult(result);
           if (predictedId && (await documentExists(options.db, predictedId))) {
             report.skipped += 1;
             const skippedResult: LocIngestResult = {
@@ -513,11 +743,11 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
           }
         }
 
-        const item = await fetchItem(fetchImpl, result);
+        const item = await fetchItem(makeDeps(predictedId), result);
         const transcriptionUrl = extractFullTextUrl(item);
         let transcription = '';
         if (transcriptionUrl) {
-          transcription = await fetchText(fetchImpl, transcriptionUrl);
+          transcription = await fetchText(makeDeps(predictedId), transcriptionUrl, 'fulltext');
         }
         const document = mapLocItemToDocument(item, transcription, transcriptionUrl);
         report.mapped += 1;
@@ -554,10 +784,36 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
           `  ${dryRun ? 'mapped' : 'ingested'} ${document.id} (${document.transcription.length} chars)`,
         );
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
         report.failed += 1;
-        report.results.push({ status: 'error', error: message });
-        logger.warn(`  failed LoC result: ${message}`);
+        if (err instanceof LocFetchError) {
+          const info = err.info;
+          const summary =
+            `[ingest-loc] failed LoC result stage=${info.stage} ` +
+            `docId=${info.documentId ?? 'unknown'} url=${info.url} ` +
+            `attempts=${info.attempts} error=${info.errorName}: ${info.errorMessage}` +
+            (info.cause ? ` cause=${info.cause}` : '') +
+            (info.httpStatus != null
+              ? ` http=${info.httpStatus} ${info.httpStatusText ?? ''}`.trimEnd()
+              : '');
+          logger.warn(summary);
+          const errResult: LocIngestResult = {
+            status: 'error',
+            error: summary,
+            errorInfo: info,
+          };
+          if (info.documentId) errResult.documentId = info.documentId;
+          report.results.push(errResult);
+        } else {
+          const d = describeError(err);
+          const summary =
+            `[ingest-loc] failed LoC result stage=post-fetch ` +
+            `docId=${predictedId ?? 'unknown'} error=${d.name}: ${d.message}` +
+            (d.cause ? ` cause=${d.cause}` : '');
+          logger.warn(summary);
+          const errResult: LocIngestResult = { status: 'error', error: summary };
+          if (predictedId) errResult.documentId = predictedId;
+          report.results.push(errResult);
+        }
       }
     }
 
