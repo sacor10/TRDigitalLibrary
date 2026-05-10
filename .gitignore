@@ -30,3 +30,9 @@ data/library.db-shm
 .idea/
 .DS_Store
 *.swp
+
+# Claude Code working state
+.claude/
+
+# Netlify CLI state
+.netlify/
