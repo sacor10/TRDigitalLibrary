@@ -1,9 +1,14 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import Database from 'better-sqlite3';
-import type { Database as DatabaseT } from 'better-sqlite3';
+import type {
+  Client as LibsqlClient,
+  Config as LibsqlConfig,
+  InStatement,
+  InValue,
+  Row,
+} from '@libsql/client';
 
 import type { Document, DocumentPatch, DocumentSection, FieldProvenance } from '@tr/shared';
 
@@ -15,7 +20,8 @@ const __dirname = (() => {
   }
 })();
 
-const DEFAULT_DB_PATH = join(__dirname, '..', '..', 'data', 'library.db');
+const DEFAULT_LOCAL_FILE = join(__dirname, '..', '..', 'data', 'library.db');
+const DEFAULT_LOCAL_URL = `file:${DEFAULT_LOCAL_FILE}`;
 
 export interface DocumentRow {
   id: string;
@@ -90,6 +96,37 @@ function fieldValueFromDocument(doc: Document, field: ProvenanceField): unknown 
   return doc[field];
 }
 
+function asString(v: unknown): string {
+  return v == null ? '' : String(v);
+}
+
+function asNullableString(v: unknown): string | null {
+  return v == null ? null : String(v);
+}
+
+export function rowToDocumentRow(row: Row): DocumentRow {
+  return {
+    id: asString(row.id),
+    title: asString(row.title),
+    type: asString(row.type),
+    date: asString(row.date),
+    recipient: asNullableString(row.recipient),
+    location: asNullableString(row.location),
+    author: asString(row.author),
+    transcription: asString(row.transcription),
+    transcription_url: asNullableString(row.transcription_url),
+    transcription_format: asString(row.transcription_format),
+    facsimile_url: asNullableString(row.facsimile_url),
+    iiif_manifest_url: asNullableString(row.iiif_manifest_url),
+    provenance: asNullableString(row.provenance),
+    source: asString(row.source),
+    source_url: asNullableString(row.source_url),
+    tags: asString(row.tags),
+    mentions: asString(row.mentions),
+    tei_xml: asNullableString(row.tei_xml),
+  };
+}
+
 export function rowToDocument(row: DocumentRow): Document {
   return {
     id: row.id,
@@ -113,204 +150,258 @@ export function rowToDocument(row: DocumentRow): Document {
   };
 }
 
-export interface OpenDatabaseOptions {
-  readonly?: boolean;
+export interface OpenLibraryDbOptions {
+  url?: string;
+  authToken?: string;
 }
 
-export function openDatabase(
-  path: string = DEFAULT_DB_PATH,
-  opts: OpenDatabaseOptions = {},
-): DatabaseT {
-  if (opts.readonly) {
-    const db = new Database(path, { readonly: true, fileMustExist: true });
-    db.pragma('foreign_keys = ON');
-    return db;
+/**
+ * Open a connection to the library DB.
+ *
+ * Resolution order for the URL:
+ *   1. `opts.url`
+ *   2. `process.env.TURSO_LIBRARY_DATABASE_URL` (production / Netlify)
+ *   3. `file:./data/library.db` (local dev fallback so devs without Turso creds
+ *      keep working).
+ *
+ * Auth token comes from `opts.authToken` or `TURSO_LIBRARY_AUTH_TOKEN`. The
+ * library DB is intentionally separate from the annotations DB so the two can
+ * point to different Turso instances; see `server/src/annotations-db.ts`.
+ */
+export async function openLibraryDb(
+  opts: OpenLibraryDbOptions = {},
+): Promise<LibsqlClient> {
+  const url = opts.url ?? process.env.TURSO_LIBRARY_DATABASE_URL ?? DEFAULT_LOCAL_URL;
+  const authToken = opts.authToken ?? process.env.TURSO_LIBRARY_AUTH_TOKEN;
+
+  if (url.startsWith('file:')) {
+    ensureLocalDirExists(url);
   }
-  const db = new Database(path);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  runMigrations(db);
-  return db;
+
+  const client = await createLibsqlClient(url, authToken);
+  await runMigrations(client);
+  return client;
 }
 
-export function openInMemoryDatabase(): DatabaseT {
-  const db = new Database(':memory:');
-  db.pragma('foreign_keys = ON');
-  runMigrations(db);
-  return db;
+/**
+ * Backwards-compatible alias preserved while call sites are migrated.
+ * Prefer {@link openLibraryDb} in new code.
+ */
+export const openDatabase = openLibraryDb;
+
+export async function openInMemoryLibraryDb(): Promise<LibsqlClient> {
+  const client = await createLibsqlClient(':memory:');
+  await runMigrations(client);
+  return client;
 }
 
-function runMigrations(db: DatabaseT): void {
-  db.exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
-    id TEXT PRIMARY KEY,
-    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`);
+export const openInMemoryDatabase = openInMemoryLibraryDb;
+
+function ensureLocalDirExists(fileUrl: string): void {
+  // file:./data/library.db, file:/abs/data/library.db, file:data/library.db
+  const path = fileUrl.replace(/^file:(?:\/\/)?/, '');
+  if (!path || path === ':memory:') return;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+  } catch {
+    // Best effort: createClient will surface a clearer error if the path is unusable.
+  }
+}
+
+async function createLibsqlClient(
+  url: string,
+  authToken?: string,
+): Promise<LibsqlClient> {
+  const config: LibsqlConfig = authToken ? { url, authToken } : { url };
+  if (/^(?:libsql|https?):/i.test(url)) {
+    const { createClient } = await import('@libsql/client/http');
+    return createClient(config);
+  }
+  const { createClient } = await import('@libsql/client');
+  return createClient(config);
+}
+
+async function runMigrations(client: LibsqlClient): Promise<void> {
+  await client.execute(
+    `CREATE TABLE IF NOT EXISTS schema_migrations (
+       id TEXT PRIMARY KEY,
+       applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+     )`,
+  );
 
   const migrationsDir = join(__dirname, 'migrations');
   const files = readdirSync(migrationsDir)
     .filter((f) => f.endsWith('.sql'))
     .sort();
 
-  const isApplied = db.prepare('SELECT 1 AS x FROM schema_migrations WHERE id = ?');
-  const record = db.prepare('INSERT INTO schema_migrations (id) VALUES (?)');
-
-  const apply = db.transaction((file: string, sql: string) => {
-    db.exec(sql);
-    record.run(file);
-  });
-
   for (const file of files) {
-    if (isApplied.get(file)) continue;
-    const sql = readFileSync(join(migrationsDir, file), 'utf8');
-    apply(file, sql);
-  }
-}
-
-export function upsertDocument(
-  db: DatabaseT,
-  doc: Document,
-  ctx?: ProvenanceContext,
-): void {
-  const stmt = db.prepare(`
-    INSERT INTO documents (
-      id, title, type, date, recipient, location, author,
-      transcription, transcription_url, transcription_format,
-      facsimile_url, iiif_manifest_url, provenance, source, source_url, tags, mentions, tei_xml
-    ) VALUES (
-      @id, @title, @type, @date, @recipient, @location, @author,
-      @transcription, @transcription_url, @transcription_format,
-      @facsimile_url, @iiif_manifest_url, @provenance, @source, @source_url, @tags, @mentions, @tei_xml
-    )
-    ON CONFLICT(id) DO UPDATE SET
-      title = excluded.title,
-      type = excluded.type,
-      date = excluded.date,
-      recipient = excluded.recipient,
-      location = excluded.location,
-      author = excluded.author,
-      transcription = excluded.transcription,
-      transcription_url = excluded.transcription_url,
-      transcription_format = excluded.transcription_format,
-      facsimile_url = excluded.facsimile_url,
-      iiif_manifest_url = excluded.iiif_manifest_url,
-      provenance = excluded.provenance,
-      source = excluded.source,
-      source_url = excluded.source_url,
-      tags = excluded.tags,
-      mentions = excluded.mentions,
-      tei_xml = excluded.tei_xml
-  `);
-
-  const run = (): void => {
-    stmt.run({
-      id: doc.id,
-      title: doc.title,
-      type: doc.type,
-      date: doc.date,
-      recipient: doc.recipient,
-      location: doc.location,
-      author: doc.author,
-      transcription: doc.transcription,
-      transcription_url: doc.transcriptionUrl,
-      transcription_format: doc.transcriptionFormat,
-      facsimile_url: doc.facsimileUrl,
-      iiif_manifest_url: doc.iiifManifestUrl ?? null,
-      provenance: doc.provenance,
-      source: doc.source,
-      source_url: doc.sourceUrl,
-      tags: JSON.stringify(doc.tags),
-      mentions: JSON.stringify(doc.mentions ?? []),
-      tei_xml: doc.teiXml ?? null,
+    const applied = await client.execute({
+      sql: 'SELECT 1 FROM schema_migrations WHERE id = ?',
+      args: [file],
     });
-    if (ctx) {
-      for (const field of PROVENANCE_FIELDS) {
-        recordFieldProvenance(db, doc.id, field, ctx);
-      }
-    }
-  };
+    if (applied.rows.length > 0) continue;
 
-  if (ctx) {
-    db.transaction(run)();
-  } else {
-    run();
+    const sql = readFileSync(join(migrationsDir, file), 'utf8');
+    // executeMultiple is the libsql equivalent of better-sqlite3's db.exec():
+    // it runs the entire script as a sequence of statements separated by ';'
+    // and correctly handles BEGIN…END trigger bodies (which contain inner ';').
+    // A naive split-on-';' splitter would corrupt the FTS5 trigger SQL in
+    // 001_init.sql / 002_tei.sql.
+    await client.executeMultiple(sql);
+    await client.execute({
+      sql: 'INSERT INTO schema_migrations (id) VALUES (?)',
+      args: [file],
+    });
   }
 }
 
-function recordFieldProvenance(
-  db: DatabaseT,
+const UPSERT_DOCUMENT_SQL = `
+  INSERT INTO documents (
+    id, title, type, date, recipient, location, author,
+    transcription, transcription_url, transcription_format,
+    facsimile_url, iiif_manifest_url, provenance, source, source_url, tags, mentions, tei_xml
+  ) VALUES (
+    @id, @title, @type, @date, @recipient, @location, @author,
+    @transcription, @transcription_url, @transcription_format,
+    @facsimile_url, @iiif_manifest_url, @provenance, @source, @source_url, @tags, @mentions, @tei_xml
+  )
+  ON CONFLICT(id) DO UPDATE SET
+    title = excluded.title,
+    type = excluded.type,
+    date = excluded.date,
+    recipient = excluded.recipient,
+    location = excluded.location,
+    author = excluded.author,
+    transcription = excluded.transcription,
+    transcription_url = excluded.transcription_url,
+    transcription_format = excluded.transcription_format,
+    facsimile_url = excluded.facsimile_url,
+    iiif_manifest_url = excluded.iiif_manifest_url,
+    provenance = excluded.provenance,
+    source = excluded.source,
+    source_url = excluded.source_url,
+    tags = excluded.tags,
+    mentions = excluded.mentions,
+    tei_xml = excluded.tei_xml
+`;
+
+function upsertDocumentArgs(doc: Document): Record<string, InValue> {
+  return {
+    id: doc.id,
+    title: doc.title,
+    type: doc.type,
+    date: doc.date,
+    recipient: doc.recipient ?? null,
+    location: doc.location ?? null,
+    author: doc.author,
+    transcription: doc.transcription,
+    transcription_url: doc.transcriptionUrl ?? null,
+    transcription_format: doc.transcriptionFormat,
+    facsimile_url: doc.facsimileUrl ?? null,
+    iiif_manifest_url: doc.iiifManifestUrl ?? null,
+    provenance: doc.provenance ?? null,
+    source: doc.source,
+    source_url: doc.sourceUrl ?? null,
+    tags: JSON.stringify(doc.tags),
+    mentions: JSON.stringify(doc.mentions ?? []),
+    tei_xml: doc.teiXml ?? null,
+  };
+}
+
+function provenanceStmt(
   documentId: string,
   field: ProvenanceField,
   ctx: ProvenanceContext,
-): void {
-  db.prepare(
-    `INSERT INTO document_field_provenance (document_id, field, source_url, fetched_at, editor)
-     VALUES (@document_id, @field, @source_url, @fetched_at, @editor)
-     ON CONFLICT(document_id, field) DO UPDATE SET
-       source_url = excluded.source_url,
-       fetched_at = excluded.fetched_at,
-       editor = excluded.editor`,
-  ).run({
-    document_id: documentId,
-    field,
-    source_url: ctx.sourceUrl,
-    fetched_at: ctx.fetchedAt,
-    editor: ctx.editor,
-  });
+): InStatement {
+  return {
+    sql: `INSERT INTO document_field_provenance (document_id, field, source_url, fetched_at, editor)
+          VALUES (@document_id, @field, @source_url, @fetched_at, @editor)
+          ON CONFLICT(document_id, field) DO UPDATE SET
+            source_url = excluded.source_url,
+            fetched_at = excluded.fetched_at,
+            editor = excluded.editor`,
+    args: {
+      document_id: documentId,
+      field,
+      source_url: ctx.sourceUrl ?? null,
+      fetched_at: ctx.fetchedAt,
+      editor: ctx.editor,
+    },
+  };
 }
 
-export function getFieldProvenance(
-  db: DatabaseT,
+export async function upsertDocument(
+  client: LibsqlClient,
+  doc: Document,
+  ctx?: ProvenanceContext,
+): Promise<void> {
+  const stmts: InStatement[] = [
+    { sql: UPSERT_DOCUMENT_SQL, args: upsertDocumentArgs(doc) },
+  ];
+  if (ctx) {
+    for (const field of PROVENANCE_FIELDS) {
+      stmts.push(provenanceStmt(doc.id, field, ctx));
+    }
+  }
+  if (stmts.length === 1) {
+    await client.execute(stmts[0]!);
+  } else {
+    await client.batch(stmts, 'write');
+  }
+}
+
+export async function getFieldProvenance(
+  client: LibsqlClient,
   documentId: string,
-): Record<string, FieldProvenance> {
-  const rows = db
-    .prepare(
-      `SELECT field, source_url AS sourceUrl, fetched_at AS fetchedAt, editor
-       FROM document_field_provenance
-       WHERE document_id = ?`,
-    )
-    .all(documentId) as Array<{
-    field: string;
-    sourceUrl: string | null;
-    fetchedAt: string;
-    editor: string;
-  }>;
+): Promise<Record<string, FieldProvenance>> {
+  const result = await client.execute({
+    sql: `SELECT field, source_url, fetched_at, editor
+          FROM document_field_provenance
+          WHERE document_id = ?`,
+    args: [documentId],
+  });
   const out: Record<string, FieldProvenance> = {};
-  for (const row of rows) {
-    out[row.field] = {
-      sourceUrl: row.sourceUrl,
-      fetchedAt: row.fetchedAt,
-      editor: row.editor,
+  for (const row of result.rows) {
+    out[asString(row.field)] = {
+      sourceUrl: asNullableString(row.source_url),
+      fetchedAt: asString(row.fetched_at),
+      editor: asString(row.editor),
     };
   }
   return out;
 }
 
-export function rowToDocumentWithProvenance(db: DatabaseT, row: DocumentRow): Document {
+export async function rowToDocumentWithProvenance(
+  client: LibsqlClient,
+  row: DocumentRow,
+): Promise<Document> {
   const doc = rowToDocument(row);
-  const fieldProvenance = getFieldProvenance(db, row.id);
+  const fieldProvenance = await getFieldProvenance(client, row.id);
   if (Object.keys(fieldProvenance).length > 0) {
     doc.fieldProvenance = fieldProvenance;
   }
   return doc;
 }
 
-export function patchDocumentFields(
-  db: DatabaseT,
+export async function patchDocumentFields(
+  client: LibsqlClient,
   documentId: string,
   patch: DocumentPatch,
   ctx: ProvenanceContext,
-): Document | null {
-  const existing = db
-    .prepare('SELECT * FROM documents WHERE id = ?')
-    .get(documentId) as DocumentRow | undefined;
-  if (!existing) return null;
+): Promise<Document | null> {
+  const existing = await client.execute({
+    sql: 'SELECT * FROM documents WHERE id = ?',
+    args: [documentId],
+  });
+  if (existing.rows.length === 0) return null;
+  const existingRow = rowToDocumentRow(existing.rows[0]!);
+  const current = rowToDocument(existingRow);
 
-  const current = rowToDocument(existing);
   const entries = Object.entries(patch) as Array<[ProvenanceField, unknown]>;
-  if (entries.length === 0) return rowToDocumentWithProvenance(db, existing);
+  if (entries.length === 0) return rowToDocumentWithProvenance(client, existingRow);
 
   const setClauses: string[] = [];
-  const params: Record<string, unknown> = { id: documentId };
+  const params: Record<string, InValue> = { id: documentId };
   const changed: Array<{ field: ProvenanceField; previous: unknown; next: unknown }> = [];
 
   for (const [field, nextValue] of entries) {
@@ -319,7 +410,7 @@ export function patchDocumentFields(
     params[column] =
       field === 'tags' || field === 'mentions'
         ? JSON.stringify(nextValue ?? [])
-        : (nextValue ?? null);
+        : ((nextValue ?? null) as InValue);
     const previous = fieldValueFromDocument(current, field);
     if (JSON.stringify(previous) !== JSON.stringify(nextValue)) {
       changed.push({ field, previous, next: nextValue });
@@ -327,35 +418,36 @@ export function patchDocumentFields(
   }
 
   const updateSql = `UPDATE documents SET ${setClauses.join(', ')} WHERE id = @id`;
-  const updateStmt = db.prepare(updateSql);
-  const historyStmt = db.prepare(
-    `INSERT INTO document_field_provenance_history
-       (document_id, field, previous_value, new_value, source_url, fetched_at, editor)
-     VALUES (@document_id, @field, @previous_value, @new_value, @source_url, @fetched_at, @editor)`,
-  );
+  const stmts: InStatement[] = [{ sql: updateSql, args: params }];
 
-  db.transaction(() => {
-    updateStmt.run(params);
-    for (const [field] of entries) {
-      recordFieldProvenance(db, documentId, field, ctx);
-    }
-    for (const change of changed) {
-      historyStmt.run({
+  for (const [field] of entries) {
+    stmts.push(provenanceStmt(documentId, field, ctx));
+  }
+  for (const change of changed) {
+    stmts.push({
+      sql: `INSERT INTO document_field_provenance_history
+              (document_id, field, previous_value, new_value, source_url, fetched_at, editor)
+            VALUES (@document_id, @field, @previous_value, @new_value, @source_url, @fetched_at, @editor)`,
+      args: {
         document_id: documentId,
         field: change.field,
         previous_value: JSON.stringify(change.previous ?? null),
         new_value: JSON.stringify(change.next ?? null),
-        source_url: ctx.sourceUrl,
+        source_url: ctx.sourceUrl ?? null,
         fetched_at: ctx.fetchedAt,
         editor: ctx.editor,
-      });
-    }
-  })();
+      },
+    });
+  }
 
-  const updated = db
-    .prepare('SELECT * FROM documents WHERE id = ?')
-    .get(documentId) as DocumentRow;
-  return rowToDocumentWithProvenance(db, updated);
+  await client.batch(stmts, 'write');
+
+  const updated = await client.execute({
+    sql: 'SELECT * FROM documents WHERE id = ?',
+    args: [documentId],
+  });
+  if (updated.rows.length === 0) return null;
+  return rowToDocumentWithProvenance(client, rowToDocumentRow(updated.rows[0]!));
 }
 
 interface SectionRow {
@@ -371,19 +463,33 @@ interface SectionRow {
   xml_fragment: string;
 }
 
-export function getSectionsByDocumentId(
-  db: DatabaseT,
+function rowToSectionRow(row: Row): SectionRow {
+  return {
+    id: asString(row.id),
+    document_id: asString(row.document_id),
+    parent_id: asNullableString(row.parent_id),
+    order: Number(row.order ?? 0),
+    level: Number(row.level ?? 0),
+    type: asString(row.type),
+    n: asNullableString(row.n),
+    heading: asNullableString(row.heading),
+    text: asString(row.text),
+    xml_fragment: asString(row.xml_fragment),
+  };
+}
+
+export async function getSectionsByDocumentId(
+  client: LibsqlClient,
   documentId: string,
-): DocumentSection[] {
-  const rows = db
-    .prepare(
-      `SELECT id, document_id, parent_id, "order", level, type, n, heading, text, xml_fragment
-       FROM document_sections
-       WHERE document_id = ?
-       ORDER BY "order"`,
-    )
-    .all(documentId) as SectionRow[];
-  return rows.map((row) => ({
+): Promise<DocumentSection[]> {
+  const result = await client.execute({
+    sql: `SELECT id, document_id, parent_id, "order", level, type, n, heading, text, xml_fragment
+          FROM document_sections
+          WHERE document_id = ?
+          ORDER BY "order"`,
+    args: [documentId],
+  });
+  return result.rows.map(rowToSectionRow).map((row) => ({
     id: row.id,
     documentId: row.document_id,
     parentId: row.parent_id,
@@ -397,37 +503,37 @@ export function getSectionsByDocumentId(
   }));
 }
 
-export function replaceSections(
-  db: DatabaseT,
+export async function replaceSections(
+  client: LibsqlClient,
   documentId: string,
   sections: DocumentSection[],
-): void {
-  const del = db.prepare('DELETE FROM document_sections WHERE document_id = ?');
-  const ins = db.prepare(`
-    INSERT INTO document_sections (
-      id, document_id, parent_id, "order", level, type, n, heading, text, xml_fragment
-    ) VALUES (
-      @id, @document_id, @parent_id, @order, @level, @type, @n, @heading, @text, @xml_fragment
-    )
-  `);
-
-  const tx = db.transaction((docId: string, secs: DocumentSection[]) => {
-    del.run(docId);
-    for (const s of secs) {
-      ins.run({
+): Promise<void> {
+  const stmts: InStatement[] = [
+    {
+      sql: 'DELETE FROM document_sections WHERE document_id = ?',
+      args: [documentId],
+    },
+    ...sections.map<InStatement>((s) => ({
+      sql: `INSERT INTO document_sections (
+              id, document_id, parent_id, "order", level, type, n, heading, text, xml_fragment
+            ) VALUES (
+              @id, @document_id, @parent_id, @order, @level, @type, @n, @heading, @text, @xml_fragment
+            )`,
+      args: {
         id: s.id,
         document_id: s.documentId,
-        parent_id: s.parentId,
+        parent_id: s.parentId ?? null,
         order: s.order,
         level: s.level,
         type: s.type,
-        n: s.n,
-        heading: s.heading,
+        n: s.n ?? null,
+        heading: s.heading ?? null,
         text: s.text,
         xml_fragment: s.xmlFragment,
-      });
-    }
-  });
-
-  tx(documentId, sections);
+      },
+    })),
+  ];
+  await client.batch(stmts, 'write');
 }
+
+export type { LibsqlClient };
