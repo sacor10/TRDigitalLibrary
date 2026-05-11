@@ -118,6 +118,17 @@ describe('Timeline', () => {
     expect(screen.getByText(/Document opened/i)).toBeTruthy();
   });
 
+  it('previews the selected marker title and date in the timeline frame', () => {
+    renderTimeline(docs, {
+      dateFrom: '1910-01-23',
+      dateTo: '1910-07-23',
+      selectedDocumentId: 'e',
+    });
+
+    expect(screen.getByText('E')).toBeTruthy();
+    expect(screen.getByText('1910-04-23')).toBeTruthy();
+  });
+
   it('recenters the six-month window when another marker is activated at exactly six months', () => {
     const onDateRangeChange = vi.fn();
     renderTimeline(docs, {

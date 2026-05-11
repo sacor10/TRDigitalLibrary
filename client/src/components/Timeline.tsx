@@ -228,6 +228,9 @@ export function Timeline({
     }
     openDocument(doc);
   };
+  const selectedDocument = selectedDocumentId
+    ? documents.find((doc) => doc.id === selectedDocumentId)
+    : undefined;
 
   if (plotted.length === 0) {
     return <p className="py-12 text-center">No documents to plot.</p>;
@@ -241,7 +244,20 @@ export function Timeline({
       <figcaption className="sr-only">
         Timeline of {plotted.length} documents. Use Tab to focus a marker and Enter to open it.
       </figcaption>
-      <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <div className="relative -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        {selectedDocument && (
+          <div
+            className="pointer-events-none absolute left-4 top-3 z-10 max-w-[min(28rem,calc(100%-2rem))] rounded-md border border-ink-700/15 bg-white/90 px-3 py-2 text-sm shadow-sm backdrop-blur dark:border-parchment-50/15 dark:bg-ink-900/90"
+            aria-live="polite"
+          >
+            <p className="truncate font-medium text-ink-900 dark:text-parchment-50">
+              {selectedDocument.title}
+            </p>
+            <p className="mt-0.5 text-xs text-ink-700/75 dark:text-parchment-100/75">
+              {selectedDocument.date}
+            </p>
+          </div>
+        )}
         <svg
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           className="h-auto min-w-[48rem] sm:min-w-0 sm:w-full"
