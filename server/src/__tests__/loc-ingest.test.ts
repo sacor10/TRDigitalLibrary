@@ -730,6 +730,67 @@ describe('LoC ingestion', () => {
       expect(report.skipped).toBe(1);
     });
 
+    it('fetches items concurrently and flushes the page as a single batched write', async () => {
+      db = await openInMemoryDatabase();
+
+      // Build a 5-item collection page with distinct ids so we can observe
+      // multiple concurrent item fetches in flight at once.
+      const items = Array.from({ length: 5 }, (_, i) => {
+        const num = `mss5500${i.toString().padStart(2, '0')}`;
+        return {
+          collection: {
+            id: `http://www.loc.gov/item/${num}/`,
+            url: `https://www.loc.gov/item/${num}/`,
+            title: `concurrent item ${i}`,
+          },
+          item: {
+            ...locItem,
+            id: `http://www.loc.gov/item/${num}/`,
+            url: `https://www.loc.gov/item/${num}/`,
+            number: [num],
+          },
+          docId: `loc-${num}`,
+        };
+      });
+      const concurrentPage = {
+        pagination: { next: null },
+        results: items.map((x) => x.collection),
+      };
+
+      let itemInFlight = 0;
+      let itemPeakInFlight = 0;
+      const fetchImpl: FetchLike = async (url: string) => {
+        if (isCollectionUrl(url)) return jsonResponse(concurrentPage);
+        for (const x of items) {
+          if (url.startsWith(x.collection.url)) {
+            itemInFlight += 1;
+            itemPeakInFlight = Math.max(itemPeakInFlight, itemInFlight);
+            // Yield to the event loop so the pool actually overlaps requests.
+            await new Promise((r) => setTimeout(r, 5));
+            itemInFlight -= 1;
+            return jsonResponse({ item: x.item });
+          }
+        }
+        return new Response('LoC full text with unique-token-alpenglow.', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        });
+      };
+
+      const report = await ingestLocCollection({
+        db,
+        fetchImpl,
+        logger: silentLogger,
+        concurrency: 4,
+      });
+
+      expect(report.written).toBe(5);
+      expect(report.failed).toBe(0);
+      expect(itemPeakInFlight).toBeGreaterThan(1); // proves overlap occurred
+      const count = await db.execute('SELECT COUNT(*) AS c FROM documents');
+      expect(Number(count.rows[0]?.c)).toBe(5);
+    });
+
     it('--reset clears the cursor so the next run starts at page 1', async () => {
       db = await openInMemoryDatabase();
       await ingestLocCollection({

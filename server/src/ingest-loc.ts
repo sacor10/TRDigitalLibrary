@@ -44,6 +44,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 interface CliOptions {
   dbPath: string;
+  /**
+   * True when `--db` was passed on the CLI. When false, the env var
+   * `TURSO_LIBRARY_DATABASE_URL` is allowed to win in `openLibraryDb`; when
+   * true, the local file path overrides everything.
+   */
+  dbPathExplicit: boolean;
   dryRun: boolean;
   reset: boolean;
   force: boolean;
@@ -97,6 +103,7 @@ function parseCliArgs(argv: string[]): CliOptions {
   const startPage = positiveInt(values['start-page'], '--start-page') ?? 1;
   const opts: CliOptions = {
     dbPath: values.db ? resolve(values.db) : defaultDbPath,
+    dbPathExplicit: values.db != null,
     dryRun: Boolean(values['dry-run']),
     reset: Boolean(values.reset),
     force: Boolean(values.force),
@@ -169,13 +176,30 @@ async function main(): Promise<void> {
   const opts = parseCliArgs(process.argv.slice(2));
   let db: LibsqlClient | null = null;
   if (!opts.dryRun) {
-    mkdirSync(dirname(opts.dbPath), { recursive: true });
-    // The CLI's --db flag stays a path for backwards compatibility with the
-    // pre-Turso workflow; route it through openLibraryDb as a file: URL so
-    // local-dev devs without Turso credentials keep working unchanged. Setting
-    // TURSO_LIBRARY_DATABASE_URL still wins because openLibraryDb prefers
-    // explicit opts.url over its env-var fallback chain.
-    db = await openLibraryDb({ url: `file:${opts.dbPath}` });
+    // Only force a local file URL when the operator explicitly passed --db.
+    // Without it, fall through to openLibraryDb's resolution chain
+    // (TURSO_LIBRARY_DATABASE_URL → local file fallback) so production builds
+    // write to Turso. The previous code always passed url=file:..., which
+    // silently masked the env var and made every Netlify build write to a
+    // throwaway path inside the build container.
+    if (opts.dbPathExplicit) {
+      mkdirSync(dirname(opts.dbPath), { recursive: true });
+      db = await openLibraryDb({ url: `file:${opts.dbPath}` });
+      console.log(`[ingest-loc] db: file:${opts.dbPath} (explicit --db)`);
+    } else {
+      db = await openLibraryDb();
+      const envUrl = process.env.TURSO_LIBRARY_DATABASE_URL ?? '(local file fallback)';
+      // Don't print the auth token; print only the URL host so the user can
+      // confirm in the build log that the right Turso instance was reached.
+      const host = (() => {
+        try {
+          return new URL(envUrl.replace(/^libsql:/, 'https:')).host;
+        } catch {
+          return envUrl;
+        }
+      })();
+      console.log(`[ingest-loc] db: ${envUrl.startsWith('file:') ? envUrl : `libsql://${host}`}`);
+    }
   }
 
   try {
@@ -193,6 +217,23 @@ async function main(): Promise<void> {
     if (opts.startPageExplicit) ingestOptions.startPage = opts.startPage;
     if (opts.limit != null) ingestOptions.limit = opts.limit;
     if (opts.editor) ingestOptions.editor = opts.editor;
+    // Read concurrency from the env so the orchestrator (or operator) can
+    // tune it without recompiling. Non-positive values fall back to the
+    // library default.
+    const concurrencyEnv = process.env.INGEST_CONCURRENCY;
+    if (concurrencyEnv) {
+      const n = Number(concurrencyEnv);
+      if (Number.isInteger(n) && n > 0) {
+        ingestOptions.concurrency = n;
+      } else {
+        console.warn(
+          `[ingest-loc] INGEST_CONCURRENCY="${concurrencyEnv}" is not a positive integer; using default.`,
+        );
+      }
+    }
+    console.log(
+      `[ingest-loc] starting: limit=${opts.limit ?? '∞'} concurrency=${ingestOptions.concurrency ?? 'default'}`,
+    );
     const report = await ingestLocCollection(ingestOptions);
     printReport(report);
     process.exit(report.failed > 0 ? 1 : 0);

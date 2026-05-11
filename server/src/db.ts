@@ -398,6 +398,47 @@ export async function upsertDocument(
 }
 
 /**
+ * Upsert many documents in a single Turso write batch.
+ *
+ * Each entry contributes one INSERT into `documents` and (when ctx is
+ * provided) one row per PROVENANCE_FIELDS into
+ * `document_field_provenance` — so a batch of N items expands to
+ * roughly `N * (1 + PROVENANCE_FIELDS.length)` statements. Callers
+ * should size their input lists modestly (the LoC ingest uses ~25 per
+ * page, ~450 statements per batch) so the libsql HTTP payload stays
+ * within Turso's per-batch limits.
+ *
+ * All statements run inside a single libsql write batch, so partial
+ * failures roll the whole batch back. That's the desired semantics for
+ * chunked ingest: a failed batch leaves the cursor unchanged and the
+ * next build retries those items via skip-if-exists.
+ */
+export async function upsertDocumentsBatch(
+  client: LibsqlClient,
+  items: Array<{ doc: Document; ctx?: ProvenanceContext; teiSourceHash?: string | null }>,
+  opts: UpsertDocumentOptions = {},
+): Promise<void> {
+  if (items.length === 0) return;
+  const sql =
+    opts.mode === 'skip-if-exists'
+      ? UPSERT_DOCUMENT_SKIP_IF_EXISTS_SQL
+      : UPSERT_DOCUMENT_REPLACE_SQL;
+  const stmts: InStatement[] = [];
+  for (const { doc, ctx, teiSourceHash } of items) {
+    stmts.push({
+      sql,
+      args: upsertDocumentArgs(doc, teiSourceHash ?? opts.teiSourceHash ?? null),
+    });
+    if (ctx) {
+      for (const field of PROVENANCE_FIELDS) {
+        stmts.push(provenanceStmt(doc.id, field, ctx));
+      }
+    }
+  }
+  await client.batch(stmts, 'write');
+}
+
+/**
  * Returns the row's existing `tei_source_hash` (or `null` if the row exists
  * with no recorded hash, or `undefined` if the row does not exist). The TEI
  * ingest uses this to short-circuit unchanged files without parsing or
