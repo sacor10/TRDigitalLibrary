@@ -71,6 +71,27 @@ describe('transformToDocument', () => {
     expect(document.id).toBe('some-letter');
   });
 
+  it('clamps pre-1877 TEI dates to the earliest Roosevelt publication date', () => {
+    const xml = `<?xml version="1.0"?>
+       <TEI xmlns="http://www.tei-c.org/ns/1.0" xml:id="range-record">
+         <teiHeader>
+           <fileDesc>
+             <titleStmt><title>Collection range record</title></titleStmt>
+             <publicationStmt><p>x</p></publicationStmt>
+             <sourceDesc><bibl>x</bibl></sourceDesc>
+           </fileDesc>
+           <profileDesc><creation><date when="1759-08-01">1759-1898</date></creation></profileDesc>
+         </teiHeader>
+         <text><body><p>hello</p></body></text>
+       </TEI>`;
+    const parsed = parseTei(xml);
+    const { document } = transformToDocument(parsed, {
+      filename: '/tmp/range-record.xml',
+      rawXml: xml,
+    });
+    expect(document.date).toBe('1877-01-01');
+  });
+
   it('throws when the date cannot be derived', () => {
     const xml = `<?xml version="1.0"?>
        <TEI xmlns="http://www.tei-c.org/ns/1.0" xml:id="undated">

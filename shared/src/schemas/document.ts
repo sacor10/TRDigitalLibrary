@@ -11,9 +11,18 @@ export const DocumentTypeSchema = z.enum([
 
 export type DocumentType = z.infer<typeof DocumentTypeSchema>;
 
+export const EARLIEST_ROOSEVELT_DOCUMENT_DATE = '1877-01-01';
+
+export function clampRooseveltDocumentDate(date: string): string {
+  return date < EARLIEST_ROOSEVELT_DOCUMENT_DATE ? EARLIEST_ROOSEVELT_DOCUMENT_DATE : date;
+}
+
 const isoDate = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format');
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
+  .refine((date) => date >= EARLIEST_ROOSEVELT_DOCUMENT_DATE, {
+    message: `Date must not be earlier than ${EARLIEST_ROOSEVELT_DOCUMENT_DATE}`,
+  });
 
 export const TranscriptionFormatSchema = z.enum([
   'wikisource-html',

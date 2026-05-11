@@ -171,15 +171,18 @@ describe('LoC ingestion', () => {
 
   it('normalizes common LoC date shapes', () => {
     expect(normalizeLocDate('19011112/19011216')).toBe('1901-11-12');
-    expect(normalizeLocDate('17590800/18980500')).toBe('1759-08-01');
+    expect(normalizeLocDate('18770000/18980500')).toBe('1877-01-01');
     expect(normalizeLocDate('November 12, 1901 - December 16, 1901')).toBe(
       '1901-11-12',
     );
-    expect(normalizeLocDate('1759-08')).toBe('1759-08-01');
+    expect(normalizeLocDate('1877-08')).toBe('1877-08-01');
     expect(normalizeLocDate('1902')).toBe('1902-01-01');
   });
 
-  it('dates the first Series 1 range item to the earliest TR-authored work', () => {
+  it('clamps pre-1877 LoC range dates to the earliest TR-authored work', () => {
+    expect(normalizeLocDate('17590800/18980500')).toBe('1877-01-01');
+    expect(normalizeLocDate('1759-08')).toBe('1877-01-01');
+
     const doc = mapLocItemToDocument(locFirstSeriesRangeItem);
 
     expect(doc.id).toBe('loc-mss382990001');

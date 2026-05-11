@@ -3,6 +3,7 @@ import { basename } from 'node:path';
 import {
   DocumentSchema,
   DocumentSectionSchema,
+  clampRooseveltDocumentDate,
   type Document,
   type DocumentSection,
   type DocumentType,
@@ -62,11 +63,11 @@ function deriveId(metadata: TeiMetadata, filename: string): string {
 function normalizeDate(raw: string | null): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-  if (/^\d{4}-\d{2}$/.test(trimmed)) return `${trimmed}-01`;
-  if (/^\d{4}$/.test(trimmed)) return `${trimmed}-01-01`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return clampRooseveltDocumentDate(trimmed);
+  if (/^\d{4}-\d{2}$/.test(trimmed)) return clampRooseveltDocumentDate(`${trimmed}-01`);
+  if (/^\d{4}$/.test(trimmed)) return clampRooseveltDocumentDate(`${trimmed}-01-01`);
   const m = trimmed.match(/(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  if (m) return clampRooseveltDocumentDate(`${m[1]}-${m[2]}-${m[3]}`);
   return null;
 }
 
