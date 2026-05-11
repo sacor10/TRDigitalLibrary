@@ -63,6 +63,28 @@ const locItem = {
   },
 };
 
+const locFirstSeriesRangeItem = {
+  id: 'http://www.loc.gov/item/mss382990001/',
+  url: 'https://www.loc.gov/item/mss382990001/',
+  title:
+    'Theodore Roosevelt Papers: Series 1: Letters and Related Material, 1759-1919; 1759, Aug.-1898, May',
+  date: '1759-08',
+  contributor_names: ['Roosevelt, Theodore, 1858-1919'],
+  number: ['mss382990001'],
+  original_format: ['manuscript/mixed material'],
+  item: {
+    call_number: [
+      'mss38299, reel 1',
+      'series: Series 1: Letters and Related Material, 1759-1919',
+    ],
+    contributors: ['Roosevelt, Theodore, 1858-1919'],
+    source_collection: 'Theodore Roosevelt papers',
+    title:
+      'Theodore Roosevelt Papers: Series 1: Letters and Related Material, 1759-1919; 1759, Aug.-1898, May',
+    date: '17590800/18980500',
+  },
+};
+
 function fakeFetch(text = 'LoC full text with unique-token-alpenglow.'): FetchLike {
   return async (url: string) => {
     if (url.includes('/collections/theodore-roosevelt-papers/')) {
@@ -149,10 +171,23 @@ describe('LoC ingestion', () => {
 
   it('normalizes common LoC date shapes', () => {
     expect(normalizeLocDate('19011112/19011216')).toBe('1901-11-12');
+    expect(normalizeLocDate('18770000/18980500')).toBe('1877-01-01');
     expect(normalizeLocDate('November 12, 1901 - December 16, 1901')).toBe(
       '1901-11-12',
     );
+    expect(normalizeLocDate('1877-08')).toBe('1877-08-01');
     expect(normalizeLocDate('1902')).toBe('1902-01-01');
+  });
+
+  it('clamps pre-1877 LoC range dates to the earliest TR-authored work', () => {
+    expect(normalizeLocDate('17590800/18980500')).toBe('1877-01-01');
+    expect(normalizeLocDate('1759-08')).toBe('1877-01-01');
+
+    const doc = mapLocItemToDocument(locFirstSeriesRangeItem);
+
+    expect(doc.id).toBe('loc-mss382990001');
+    expect(doc.date).toBe('1877-01-01');
+    expect(() => DocumentSchema.parse(doc)).not.toThrow();
   });
 
   it('does not write rows during dry run', async () => {

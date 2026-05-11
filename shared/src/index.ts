@@ -1,6 +1,7 @@
 export {
   DocumentSchema,
   DocumentTypeSchema,
+  EARLIEST_ROOSEVELT_DOCUMENT_DATE,
   TranscriptionFormatSchema,
   DocumentSectionSchema,
   DocumentSectionTypeSchema,
@@ -8,6 +9,7 @@ export {
   DocumentListQuerySchema,
   DocumentPatchSchema,
   FieldProvenanceSchema,
+  clampRooseveltDocumentDate,
   SearchQuerySchema,
   SearchResultSchema,
   SearchResponseSchema,

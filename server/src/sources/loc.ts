@@ -1,4 +1,4 @@
-import { DocumentSchema, type Document } from '@tr/shared';
+import { DocumentSchema, clampRooseveltDocumentDate, type Document } from '@tr/shared';
 
 import {
   documentExists,
@@ -268,21 +268,32 @@ function monthNumber(name: string): string {
   return String(idx + 1).padStart(2, '0');
 }
 
+function isoDateFromParts(year: string, month = '01', day = '01'): string {
+  const safeMonth = month === '00' ? '01' : month;
+  const safeDay = day === '00' ? '01' : day;
+  return `${year}-${safeMonth}-${safeDay}`;
+}
+
 export function normalizeLocDate(raw: string | null): string {
   if (!raw) return '1900-01-01';
   const trimmed = raw.trim();
+  const clamp = (date: string): string => clampRooseveltDocumentDate(date);
   const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  if (iso) return clamp(isoDateFromParts(iso[1]!, iso[2]!, iso[3]!));
+  const isoMonth = trimmed.match(/^(\d{4})-(\d{2})(?:\b|$)/);
+  if (isoMonth) return clamp(isoDateFromParts(isoMonth[1]!, isoMonth[2]!));
   const compact = trimmed.match(/^(\d{4})(\d{2})(\d{2})/);
-  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
+  if (compact) return clamp(isoDateFromParts(compact[1]!, compact[2]!, compact[3]!));
   const month = trimmed.match(
     /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s*(\d{4})/i,
   );
   if (month) {
-    return `${month[3]}-${monthNumber(month[1]!)}-${month[2]!.padStart(2, '0')}`;
+    return clamp(
+      isoDateFromParts(month[3]!, monthNumber(month[1]!), month[2]!.padStart(2, '0')),
+    );
   }
   const year = trimmed.match(/\b(\d{4})\b/);
-  if (year) return `${year[1]}-01-01`;
+  if (year) return clamp(isoDateFromParts(year[1]!));
   return '1900-01-01';
 }
 
@@ -555,10 +566,9 @@ async function runWithConcurrency<T, R>(
   for (let lane = 0; lane < lanes; lane += 1) {
     pool.push(
       (async () => {
-        while (true) {
+        while (cursor < items.length) {
           const idx = cursor;
           cursor += 1;
-          if (idx >= items.length) return;
           results[idx] = await worker(items[idx]!, idx);
         }
       })(),
