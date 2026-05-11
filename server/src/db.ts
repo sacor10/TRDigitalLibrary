@@ -244,7 +244,12 @@ export function locateMigrationsDir(): string {
   return found;
 }
 
-async function runMigrations(client: LibsqlClient): Promise<void> {
+/** @internal Exported only for the cold-start regression test in
+ * `__tests__/migrations.test.ts`. The shape of the wire protocol matters
+ * (single CREATE + single batched SELECT on a fully-applied DB), and that
+ * contract is easier to assert against the function directly than to spy
+ * on the libsql HTTP client through a module-level monkey patch. */
+export async function runMigrations(client: LibsqlClient): Promise<void> {
   await client.execute(
     `CREATE TABLE IF NOT EXISTS schema_migrations (
        id TEXT PRIMARY KEY,
@@ -256,14 +261,21 @@ async function runMigrations(client: LibsqlClient): Promise<void> {
   const files = readdirSync(migrationsDir)
     .filter((f) => f.endsWith('.sql'))
     .sort();
+  if (files.length === 0) return;
+
+  // One batched IN-clause probe instead of one SELECT per file. The serverless
+  // function's cold start used to fire N sequential round-trips to Turso just
+  // to verify migrations were already applied, which dominated wall time and
+  // could push the first request past the function's 502 threshold.
+  const placeholders = files.map(() => '?').join(',');
+  const appliedResult = await client.execute({
+    sql: `SELECT id FROM schema_migrations WHERE id IN (${placeholders})`,
+    args: files as InValue[],
+  });
+  const applied = new Set(appliedResult.rows.map((row) => String(row.id)));
 
   for (const file of files) {
-    const applied = await client.execute({
-      sql: 'SELECT 1 FROM schema_migrations WHERE id = ?',
-      args: [file],
-    });
-    if (applied.rows.length > 0) continue;
-
+    if (applied.has(file)) continue;
     const sql = readFileSync(join(migrationsDir, file), 'utf8');
     // executeMultiple is the libsql equivalent of better-sqlite3's db.exec():
     // it runs the entire script as a sequence of statements separated by ';'

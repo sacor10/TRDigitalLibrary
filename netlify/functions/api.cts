@@ -22,35 +22,49 @@ async function createHandler(): Promise<ServerlessHandler> {
     );
   }
 
-  const db = await openLibraryDb({
-    url: tursoLibraryUrl,
-    ...(tursoLibraryAuthToken ? { authToken: tursoLibraryAuthToken } : {}),
-  });
-
   const sessionSecret = process.env.SESSION_SECRET;
   const tursoDatabaseUrl = process.env.TURSO_DATABASE_URL;
   const tursoAuthToken = process.env.TURSO_AUTH_TOKEN;
   const googleClientId = process.env.GOOGLE_CLIENT_ID;
+  const annotationsEnabled = Boolean(sessionSecret && tursoDatabaseUrl);
+
+  // Open the library DB and (when configured) the annotations DB in parallel.
+  // Each open does a round-trip to Turso to verify migrations; doing them
+  // sequentially doubled cold-start latency.
+  const annotationsModulesPromise = annotationsEnabled
+    ? Promise.all([
+        import('../../server/src/annotations-db.js'),
+        import('../../server/src/auth/google.js'),
+      ])
+    : null;
+
+  const [db, annotationsBundle] = await Promise.all([
+    openLibraryDb({
+      url: tursoLibraryUrl,
+      ...(tursoLibraryAuthToken ? { authToken: tursoLibraryAuthToken } : {}),
+    }),
+    annotationsModulesPromise
+      ? annotationsModulesPromise.then(async ([{ openAnnotationsDb }, { createGoogleVerifier }]) => {
+          const annotationsDb = await openAnnotationsDb({
+            url: tursoDatabaseUrl as string,
+            ...(tursoAuthToken ? { authToken: tursoAuthToken } : {}),
+          });
+          return { annotationsDb, createGoogleVerifier };
+        })
+      : Promise.resolve(null),
+  ]);
 
   // Auth and annotations need a writable production store. If either required
   // piece is missing, keep the read-only document API online and leave auth off.
-  let annotationsOptions = {};
-  if (sessionSecret && tursoDatabaseUrl) {
-    const [{ openAnnotationsDb }, { createGoogleVerifier }] = await Promise.all([
-      import('../../server/src/annotations-db.js'),
-      import('../../server/src/auth/google.js'),
-    ]);
-    const annotationsDb = await openAnnotationsDb({
-      url: tursoDatabaseUrl,
-      ...(tursoAuthToken ? { authToken: tursoAuthToken } : {}),
-    });
-
-    annotationsOptions = {
-      annotationsDb,
-      sessionSecret,
-      ...(googleClientId ? { verifyGoogleIdToken: createGoogleVerifier(googleClientId) } : {}),
-    };
-  }
+  const annotationsOptions: Record<string, unknown> = annotationsBundle
+    ? {
+        annotationsDb: annotationsBundle.annotationsDb,
+        sessionSecret,
+        ...(googleClientId
+          ? { verifyGoogleIdToken: annotationsBundle.createGoogleVerifier(googleClientId) }
+          : {}),
+      }
+    : {};
 
   const app = createApp(db, {
     readonly: true,

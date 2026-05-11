@@ -69,13 +69,19 @@ async function runMigrations(client: LibsqlClient): Promise<void> {
   const files = readdirSync(migrationsDir)
     .filter((f) => f.endsWith('.sql'))
     .sort();
+  if (files.length === 0) return;
+
+  // Single batched probe instead of one SELECT per file. See server/src/db.ts
+  // for the same optimisation on the library DB and the cold-start motivation.
+  const placeholders = files.map(() => '?').join(',');
+  const appliedResult = await client.execute({
+    sql: `SELECT id FROM schema_migrations WHERE id IN (${placeholders})`,
+    args: files,
+  });
+  const applied = new Set(appliedResult.rows.map((row) => String(row.id)));
 
   for (const file of files) {
-    const applied = await client.execute({
-      sql: 'SELECT 1 FROM schema_migrations WHERE id = ?',
-      args: [file],
-    });
-    if (applied.rows.length > 0) continue;
+    if (applied.has(file)) continue;
 
     const sql = readFileSync(join(migrationsDir, file), 'utf8');
     const statements = sql
