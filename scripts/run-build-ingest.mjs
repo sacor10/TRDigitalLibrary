@@ -48,7 +48,9 @@
  *
  * Escape hatches (handy for local debugging):
  *   - INGEST_CHUNK_SIZE=<n>       cap LoC ingest at <n> items per build
- *                                (default 2000).
+ *                                (default 500).
+ *   - INGEST_CONCURRENCY=<n>     parallel LoC item fetches per page
+ *                                (default 8; read by ingest-loc directly).
  *   - SKIP_ANALYSIS=1            don't run sentiment / topic-model even
  *                                if the corpus changed.
  *   - SKIP_PIP_INSTALL=1         skip `pip install -r python/requirements.txt`
@@ -75,7 +77,7 @@ if (!TURSO_URL) {
   process.exit(0);
 }
 
-const DEFAULT_CHUNK_SIZE = 2000;
+const DEFAULT_CHUNK_SIZE = 500;
 function resolveChunkSize() {
   const raw = process.env.INGEST_CHUNK_SIZE;
   if (raw == null || raw === '') return DEFAULT_CHUNK_SIZE;
@@ -182,7 +184,10 @@ function pickPython() {
 }
 
 const chunkSize = resolveChunkSize();
-console.log(`[build-ingest] LoC chunk size: ${chunkSize} items per build`);
+const concurrencyDisplay = process.env.INGEST_CONCURRENCY ?? 'default(8)';
+console.log(
+  `[build-ingest] LoC chunk size: ${chunkSize} items/build, concurrency: ${concurrencyDisplay}`,
+);
 
 const summaries = [];
 

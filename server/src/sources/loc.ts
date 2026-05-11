@@ -1,6 +1,11 @@
 import { DocumentSchema, type Document } from '@tr/shared';
 
-import { documentExists, upsertDocument, type LibsqlClient, type ProvenanceContext } from '../db.js';
+import {
+  documentExists,
+  upsertDocumentsBatch,
+  type LibsqlClient,
+  type ProvenanceContext,
+} from '../db.js';
 
 export const LOC_COLLECTION_SLUG = 'theodore-roosevelt-papers';
 export const LOC_SOURCE = 'Library of Congress Theodore Roosevelt Papers';
@@ -20,6 +25,7 @@ const MAX_FETCH_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 1_000;        // backoff schedule: 1s, 2s, 4s (+jitter)
 const MAX_RETRY_AFTER_MS = 30_000;    // cap honoring server Retry-After
 const DEFAULT_PAGE_SIZE = 25;
+const DEFAULT_CONCURRENCY = 8;
 // Defensive cap on a single response body. Fulltext transcriptions are
 // typically a few MB; anything substantially larger likely indicates an
 // unexpected upstream response and we'd rather fail loudly than OOM the
@@ -103,6 +109,12 @@ export interface LocIngestOptions {
    * Explicit `startPage` overrides the cursor.
    */
   autoResume?: boolean;
+  /**
+   * Maximum number of LoC items processed concurrently within a single
+   * collection page. Bounded so we don't overwhelm LoC's rate limits or
+   * the libsql client pool. Defaults to 8.
+   */
+  concurrency?: number;
   fetchImpl?: FetchLike;
   now?: () => Date;
   logger?: Logger;
@@ -518,6 +530,37 @@ function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Run `worker(items[i])` in parallel with at most `concurrency` in flight at
+ * once, preserving result order. Each worker is expected to return a tagged
+ * outcome rather than throw — that keeps a single bad item from short-
+ * circuiting the rest of the page. Internal pool, no external deps.
+ */
+async function runWithConcurrency<T, R>(
+  items: T[],
+  worker: (item: T, index: number) => Promise<R>,
+  concurrency: number,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const pool: Promise<void>[] = [];
+  const lanes = Math.max(1, Math.min(concurrency, items.length));
+  for (let lane = 0; lane < lanes; lane += 1) {
+    pool.push(
+      (async () => {
+        while (true) {
+          const idx = cursor;
+          cursor += 1;
+          if (idx >= items.length) return;
+          results[idx] = await worker(items[idx]!, idx);
+        }
+      })(),
+    );
+  }
+  await Promise.all(pool);
+  return results;
+}
+
 function describeError(err: unknown): { name: string; message: string; cause?: string } {
   const e = err instanceof Error ? err : new Error(String(err));
   const causeRaw = (e as { cause?: unknown }).cause;
@@ -745,6 +788,7 @@ export async function clearIngestCursor(
 export async function ingestLocCollection(options: LocIngestOptions): Promise<LocIngestReport> {
   const dryRun = options.dryRun ?? false;
   const pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
+  const concurrency = Math.max(1, options.concurrency ?? DEFAULT_CONCURRENCY);
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? (() => new Date());
   const logger: Logger = options.logger ?? console;
@@ -851,26 +895,33 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
       break;
     }
 
-    let processedOnPage = 0;
-    for (const result of collection.results) {
-      if (remaining <= 0) break;
-      remaining -= 1;
-      processedOnPage += 1;
-      report.scanned += 1;
+    // Process the page's items concurrently. Each worker fetches LoC item
+    // details + fulltext, maps to a Document, and (for non-skipped ok results)
+    // pushes a pending-write entry. After the workers finish we flush all
+    // pending writes for the page in a single Turso batch — one network
+    // round-trip per page instead of one per document.
+    const sliceLength = Math.min(collection.results.length, remaining);
+    const itemsToProcess = collection.results.slice(0, sliceLength);
+    remaining -= itemsToProcess.length;
+    const processedOnPage = itemsToProcess.length;
 
-      // Predict the document id from the collection-page result so retry +
-      // error logs carry a stable, grep-able identifier even when the item
-      // fetch itself fails.
+    type ItemOutcome =
+      | { kind: 'skipped'; result: LocIngestResult }
+      | {
+          kind: 'ok';
+          doc: Document;
+          ctx: ProvenanceContext | null;
+          result: LocIngestResult;
+          withFullText: boolean;
+          logLine: string;
+        }
+      | { kind: 'error'; result: LocIngestResult; warning: string };
+
+    const processOne = async (result: JsonObject): Promise<ItemOutcome> => {
       const predictedId = predictDocumentIdFromCollectionResult(result);
-
       try {
-        // Fast no-op: predict the document id from the collection-page result
-        // alone and skip the (expensive) item-details fetch + full-text
-        // download if it's already in the DB. `--force` bypasses the check;
-        // `--reset` already wiped the DB so nothing will exist to skip.
         if (!options.force && options.db) {
           if (predictedId && (await documentExists(options.db, predictedId))) {
-            report.skipped += 1;
             const skippedResult: LocIngestResult = {
               status: 'skipped',
               documentId: predictedId,
@@ -879,9 +930,7 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
             if (sourceUrl) skippedResult.sourceUrl = sourceUrl;
             const title = stringAt(result, 'title');
             if (title) skippedResult.title = title;
-            report.results.push(skippedResult);
-            logger.log(`  skipped ${predictedId} (already in DB)`);
-            continue;
+            return { kind: 'skipped', result: skippedResult };
           }
         }
 
@@ -892,27 +941,15 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
           transcription = await fetchText(makeDeps(predictedId), transcriptionUrl, 'fulltext');
         }
         const document = mapLocItemToDocument(item, transcription, transcriptionUrl);
-        report.mapped += 1;
-        if (transcription.trim()) {
-          report.withFullText += 1;
-        } else {
-          report.withoutFullText += 1;
-        }
 
-        if (!dryRun && options.db) {
-          const ctx: ProvenanceContext = {
-            sourceUrl: document.sourceUrl,
-            fetchedAt: now().toISOString(),
-            editor,
-          };
-          // skip-if-exists: belt-and-braces against TOCTOU between the
-          // documentExists check above and the INSERT here. Without --force
-          // we never want to overwrite an already-ingested LoC row from a
-          // build-time re-ingest; corrections should go through the
-          // /api/documents PATCH path which records provenance history.
-          await upsertDocument(options.db, document, ctx, { mode: 'skip-if-exists' });
-          report.written += 1;
-        }
+        const ctx: ProvenanceContext | null =
+          !dryRun && options.db
+            ? {
+                sourceUrl: document.sourceUrl,
+                fetchedAt: now().toISOString(),
+                editor,
+              }
+            : null;
 
         const okResult: LocIngestResult = {
           status: 'ok',
@@ -921,12 +958,16 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
           transcriptionLength: document.transcription.length,
         };
         if (document.sourceUrl) okResult.sourceUrl = document.sourceUrl;
-        report.results.push(okResult);
-        logger.log(
-          `  ${dryRun ? 'mapped' : 'ingested'} ${document.id} (${document.transcription.length} chars)`,
-        );
+
+        return {
+          kind: 'ok',
+          doc: document,
+          ctx,
+          result: okResult,
+          withFullText: transcription.trim().length > 0,
+          logLine: `  ${dryRun ? 'mapped' : 'fetched'} ${document.id} (${document.transcription.length} chars)`,
+        };
       } catch (err) {
-        report.failed += 1;
         if (err instanceof LocFetchError) {
           const info = err.info;
           const summary =
@@ -937,26 +978,63 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
             (info.httpStatus != null
               ? ` http=${info.httpStatus} ${info.httpStatusText ?? ''}`.trimEnd()
               : '');
-          logger.warn(summary);
           const errResult: LocIngestResult = {
             status: 'error',
             error: summary,
             errorInfo: info,
           };
           if (info.documentId) errResult.documentId = info.documentId;
-          report.results.push(errResult);
-        } else {
-          const d = describeError(err);
-          const summary =
-            `[ingest-loc] failed LoC result stage=post-fetch ` +
-            `docId=${predictedId ?? 'unknown'} error=${d.name}: ${d.message}` +
-            (d.cause ? ` cause=${d.cause}` : '');
-          logger.warn(summary);
-          const errResult: LocIngestResult = { status: 'error', error: summary };
-          if (predictedId) errResult.documentId = predictedId;
-          report.results.push(errResult);
+          return { kind: 'error', result: errResult, warning: summary };
         }
+        const d = describeError(err);
+        const summary =
+          `[ingest-loc] failed LoC result stage=post-fetch ` +
+          `docId=${predictedId ?? 'unknown'} error=${d.name}: ${d.message}` +
+          (d.cause ? ` cause=${d.cause}` : '');
+        const errResult: LocIngestResult = { status: 'error', error: summary };
+        if (predictedId) errResult.documentId = predictedId;
+        return { kind: 'error', result: errResult, warning: summary };
       }
+    };
+
+    const outcomes = await runWithConcurrency(itemsToProcess, processOne, concurrency);
+
+    // Aggregate the page's outcomes into the report. Order-preserving so the
+    // results array still matches the input order, which test assertions and
+    // log readers rely on.
+    const pendingWrites: Array<{ doc: Document; ctx?: ProvenanceContext }> = [];
+    for (const outcome of outcomes) {
+      report.scanned += 1;
+      if (outcome.kind === 'skipped') {
+        report.skipped += 1;
+        report.results.push(outcome.result);
+        logger.log(`  skipped ${outcome.result.documentId} (already in DB)`);
+      } else if (outcome.kind === 'ok') {
+        report.mapped += 1;
+        if (outcome.withFullText) report.withFullText += 1;
+        else report.withoutFullText += 1;
+        report.results.push(outcome.result);
+        logger.log(outcome.logLine);
+        if (outcome.ctx) {
+          pendingWrites.push({ doc: outcome.doc, ctx: outcome.ctx });
+        }
+      } else {
+        report.failed += 1;
+        report.results.push(outcome.result);
+        logger.warn(outcome.warning);
+      }
+    }
+
+    // One Turso write per page. skip-if-exists keeps it idempotent against
+    // partial prior runs; partial Turso failures roll the batch back so the
+    // cursor stays at the page that failed and the next build retries it.
+    if (pendingWrites.length > 0 && !dryRun && options.db) {
+      const flushStart = Date.now();
+      await upsertDocumentsBatch(options.db, pendingWrites, { mode: 'skip-if-exists' });
+      report.written += pendingWrites.length;
+      logger.log(
+        `  wrote ${pendingWrites.length} document(s) to db in ${Date.now() - flushStart}ms`,
+      );
     }
 
     // --limit cut us off mid-page: the next build should re-fetch THIS page
