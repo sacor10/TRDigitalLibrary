@@ -40,10 +40,11 @@ export function createDocumentsRouter(
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
     }
-    const { type, dateFrom, dateTo, recipient, sort, order, limit, offset } = parsed.data;
+    const { type, dateFrom, dateTo, recipient, topicId, sort, order, limit, offset } = parsed.data;
 
     const where: string[] = [];
     const params: Record<string, InValue> = {};
+    const joins: string[] = [];
     if (type) {
       where.push('type = @type');
       params.type = type;
@@ -60,18 +61,24 @@ export function createDocumentsRouter(
       where.push('recipient LIKE @recipient');
       params.recipient = `%${recipient}%`;
     }
+    if (topicId !== undefined) {
+      joins.push('JOIN document_topics ON document_topics.document_id = documents.id');
+      where.push('document_topics.topic_id = @topicId');
+      params.topicId = topicId;
+    }
+    const joinSql = joins.join(' ');
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const orderSql = `ORDER BY ${sort} ${order.toUpperCase()}`;
 
     try {
       const totalResult = await db.execute({
-        sql: `SELECT COUNT(*) as c FROM documents ${whereSql}`,
+        sql: `SELECT COUNT(*) as c FROM documents ${joinSql} ${whereSql}`,
         args: params,
       });
       const total = asNumber(totalResult.rows[0]?.c);
 
       const listResult = await db.execute({
-        sql: `SELECT ${DOCUMENT_SUMMARY_COLUMNS} FROM documents ${whereSql} ${orderSql} LIMIT @limit OFFSET @offset`,
+        sql: `SELECT ${DOCUMENT_SUMMARY_COLUMNS} FROM documents ${joinSql} ${whereSql} ${orderSql} LIMIT @limit OFFSET @offset`,
         args: { ...params, limit, offset },
       });
       const rows = listResult.rows.map(rowToDocumentRow);

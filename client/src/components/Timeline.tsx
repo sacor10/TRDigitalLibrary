@@ -1,10 +1,22 @@
-import type { Document } from '@tr/shared';
+import {
+  EARLIEST_ROOSEVELT_DOCUMENT_DATE,
+  clampRooseveltDocumentDate,
+  type Document,
+} from '@tr/shared';
 import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 
 interface TimelineProps {
   documents: Document[];
+  dateFrom?: string;
+  dateTo?: string;
+  selectedDocumentId?: string | null;
+  onDateRangeChange?: (range: {
+    dateFrom: string;
+    dateTo: string;
+    selectedDocumentId: string;
+  }) => void;
 }
 
 const TYPE_COLORS: Record<Document['type'], string> = {
@@ -23,6 +35,12 @@ interface Plotted {
   y: number;
 }
 
+interface Tick {
+  key: string;
+  label: string;
+  ts: number;
+}
+
 const WIDTH = 1200;
 const HEIGHT = 280;
 const MARGIN = { top: 24, right: 40, bottom: 44, left: 40 };
@@ -33,6 +51,13 @@ const LANE_TOP = MARGIN.top + 8;
 const LANE_GAP = (PLOT_H - 16) / LANES;
 const MARKER_R = 7;
 const MIN_SPACING = MARKER_R * 2 + 4;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const MONTH_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  timeZone: 'UTC',
+  year: 'numeric',
+});
 
 function chooseTickStep(yearSpan: number): number {
   if (yearSpan <= 5) return 1;
@@ -42,27 +67,120 @@ function chooseTickStep(yearSpan: number): number {
   return 20;
 }
 
-export function Timeline({ documents }: TimelineProps) {
+function parseIsoDate(date: string): number {
+  return Date.UTC(
+    Number(date.slice(0, 4)),
+    Number(date.slice(5, 7)) - 1,
+    Number(date.slice(8, 10)),
+  );
+}
+
+function formatIsoDate(ts: number): string {
+  const d = new Date(ts);
+  const year = d.getUTCFullYear();
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function daysInUtcMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+}
+
+function addUtcMonths(date: string, months: number): string {
+  const year = Number(date.slice(0, 4));
+  const month = Number(date.slice(5, 7)) - 1;
+  const day = Number(date.slice(8, 10));
+  const target = new Date(Date.UTC(year, month + months, 1));
+  const targetYear = target.getUTCFullYear();
+  const targetMonth = target.getUTCMonth();
+  const targetDay = Math.min(day, daysInUtcMonth(targetYear, targetMonth));
+  return formatIsoDate(Date.UTC(targetYear, targetMonth, targetDay));
+}
+
+function centeredSixMonthRange(date: string): { dateFrom: string; dateTo: string } {
+  return {
+    dateFrom: clampRooseveltDocumentDate(addUtcMonths(date, -3)),
+    dateTo: addUtcMonths(date, 3),
+  };
+}
+
+function isRangeAtLeastSixMonths(dateFrom?: string, dateTo?: string): boolean {
+  if (!dateFrom || !dateTo) return true;
+  return addUtcMonths(dateFrom, 6) <= dateTo;
+}
+
+function buildYearTicks(minYear: number, maxYear: number): Tick[] {
+  const step = chooseTickStep(maxYear - minYear);
+  const ticks: Tick[] = [];
+  for (let y = minYear; y <= maxYear; y += step) {
+    ticks.push({ key: `year-${y}`, label: String(y), ts: Date.UTC(y, 0, 1) });
+  }
+  if (ticks[ticks.length - 1]?.label !== String(maxYear)) {
+    ticks.push({ key: `year-${maxYear}`, label: String(maxYear), ts: Date.UTC(maxYear, 0, 1) });
+  }
+  return ticks;
+}
+
+function buildMonthTicks(minTs: number, maxTs: number): Tick[] {
+  const ticks: Tick[] = [
+    {
+      key: `range-start-${minTs}`,
+      label: MONTH_FORMATTER.format(new Date(minTs)),
+      ts: minTs,
+    },
+  ];
+  const start = new Date(minTs);
+  let cursor = Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1);
+
+  while (cursor <= maxTs) {
+    ticks.push({
+      key: `month-${cursor}`,
+      label: MONTH_FORMATTER.format(new Date(cursor)),
+      ts: cursor,
+    });
+    const d = new Date(cursor);
+    cursor = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+  }
+
+  return ticks;
+}
+
+export function Timeline({
+  documents,
+  dateFrom,
+  dateTo,
+  selectedDocumentId,
+  onDateRangeChange,
+}: TimelineProps) {
   const navigate = useNavigate();
 
   const { plotted, ticks, minTs, maxTs } = useMemo(() => {
     if (documents.length === 0) {
-      return { plotted: [] as Plotted[], ticks: [] as number[], minTs: 0, maxTs: 0 };
+      return { plotted: [] as Plotted[], ticks: [] as Tick[], minTs: 0, maxTs: 0 };
     }
     const stamps = documents.map((d) => new Date(d.date).getTime());
     const minDataTs = Math.min(...stamps);
     const maxDataTs = Math.max(...stamps);
 
-    // Anchor the domain to whole-year boundaries so ticks align nicely
-    // and edge markers don't sit on the axis edge.
     const minYear = new Date(minDataTs).getUTCFullYear();
     const maxYear = new Date(maxDataTs).getUTCFullYear();
-    const min = Date.UTC(minYear, 0, 1);
-    const max = Date.UTC(maxYear + 1, 0, 1);
+    const hasExplicitRange = Boolean(dateFrom || dateTo);
+    let min = dateFrom ? parseIsoDate(dateFrom) : Date.UTC(minYear, 0, 1);
+    let max = dateTo ? parseIsoDate(dateTo) : Date.UTC(maxYear + 1, 0, 1);
+
+    if (min < parseIsoDate(EARLIEST_ROOSEVELT_DOCUMENT_DATE)) {
+      min = parseIsoDate(EARLIEST_ROOSEVELT_DOCUMENT_DATE);
+    }
+    if (max <= min) {
+      max = min + DAY_MS;
+    }
+
     const span = max - min;
 
     const sorted = documents
       .map((doc) => ({ doc, ts: new Date(doc.date).getTime() }))
+      .filter(({ ts }) => ts >= min && ts <= max)
       .sort((a, b) => a.ts - b.ts);
 
     // Lane assignment that prefers higher (lower-index) lanes and only drops
@@ -81,13 +199,35 @@ export function Timeline({ documents }: TimelineProps) {
       return { doc, ts, x, y: LANE_TOP + lane * LANE_GAP };
     });
 
-    const step = chooseTickStep(maxYear - minYear);
-    const tickYears: number[] = [];
-    for (let y = minYear; y <= maxYear; y += step) tickYears.push(y);
-    if (tickYears[tickYears.length - 1] !== maxYear) tickYears.push(maxYear);
+    const yearSpan = (max - min) / (365.2425 * DAY_MS);
+    const rangeMinYear = new Date(min).getUTCFullYear();
+    const rangeMaxYear = new Date(max).getUTCFullYear();
+    const tickMarks =
+      hasExplicitRange && yearSpan < 1
+        ? buildMonthTicks(min, max)
+        : buildYearTicks(
+            hasExplicitRange ? rangeMinYear : minYear,
+            hasExplicitRange ? rangeMaxYear : maxYear,
+          );
 
-    return { plotted: placed, ticks: tickYears, minTs: min, maxTs: max };
-  }, [documents]);
+    return { plotted: placed, ticks: tickMarks, minTs: min, maxTs: max };
+  }, [dateFrom, dateTo, documents]);
+
+  const openDocument = (doc: Document): void => {
+    navigate(`/documents/${doc.id}`);
+  };
+
+  const activateMarker = (doc: Document): void => {
+    if (doc.id === selectedDocumentId) {
+      openDocument(doc);
+      return;
+    }
+    if (onDateRangeChange && isRangeAtLeastSixMonths(dateFrom, dateTo)) {
+      onDateRangeChange({ ...centeredSixMonthRange(doc.date), selectedDocumentId: doc.id });
+      return;
+    }
+    openDocument(doc);
+  };
 
   if (plotted.length === 0) {
     return <p className="py-12 text-center">No documents to plot.</p>;
@@ -117,10 +257,9 @@ export function Timeline({ documents }: TimelineProps) {
             strokeWidth="1"
           />
           {ticks.map((year) => {
-            const ts = Date.UTC(year, 0, 1);
-            const x = MARGIN.left + ((ts - minTs) / span) * PLOT_W;
+            const x = MARGIN.left + ((year.ts - minTs) / span) * PLOT_W;
             return (
-              <g key={year}>
+              <g key={year.key}>
                 <line
                   x1={x}
                   x2={x}
@@ -136,7 +275,7 @@ export function Timeline({ documents }: TimelineProps) {
                   className="fill-ink-700 dark:fill-parchment-100"
                   style={{ fontSize: '14px' }}
                 >
-                  {year}
+                  {year.label}
                 </text>
               </g>
             );
@@ -156,15 +295,21 @@ export function Timeline({ documents }: TimelineProps) {
                 cx={x}
                 cy={y}
                 r={MARKER_R}
-                className={`${TYPE_COLORS[doc.type]} transition-opacity hover:opacity-80`}
+                className={`${TYPE_COLORS[doc.type]} ${
+                  selectedDocumentId === doc.id
+                    ? 'stroke-ink-900 dark:stroke-parchment-50'
+                    : 'stroke-transparent'
+                } transition-opacity hover:opacity-80`}
+                strokeWidth={selectedDocumentId === doc.id ? 3 : 0}
                 tabIndex={0}
                 role="button"
                 aria-label={`${doc.title}, ${doc.date}`}
-                onClick={() => navigate(`/documents/${doc.id}`)}
+                aria-pressed={selectedDocumentId === doc.id}
+                onClick={() => activateMarker(doc)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    navigate(`/documents/${doc.id}`);
+                    activateMarker(doc);
                   }
                 }}
               />

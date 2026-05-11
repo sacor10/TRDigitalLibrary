@@ -31,6 +31,23 @@ describe('TR Digital Library API', () => {
         transcription: `Stub content for ${doc.title}. unique-token-alpenglow ${doc.id}.`,
       });
     }
+    await db.execute({
+      sql: 'INSERT INTO topics (id, label, keywords, size, computed_at, model_version) VALUES (?, ?, ?, ?, ?, ?)',
+      args: [
+        7,
+        'civic ethics',
+        JSON.stringify(['civic', 'ethics', 'arena']),
+        2,
+        '2026-05-09T12:00:00Z',
+        'test',
+      ],
+    });
+    for (const documentId of ['man-in-the-arena', 'new-nationalism']) {
+      await db.execute({
+        sql: 'INSERT INTO document_topics (document_id, topic_id, probability) VALUES (?, ?, ?)',
+        args: [documentId, 7, 0.9],
+      });
+    }
     app = createApp(db);
   });
 
@@ -119,6 +136,14 @@ describe('TR Digital Library API', () => {
         expect(item.date >= '1910-01-01').toBe(true);
         expect(item.date <= '1910-12-31').toBe(true);
       }
+    });
+
+    it('filters by topic id', async () => {
+      const res = await request(app).get('/api/documents?topicId=7&limit=100');
+      expect(res.status).toBe(200);
+      const ids = res.body.items.map((d: Document) => d.id);
+      expect(ids).toEqual(['man-in-the-arena', 'new-nationalism']);
+      expect(res.body.total).toBe(2);
     });
 
     it('rejects malformed query', async () => {
@@ -254,6 +279,14 @@ describe('TR Digital Library API', () => {
       for (const r of res.body.results) {
         expect(r.document.type).toBe('letter');
       }
+    });
+
+    it('combines query with topic filter', async () => {
+      const res = await request(app).get('/api/search?q=alpenglow&topicId=7&limit=100');
+      expect(res.status).toBe(200);
+      const ids = res.body.results.map((r: { document: Document }) => r.document.id).sort();
+      expect(ids).toEqual(['man-in-the-arena', 'new-nationalism']);
+      expect(res.body.total).toBe(2);
     });
 
     it('paginates via offset', async () => {

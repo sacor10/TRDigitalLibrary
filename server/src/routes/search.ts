@@ -52,11 +52,12 @@ export function createSearchRouter(db: LibsqlClient): Router {
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
     }
-    const { q, type, dateFrom, dateTo, recipient, limit, offset } = parsed.data;
+    const { q, type, dateFrom, dateTo, recipient, topicId, limit, offset } = parsed.data;
     const ftsQuery = buildFtsQuery(q);
 
     const where: string[] = ['documents_fts MATCH @ftsQuery'];
     const params: Record<string, string | number> = { ftsQuery, limit, offset };
+    const joins: string[] = [];
     if (type) {
       where.push('documents.type = @type');
       params.type = type;
@@ -73,6 +74,12 @@ export function createSearchRouter(db: LibsqlClient): Router {
       where.push('documents.recipient LIKE @recipient');
       params.recipient = `%${recipient}%`;
     }
+    if (topicId !== undefined) {
+      joins.push('JOIN document_topics ON document_topics.document_id = documents.id');
+      where.push('document_topics.topic_id = @topicId');
+      params.topicId = topicId;
+    }
+    const joinSql = joins.join(' ');
     const whereSql = `WHERE ${where.join(' AND ')}`;
 
     const sql = `
@@ -82,6 +89,7 @@ export function createSearchRouter(db: LibsqlClient): Router {
         bm25(documents_fts) AS rank
       FROM documents_fts
       JOIN documents ON documents.rowid = documents_fts.rowid
+      ${joinSql}
       ${whereSql}
       ORDER BY rank
       LIMIT @limit OFFSET @offset
@@ -93,6 +101,7 @@ export function createSearchRouter(db: LibsqlClient): Router {
         sql: `SELECT COUNT(*) as c
               FROM documents_fts
               JOIN documents ON documents.rowid = documents_fts.rowid
+              ${joinSql}
               ${whereSql}`,
         args: params,
       });

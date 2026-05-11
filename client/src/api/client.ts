@@ -88,6 +88,7 @@ export async function fetchDocuments(
     dateFrom: query.dateFrom,
     dateTo: query.dateTo,
     recipient: query.recipient,
+    topicId: query.topicId,
     sort: query.sort,
     order: query.order,
     limit: query.limit,
@@ -168,6 +169,7 @@ export async function searchDocuments(query: SearchQuery): Promise<SearchRespons
     dateFrom: query.dateFrom,
     dateTo: query.dateTo,
     recipient: query.recipient,
+    topicId: query.topicId,
     limit: query.limit,
     offset: query.offset,
   });
