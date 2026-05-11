@@ -1,10 +1,18 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { DocumentSchema, type Document } from '@tr/shared';
 import request from 'supertest';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 
 
 import { createApp } from '../app.js';
-import { openInMemoryDatabase, upsertDocument, type LibsqlClient } from '../db.js';
+import {
+  locateMigrationsDir,
+  openInMemoryDatabase,
+  upsertDocument,
+  type LibsqlClient,
+} from '../db.js';
 
 import { cloneTestDocuments, TEST_DOCUMENTS } from './fixtures/documents.js';
 
@@ -35,6 +43,20 @@ describe('TR Digital Library API', () => {
       const res = await request(app).get('/api/health');
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ ok: true });
+    });
+  });
+
+  // Regression guard for a Netlify 502: the esbuild-bundled lambda lives at
+  // /var/task/netlify/functions/api.js, where __dirname collapses to /var/task
+  // (the CJS bundle has no usable import.meta.url). The migration .sql files
+  // are shipped at /var/task/server/src/migrations via `included_files`, so a
+  // naive `readdirSync(join(__dirname, 'migrations'))` throws ENOENT at cold
+  // start and the function 502s before serving a single request. The resolver
+  // must walk a chain of fallback candidates.
+  describe('locateMigrationsDir', () => {
+    it('returns a directory containing the init migration', () => {
+      const dir = locateMigrationsDir();
+      expect(existsSync(join(dir, '001_init.sql'))).toBe(true);
     });
   });
 

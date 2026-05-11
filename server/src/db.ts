@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -223,6 +223,27 @@ async function createLibsqlClient(
   return createClient(config);
 }
 
+// Resolves the library migrations directory across local dev, vitest, and the
+// esbuild-bundled Netlify function. In the Netlify build `__dirname` collapses
+// to /var/task because the CJS bundle has no usable `import.meta.url`, while
+// the migration .sql files are shipped under /var/task/server/src/migrations
+// via netlify.toml's `included_files`. Mirrors the fallback chain in
+// annotations-db.ts.
+export function locateMigrationsDir(): string {
+  const candidates = [
+    join(__dirname, 'migrations'),
+    join(__dirname, 'server', 'src', 'migrations'),
+    join(process.cwd(), 'server', 'src', 'migrations'),
+  ];
+  const found = candidates.find((c) => existsSync(c));
+  if (!found) {
+    throw new Error(
+      `Could not locate library migration files. Tried: ${candidates.join(', ')}`,
+    );
+  }
+  return found;
+}
+
 async function runMigrations(client: LibsqlClient): Promise<void> {
   await client.execute(
     `CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -231,7 +252,7 @@ async function runMigrations(client: LibsqlClient): Promise<void> {
      )`,
   );
 
-  const migrationsDir = join(__dirname, 'migrations');
+  const migrationsDir = locateMigrationsDir();
   const files = readdirSync(migrationsDir)
     .filter((f) => f.endsWith('.sql'))
     .sort();
