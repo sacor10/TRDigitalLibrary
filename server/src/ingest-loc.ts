@@ -6,6 +6,40 @@ import { parseArgs } from 'node:util';
 import { openLibraryDb, type LibsqlClient } from './db.js';
 import { ingestLocCollection, type LocIngestReport } from './sources/loc.js';
 
+/**
+ * Tune undici (the runtime backing Node 20's global fetch) for this CLI:
+ * keep connections alive across the sequential LoC requests, and shorten
+ * the per-request header/body timeouts so a stalled socket fails fast and
+ * gets retried by fetchWithRetry instead of hanging on the default 5-minute
+ * undici timeout. Imported dynamically so loc.ts itself stays free of
+ * runtime-specific side effects and unit tests are unaffected.
+ */
+async function configureUndiciDispatcher(): Promise<void> {
+  try {
+    // Built into Node 18+; intentionally referenced through a variable so
+    // TypeScript does not try to resolve it at compile time (no @types).
+    const moduleName = 'undici';
+    const undici = (await import(moduleName)) as {
+      setGlobalDispatcher: (d: unknown) => void;
+      Agent: new (opts: Record<string, unknown>) => unknown;
+    };
+    undici.setGlobalDispatcher(
+      new undici.Agent({
+        keepAliveTimeout: 30_000,
+        keepAliveMaxTimeout: 60_000,
+        connections: 4,
+        headersTimeout: 30_000,
+        bodyTimeout: 120_000,
+        connect: { timeout: 15_000 },
+      }),
+    );
+  } catch {
+    // Non-Node environments may not expose 'undici'; the per-stage
+    // AbortController in fetchWithTimeout is still in play, so we
+    // simply fall back to the default fetch behaviour.
+  }
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 interface CliOptions {
@@ -112,6 +146,7 @@ function printReport(report: LocIngestReport): void {
 }
 
 async function main(): Promise<void> {
+  await configureUndiciDispatcher();
   const opts = parseCliArgs(process.argv.slice(2));
   let db: LibsqlClient | null = null;
   if (!opts.dryRun) {

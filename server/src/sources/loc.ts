@@ -20,6 +20,11 @@ const MAX_FETCH_ATTEMPTS = 3;
 const BASE_BACKOFF_MS = 1_000;        // backoff schedule: 1s, 2s, 4s (+jitter)
 const MAX_RETRY_AFTER_MS = 30_000;    // cap honoring server Retry-After
 const DEFAULT_PAGE_SIZE = 25;
+// Defensive cap on a single response body. Fulltext transcriptions are
+// typically a few MB; anything substantially larger likely indicates an
+// unexpected upstream response and we'd rather fail loudly than OOM the
+// Netlify build container.
+const MAX_BODY_BYTES = 32 * 1024 * 1024;
 
 type JsonObject = Record<string, unknown>;
 
@@ -531,13 +536,22 @@ async function fetchWithRetry(
   deps: RetryDeps,
   url: string,
   stage: FetchStage,
-): Promise<Response> {
+): Promise<string> {
   const cfg = STAGE_CONFIG[stage];
   const docLabel = deps.documentId ?? 'unknown';
   for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
-    let res: Response | null = null;
+    let res: Response;
+    let body: string;
     try {
       res = await fetchWithTimeout(deps.fetchImpl, url, cfg);
+      // Consume the body INSIDE the retry try-block. undici streams the
+      // response; a mid-stream socket close (e.g. UND_ERR_SOCKET 'other side
+      // closed') throws here, and that error needs to be retried just like
+      // the initial fetch failing. Previously body reads happened in
+      // fetchJson/fetchText after fetchWithRetry returned, so socket-close
+      // failures bypassed retries entirely and surfaced as 'stage=post-fetch'
+      // build failures.
+      body = await res.text();
     } catch (err) {
       const retryable = isRetryableNetworkError(err);
       if (!retryable || attempt === MAX_FETCH_ATTEMPTS) {
@@ -567,13 +581,19 @@ async function fetchWithRetry(
       continue;
     }
 
-    if (res.ok) return res;
-
-    // Drain the body so the underlying socket can be reused.
-    try {
-      await res.text();
-    } catch {
-      /* ignore */
+    if (res.ok) {
+      if (body.length > MAX_BODY_BYTES) {
+        throw new LocFetchError({
+          stage,
+          url,
+          documentId: deps.documentId,
+          attempts: attempt,
+          errorName: 'BodyTooLargeError',
+          errorMessage: `LoC body exceeded ${MAX_BODY_BYTES} bytes (received ${body.length})`,
+          retryable: false,
+        });
+      }
+      return body;
     }
 
     const retryable = isRetryableStatus(res.status);
@@ -603,13 +623,12 @@ async function fetchWithRetry(
 }
 
 async function fetchJson(deps: RetryDeps, url: string, stage: FetchStage): Promise<unknown> {
-  const res = await fetchWithRetry(deps, url, stage);
-  return (await res.json()) as unknown;
+  const body = await fetchWithRetry(deps, url, stage);
+  return JSON.parse(body) as unknown;
 }
 
 async function fetchText(deps: RetryDeps, url: string, stage: FetchStage): Promise<string> {
-  const res = await fetchWithRetry(deps, url, stage);
-  return (await res.text()).trim();
+  return (await fetchWithRetry(deps, url, stage)).trim();
 }
 
 async function fetchCollectionPage(
