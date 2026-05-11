@@ -417,22 +417,23 @@ describe('LoC ingestion', () => {
     });
 
     expect(report.failed).toBe(1);
-    expect(itemCalls).toBe(3);
+    expect(itemCalls).toBe(5);
     const failure = report.results[0];
     expect(failure?.status).toBe('error');
     const info = failure?.errorInfo as LocFetchErrorInfo | undefined;
     expect(info).toBeDefined();
     expect(info?.stage).toBe('item');
-    expect(info?.attempts).toBe(3);
+    expect(info?.attempts).toBe(5);
     expect(info?.httpStatus).toBe(503);
     expect(info?.documentId).toBe('loc-mss382990022');
     expect(info?.retryable).toBe(true);
-    expect(logger.warn).toHaveBeenCalledTimes(1);
-    const warning = String(logger.warn.mock.calls[0]?.[0] ?? '');
-    expect(warning).toContain('stage=item');
-    expect(warning).toContain('attempts=3');
-    expect(warning).toContain('http=503');
-    expect(warning).toContain('docId=loc-mss382990022');
+    const warnings = logger.warn.mock.calls.map((args) => String(args[0]));
+    const itemWarning = warnings.find((w) => w.includes('stage=item')) ?? '';
+    expect(itemWarning).toContain('attempts=5');
+    expect(itemWarning).toContain('http=503');
+    expect(itemWarning).toContain('docId=loc-mss382990022');
+    // Cursor-hold warning fires too because the failure was retryable.
+    expect(warnings.some((w) => w.includes('holding cursor'))).toBe(true);
   });
 
   it('does not retry on 404', async () => {
@@ -528,7 +529,7 @@ describe('LoC ingestion', () => {
     const info = report.results[0]?.errorInfo;
     expect(info?.stage).toBe('fulltext');
     expect(info?.documentId).toBe('loc-mss382990022');
-    expect(info?.attempts).toBe(3);
+    expect(info?.attempts).toBe(5);
   });
 
   it('JSON parse errors on a 200 fail fast without retry', async () => {
@@ -757,6 +758,57 @@ describe('LoC ingestion', () => {
       expect(heartbeats[0]).toMatch(/page \d+: \d+\/\d+ done/);
       expect(heartbeats[0]).toContain('fetched=');
       expect(heartbeats[0]).toContain('failed=');
+    });
+
+    it('holds the cursor at the current page when retryable failures occur', async () => {
+      db = await openInMemoryDatabase();
+      // Two items on one page; the second one always returns 429.
+      const item2Id = 'mss382990777';
+      const item2Url = `https://www.loc.gov/item/${item2Id}/`;
+      const twoItemPage = {
+        pagination: { next: null },
+        results: [
+          {
+            id: 'http://www.loc.gov/item/mss382990022/',
+            url: LOC_ITEM_URL,
+            title: 'good item',
+          },
+          {
+            id: `http://www.loc.gov/item/${item2Id}/`,
+            url: item2Url,
+            title: 'rate-limited item',
+          },
+        ],
+      };
+      const fetchImpl: FetchLike = async (url: string) => {
+        if (isCollectionUrl(url)) return jsonResponse(twoItemPage);
+        if (url.startsWith(item2Url)) return errorResponse(429, 'Too Many Requests');
+        if (url.startsWith(LOC_ITEM_URL)) return jsonResponse({ item: locItem });
+        return new Response('LoC full text', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        });
+      };
+
+      const report = await ingestLocCollection({
+        db,
+        fetchImpl,
+        logger: silentLogger,
+        sleep: noSleep,
+        concurrency: 1,
+      });
+
+      // Good item was written; bad item failed retryably.
+      expect(report.written).toBe(1);
+      expect(report.failed).toBe(1);
+      // Cursor must NOT advance past the failing page.
+      expect(report.nextPage).toBe(1);
+      expect(report.completed).toBe(false);
+      const cursor = await db.execute(
+        "SELECT next_page, completed FROM ingest_progress WHERE source = 'loc'",
+      );
+      expect(Number(cursor.rows[0]?.next_page)).toBe(1);
+      expect(Number(cursor.rows[0]?.completed)).toBe(0);
     });
 
     it('fetches items concurrently and flushes the page as a single batched write', async () => {

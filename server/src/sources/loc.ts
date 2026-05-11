@@ -21,11 +21,11 @@ const COLLECTION_PAGE_TIMEOUT_MS = 30_000;
 const ITEM_TIMEOUT_MS = 30_000;
 const FULLTEXT_TIMEOUT_MS = 60_000;
 
-const MAX_FETCH_ATTEMPTS = 3;
-const BASE_BACKOFF_MS = 1_000;        // backoff schedule: 1s, 2s, 4s (+jitter)
-const MAX_RETRY_AFTER_MS = 30_000;    // cap honoring server Retry-After
+const MAX_FETCH_ATTEMPTS = 5;
+const BASE_BACKOFF_MS = 1_000;        // backoff schedule: 1s, 2s, 4s, 8s, 16s (+jitter)
+const MAX_RETRY_AFTER_MS = 120_000;   // cap honoring server Retry-After
 const DEFAULT_PAGE_SIZE = 25;
-const DEFAULT_CONCURRENCY = 8;
+const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;
 // Defensive cap on a single response body. Fulltext transcriptions are
 // typically a few MB; anything substantially larger likely indicates an
@@ -1042,8 +1042,12 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
 
     // Aggregate the page's outcomes into the report. Order-preserving so the
     // results array still matches the input order, which test assertions and
-    // log readers rely on.
+    // log readers rely on. We separately count retryable failures (429/5xx/
+    // network errors that exhausted retries) — those signal "LoC is currently
+    // rate-limiting us", not "this item is broken", so we hold the cursor at
+    // this page and let the next build retry instead of advancing past it.
     const pendingWrites: Array<{ doc: Document; ctx?: ProvenanceContext }> = [];
+    let retryablePageFailures = 0;
     for (const outcome of outcomes) {
       report.scanned += 1;
       if (outcome.kind === 'skipped') {
@@ -1063,6 +1067,7 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
         report.failed += 1;
         report.results.push(outcome.result);
         logger.warn(outcome.warning);
+        if (outcome.result.errorInfo?.retryable) retryablePageFailures += 1;
       }
     }
 
@@ -1076,6 +1081,21 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
       logger.log(
         `  wrote ${pendingWrites.length} document(s) to db in ${Date.now() - flushStart}ms`,
       );
+    }
+
+    // Retryable failures on this page mean LoC was likely rate-limiting us.
+    // Hold the cursor here and stop the build cleanly so the next build can
+    // retry the failed items. documentExists will fast-skip the ones we
+    // already wrote on the next pass.
+    if (retryablePageFailures > 0) {
+      logger.warn(
+        `[ingest-loc] holding cursor at page ${page}: ${retryablePageFailures} retryable failure(s). ` +
+          `Next build will retry the failed item(s).`,
+      );
+      report.nextPage = page;
+      report.completed = false;
+      await persistCursor({ nextPage: page, completed: false });
+      break;
     }
 
     // --limit cut us off mid-page: the next build should re-fetch THIS page
