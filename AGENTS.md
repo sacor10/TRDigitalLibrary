@@ -21,7 +21,7 @@ npm run dev                       # starts server (:3001) + client (:5173)
 
 ```
 npm run lint    # ESLint across all workspaces
-npm run test    # Vitest: 95 server + client tests
+npm run test    # Vitest: 122 server + 27 client tests
 npm run build   # tsc --noEmit + vite build
 ```
 
@@ -33,8 +33,8 @@ npm run build   # tsc --noEmit + vite build
 
 ### Non-obvious notes
 
-- **ESLint resolver errors**: The ESLint config references `eslint-import-resolver-typescript` but it is not listed in `devDependencies`. Running `npm run lint` produces many `import/namespace` "Resolve error: typescript with invalid interface loaded as resolver" errors. These are pre-existing and do not affect runtime or tests.
-- **Client build TypeScript error**: `npm run build` fails on the client workspace due to a pre-existing missing `teiXml` property in `client/src/lib/citation.test.ts`. The Vite dev server (`npm run dev`) is unaffected since it does not run `tsc`.
+- **ESLint**: `npm run lint` exits non-zero due to a single pre-existing `no-constant-condition` error in `server/src/sources/loc.ts`. This does not affect runtime or tests.
+- **Client build TypeScript error**: Previously `npm run build` failed on the client workspace; this has been resolved. `npm run build` now succeeds across all three workspaces.
 - **Ingest failures are partial-success-friendly**: Some Wikisource / LoC URLs return 404. The ingest scripts still insert all available documents with metadata; transcriptions are empty for failed fetches. This is by design.
 - **Database location (dev)**: `data/library.db` and `data/annotations.db` are gitignored. Regenerate the library DB via `npm run ingest-loc -- --limit 25` after a fresh clone, or skip it entirely by exporting `TURSO_LIBRARY_DATABASE_URL` before running `npm run dev`.
 - **Build-time analysis cost**: `npm run ingest` only invokes `python/sentiment.py` + `python/topic_model.py` when ingest reports `written + updated > 0`. The first such build is slow (~5–15 minutes cold) because BERTopic downloads `sentence-transformers/all-MiniLM-L6-v2`; the netlify-plugin-cache plumbing in `netlify.toml` keeps subsequent runs fast.
