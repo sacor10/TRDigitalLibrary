@@ -92,6 +92,31 @@ describe('TR Digital Library API', () => {
       expect(res.body.error).toMatch(/failed to list/i);
       expect(res.body.details).toContain('simulated turso outage');
     });
+
+    // Regression guard for the 502 caused by an N+1 provenance fetch on the
+    // list endpoint. With a 50-row default page the old code issued 52
+    // round-trips to Turso and exceeded Netlify's 10s function timeout.
+    it('uses a bounded number of db queries regardless of result size', async () => {
+      let executeCount = 0;
+      const countingDb = new Proxy(db, {
+        get(target, prop, receiver) {
+          if (prop === 'execute') {
+            return async (...args: Parameters<LibsqlClient['execute']>) => {
+              executeCount += 1;
+              return (target.execute as LibsqlClient['execute'])(...args);
+            };
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      }) as LibsqlClient;
+      const countingApp = createApp(countingDb);
+      const res = await request(countingApp).get('/api/documents?sort=date&order=asc');
+      expect(res.status).toBe(200);
+      expect(res.body.items.length).toBeGreaterThan(0);
+      // 1 COUNT + 1 SELECT + 1 batched provenance fetch. Small headroom for
+      // future bookkeeping; anything close to N+1 trips this.
+      expect(executeCount).toBeLessThanOrEqual(4);
+    });
   });
 
   describe('GET /api/documents/:id', () => {
@@ -220,6 +245,21 @@ describe('TR Digital Library API', () => {
       ]) {
         expect(fp[field]).toEqual({ sourceUrl, fetchedAt, editor: 'loc-ingest' });
       }
+    });
+
+    it('includes fieldProvenance in the list response for documents that have it', async () => {
+      const res = await request(app).get('/api/documents?limit=100');
+      expect(res.status).toBe(200);
+      const fixture = res.body.items.find(
+        (d: Document) => d.id === fixtureId,
+      );
+      expect(fixture).toBeDefined();
+      expect(fixture.fieldProvenance).toBeDefined();
+      expect(fixture.fieldProvenance.title).toEqual({
+        sourceUrl,
+        fetchedAt,
+        editor: 'loc-ingest',
+      });
     });
 
     it('rejects PATCH without X-Editor header', async () => {

@@ -3,6 +3,7 @@ import { DocumentListQuerySchema, DocumentPatchSchema } from '@tr/shared';
 import { Router } from 'express';
 
 import {
+  getFieldProvenanceForDocuments,
   getSectionsByDocumentId,
   patchDocumentFields,
   rowToDocument,
@@ -68,7 +69,20 @@ export function createDocumentsRouter(
       });
       const rows = listResult.rows.map(rowToDocumentRow);
 
-      const items = await Promise.all(rows.map((row) => rowToDocumentWithProvenance(db, row)));
+      // Single batched provenance fetch instead of N+1 per-row queries — see
+      // getFieldProvenanceForDocuments for the why.
+      const provenanceByDoc = await getFieldProvenanceForDocuments(
+        db,
+        rows.map((row) => row.id),
+      );
+      const items = rows.map((row) => {
+        const doc = rowToDocument(row);
+        const fp = provenanceByDoc.get(row.id);
+        if (fp && Object.keys(fp).length > 0) {
+          doc.fieldProvenance = fp;
+        }
+        return doc;
+      });
 
       return res.json({ items, total });
     } catch (err) {
