@@ -126,7 +126,7 @@ export const DocumentListQuerySchema = z.object({
   recipient: z.string().optional(),
   sort: z.enum(['date', 'title']).default('date'),
   order: z.enum(['asc', 'desc']).default('asc'),
-  limit: z.coerce.number().int().positive().max(100).default(50),
+  limit: z.coerce.number().int().positive().max(100).default(10),
   offset: z.coerce.number().int().nonnegative().default(0),
 });
 
@@ -138,7 +138,8 @@ export const SearchQuerySchema = z.object({
   dateFrom: isoDate.optional(),
   dateTo: isoDate.optional(),
   recipient: z.string().optional(),
-  limit: z.coerce.number().int().positive().max(50).default(20),
+  limit: z.coerce.number().int().positive().max(100).default(10),
+  offset: z.coerce.number().int().nonnegative().default(0),
 });
 
 export type SearchQuery = z.infer<typeof SearchQuerySchema>;

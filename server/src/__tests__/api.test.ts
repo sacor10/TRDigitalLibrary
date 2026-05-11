@@ -61,14 +61,35 @@ describe('TR Digital Library API', () => {
   });
 
   describe('GET /api/documents', () => {
-    it('lists all documents', async () => {
+    it('returns exactly 10 items by default and the full total', async () => {
       const res = await request(app).get('/api/documents');
       expect(res.status).toBe(200);
       expect(res.body.total).toBe(TEST_DOCUMENTS.length);
-      expect(res.body.items).toHaveLength(TEST_DOCUMENTS.length);
+      expect(res.body.total).toBeGreaterThanOrEqual(10);
+      expect(res.body.items).toHaveLength(10);
       for (const item of res.body.items) {
         expect(() => DocumentSchema.parse(item)).not.toThrow();
       }
+    });
+
+    it('honors explicit limit + offset for paging', async () => {
+      const first = await request(app).get('/api/documents?limit=5&offset=0&sort=date&order=asc');
+      expect(first.status).toBe(200);
+      expect(first.body.items).toHaveLength(5);
+
+      const second = await request(app).get('/api/documents?limit=5&offset=5&sort=date&order=asc');
+      expect(second.status).toBe(200);
+      expect(second.body.items).toHaveLength(5);
+
+      const firstIds = new Set(first.body.items.map((d: Document) => d.id));
+      for (const item of second.body.items) {
+        expect(firstIds.has(item.id)).toBe(false);
+      }
+    });
+
+    it('rejects limit above the 100 cap', async () => {
+      const res = await request(app).get('/api/documents?limit=101');
+      expect(res.status).toBe(400);
     });
 
     it('filters by type', async () => {
@@ -210,6 +231,28 @@ describe('TR Digital Library API', () => {
       for (const r of res.body.results) {
         expect(r.document.type).toBe('letter');
       }
+    });
+
+    it('paginates via offset', async () => {
+      const first = await request(app).get('/api/search?q=alpenglow&limit=10&offset=0');
+      expect(first.status).toBe(200);
+      expect(first.body.results).toHaveLength(10);
+
+      const second = await request(app).get('/api/search?q=alpenglow&limit=10&offset=10');
+      expect(second.status).toBe(200);
+      expect(second.body.results.length).toBeGreaterThan(0);
+
+      const firstIds = new Set(
+        first.body.results.map((r: { document: Document }) => r.document.id),
+      );
+      for (const r of second.body.results) {
+        expect(firstIds.has(r.document.id)).toBe(false);
+      }
+    });
+
+    it('rejects limit above the 100 cap', async () => {
+      const res = await request(app).get('/api/search?q=alpenglow&limit=101');
+      expect(res.status).toBe(400);
     });
   });
 
