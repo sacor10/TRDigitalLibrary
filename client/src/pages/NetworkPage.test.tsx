@@ -80,6 +80,7 @@ const itemsResponse: CorrespondentItemsResponse = {
   items: [
     {
       id: 'trc-o2',
+      documentId: 'loc-o2',
       title: 'Letter from Frank T. Winslow to Theodore Roosevelt',
       date: '1918-03-01',
       dateDisplay: '1918-03-01',
@@ -136,9 +137,10 @@ describe('NetworkPage', () => {
       expect.objectContaining({ limit: 25, offset: 0 }),
     );
     const link = screen.getByRole('link', {
-        name: 'Letter from Frank T. Winslow to Theodore Roosevelt',
-      });
-    expect(link.getAttribute('href')).toBe('https://www.theodorerooseveltcenter.org/digital-library/o2/');
+      name: 'Letter from Frank T. Winslow to Theodore Roosevelt',
+    });
+    expect(link.getAttribute('href')).toBe('/documents/loc-o2');
+    expect(link.getAttribute('target')).toBeNull();
   });
 
   it('passes filter values to the graph query', async () => {

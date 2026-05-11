@@ -91,6 +91,24 @@ describe('correspondents API', () => {
       ],
       '2026-05-11T12:00:00.000Z',
     );
+    await db.execute({
+      sql: `INSERT INTO documents
+              (id, title, type, date, recipient, author, transcription, source, source_url, tags)
+            VALUES
+              (@id, @title, @type, @date, @recipient, @author, @transcription, @source, @source_url, @tags)`,
+      args: {
+        id: 'loc-o2',
+        title: 'Letter from Frank T. Winslow to Theodore Roosevelt',
+        type: 'letter',
+        date: '1918-03-01',
+        recipient: 'Theodore Roosevelt',
+        author: 'Frank T. Winslow',
+        transcription: '',
+        source: 'Library of Congress',
+        source_url: 'https://www.theodorerooseveltcenter.org/digital-library/o2/',
+        tags: '[]',
+      },
+    });
     app = createApp(db);
   });
 
@@ -137,6 +155,7 @@ describe('correspondents API', () => {
     expect(res.body.total).toBe(1);
     expect(res.body.items[0]).toMatchObject({
       id: 'trc-o2',
+      documentId: 'loc-o2',
       title: 'Letter from Frank T. Winslow to Theodore Roosevelt',
       sourceUrl: 'https://www.theodorerooseveltcenter.org/digital-library/o2/',
     });

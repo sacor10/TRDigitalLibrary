@@ -304,6 +304,7 @@ async function handleGraph(db: LibsqlClient, req: Request, res: Response) {
 
 interface ItemRow {
   id: string;
+  documentId: string | null;
   title: string;
   date: string | null;
   dateDisplay: string | null;
@@ -315,6 +316,7 @@ interface ItemRow {
 function itemRow(row: Row): ItemRow {
   return {
     id: asString(row.id),
+    documentId: asNullableString(row.document_id),
     title: asString(row.title),
     date: asNullableString(row.date),
     dateDisplay: asNullableString(row.date_display),
@@ -356,8 +358,9 @@ async function handleItems(db: LibsqlClient, req: Request, res: Response) {
     offset: query.offset,
   };
   const itemsResult = await db.execute({
-    sql: `SELECT id, title, date, date_display, resource_type, source_url, collection
+    sql: `SELECT i.id, d.id AS document_id, i.title, i.date, i.date_display, i.resource_type, i.source_url, i.collection
           FROM correspondence_items i
+          LEFT JOIN documents d ON d.source_url = i.source_url
           WHERE ${where.join(' AND ')}
           ORDER BY i.date IS NULL ASC, i.date DESC, i.title ASC
           LIMIT @limit OFFSET @offset`,
@@ -410,6 +413,7 @@ async function handleItems(db: LibsqlClient, req: Request, res: Response) {
       const people = participants.get(row.id) ?? { creators: [], recipients: [] };
       return {
         id: row.id,
+        documentId: row.documentId,
         title: row.title,
         date: row.date,
         dateDisplay: row.dateDisplay,

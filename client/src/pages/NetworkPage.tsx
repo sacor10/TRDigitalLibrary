@@ -1,6 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import type { CorrespondentDirection, CorrespondentGraphQuery } from '@tr/shared';
+import type {
+  CorrespondentDirection,
+  CorrespondentGraphQuery,
+  CorrespondentItem,
+} from '@tr/shared';
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 import { fetchCorrespondentGraph, fetchCorrespondentItems } from '../api/client';
 import { CorrespondentGraph } from '../components/CorrespondentGraph';
@@ -31,6 +36,10 @@ function directionLabel(direction: CorrespondentDirection): string {
   if (direction === 'from-tr') return 'From TR';
   if (direction === 'to-tr') return 'To TR';
   return 'Either direction';
+}
+
+function sourceRecordPath(item: CorrespondentItem): string {
+  return item.documentId ? `/documents/${encodeURIComponent(item.documentId)}` : '/browse';
 }
 
 export function NetworkPage() {
@@ -265,14 +274,12 @@ export function NetworkPage() {
                           <ul className="flex flex-col gap-3">
                             {itemsQuery.data.items.map((item) => (
                               <li key={item.id}>
-                                <a
+                                <Link
                                   className="font-medium underline decoration-accent-500/50 hover:decoration-accent-500"
-                                  href={item.sourceUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
+                                  to={sourceRecordPath(item)}
                                 >
                                   {item.title}
-                                </a>
+                                </Link>
                                 <p className="text-ink-700/70 dark:text-parchment-100/70">
                                   {item.dateDisplay ?? item.date ?? 'undated'} &middot;{' '}
                                   {item.resourceType}

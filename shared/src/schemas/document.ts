@@ -241,6 +241,7 @@ export type CorrespondentItemParticipant = z.infer<
 
 export const CorrespondentItemSchema = z.object({
   id: z.string().min(1),
+  documentId: z.string().min(1).nullable().optional(),
   title: z.string().min(1),
   date: correspondenceDate.nullable(),
   dateDisplay: z.string().nullable(),
