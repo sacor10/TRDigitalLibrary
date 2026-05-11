@@ -566,10 +566,9 @@ async function runWithConcurrency<T, R>(
   for (let lane = 0; lane < lanes; lane += 1) {
     pool.push(
       (async () => {
-        while (true) {
+        while (cursor < items.length) {
           const idx = cursor;
           cursor += 1;
-          if (idx >= items.length) return;
           results[idx] = await worker(items[idx]!, idx);
         }
       })(),
