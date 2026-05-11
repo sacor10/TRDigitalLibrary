@@ -14,6 +14,13 @@ import {
 } from '../db.js';
 import { FORMAT_BY_EXT, generateExport } from '../export/index.js';
 
+const DOCUMENT_SUMMARY_COLUMNS = `
+  id, title, type, date, recipient, location, author,
+  transcription_url, transcription_format, facsimile_url,
+  iiif_manifest_url, provenance, source, source_url, tags,
+  mentions, tei_source_hash
+`;
+
 export interface CreateDocumentsRouterOptions {
   readonly?: boolean | undefined;
 }
@@ -64,7 +71,7 @@ export function createDocumentsRouter(
       const total = asNumber(totalResult.rows[0]?.c);
 
       const listResult = await db.execute({
-        sql: `SELECT * FROM documents ${whereSql} ${orderSql} LIMIT @limit OFFSET @offset`,
+        sql: `SELECT ${DOCUMENT_SUMMARY_COLUMNS} FROM documents ${whereSql} ${orderSql} LIMIT @limit OFFSET @offset`,
         args: { ...params, limit, offset },
       });
       const rows = listResult.rows.map(rowToDocumentRow);
