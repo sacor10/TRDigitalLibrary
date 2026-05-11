@@ -26,6 +26,7 @@ const BASE_BACKOFF_MS = 1_000;        // backoff schedule: 1s, 2s, 4s (+jitter)
 const MAX_RETRY_AFTER_MS = 30_000;    // cap honoring server Retry-After
 const DEFAULT_PAGE_SIZE = 25;
 const DEFAULT_CONCURRENCY = 8;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;
 // Defensive cap on a single response body. Fulltext transcriptions are
 // typically a few MB; anything substantially larger likely indicates an
 // unexpected upstream response and we'd rather fail loudly than OOM the
@@ -115,6 +116,12 @@ export interface LocIngestOptions {
    * the libsql client pool. Defaults to 8.
    */
   concurrency?: number;
+  /**
+   * How often to emit a progress heartbeat line during the per-page item
+   * fetch phase. Defaults to 5_000 ms (5 s). Tests pass a very large value
+   * (or omit it — pages resolve before the first tick fires).
+   */
+  heartbeatIntervalMs?: number;
   fetchImpl?: FetchLike;
   now?: () => Date;
   logger?: Logger;
@@ -905,6 +912,15 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
     remaining -= itemsToProcess.length;
     const processedOnPage = itemsToProcess.length;
 
+    // Live counters for the heartbeat. Workers increment these as soon as
+    // they resolve so an operator watching the Netlify log can tell whether
+    // the ingest is making progress, hung on one slow item, or starting to
+    // accumulate failures.
+    let fetchedOnPage = 0;
+    let skippedOnPage = 0;
+    let failedOnPage = 0;
+    const pageStart = Date.now();
+
     type ItemOutcome =
       | { kind: 'skipped'; result: LocIngestResult }
       | {
@@ -930,6 +946,7 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
             if (sourceUrl) skippedResult.sourceUrl = sourceUrl;
             const title = stringAt(result, 'title');
             if (title) skippedResult.title = title;
+            skippedOnPage += 1;
             return { kind: 'skipped', result: skippedResult };
           }
         }
@@ -959,6 +976,7 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
         };
         if (document.sourceUrl) okResult.sourceUrl = document.sourceUrl;
 
+        fetchedOnPage += 1;
         return {
           kind: 'ok',
           doc: document,
@@ -968,6 +986,7 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
           logLine: `  ${dryRun ? 'mapped' : 'fetched'} ${document.id} (${document.transcription.length} chars)`,
         };
       } catch (err) {
+        failedOnPage += 1;
         if (err instanceof LocFetchError) {
           const info = err.info;
           const summary =
@@ -997,7 +1016,29 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
       }
     };
 
-    const outcomes = await runWithConcurrency(itemsToProcess, processOne, concurrency);
+    // Heartbeat: emit one log line every HEARTBEAT_INTERVAL_MS so operators
+    // can see the page is making progress vs. hung. unref() so the timer
+    // never holds the event loop open after workers finish; clearInterval
+    // in a finally keeps tests fast (sub-second pages clear before the first
+    // tick fires anyway).
+    const heartbeatMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
+    const heartbeat = setInterval(() => {
+      const done = fetchedOnPage + skippedOnPage + failedOnPage;
+      const elapsed = Math.round((Date.now() - pageStart) / 1000);
+      logger.log(
+        `  [heartbeat] page ${page}: ${done}/${itemsToProcess.length} done ` +
+          `(fetched=${fetchedOnPage} skipped=${skippedOnPage} failed=${failedOnPage}), ` +
+          `elapsed ${elapsed}s`,
+      );
+    }, heartbeatMs);
+    if (typeof heartbeat.unref === 'function') heartbeat.unref();
+
+    let outcomes: ItemOutcome[];
+    try {
+      outcomes = await runWithConcurrency(itemsToProcess, processOne, concurrency);
+    } finally {
+      clearInterval(heartbeat);
+    }
 
     // Aggregate the page's outcomes into the report. Order-preserving so the
     // results array still matches the input order, which test assertions and
