@@ -96,6 +96,13 @@ export interface LocIngestOptions {
   startPage?: number;
   pageSize?: number;
   editor?: string;
+  /**
+   * When true, and `startPage` is left at the default, read the resume
+   * cursor from `ingest_progress` and pick up from there. If the cursor is
+   * marked completed, return a zeroed report without fetching anything.
+   * Explicit `startPage` overrides the cursor.
+   */
+  autoResume?: boolean;
   fetchImpl?: FetchLike;
   now?: () => Date;
   logger?: Logger;
@@ -130,6 +137,8 @@ export interface LocIngestReport {
   startPage: number;
   pagesFetched: number;
   nextPage: number | null;
+  /** True once the LoC collection has been walked end-to-end. */
+  completed: boolean;
   dryRun: boolean;
   results: LocIngestResult[];
 }
@@ -668,14 +677,73 @@ export async function resetLibraryCorpus(db: LibsqlClient): Promise<void> {
       'DELETE FROM documents',
       "INSERT INTO documents_fts(documents_fts) VALUES ('rebuild')",
       "INSERT INTO sections_fts(sections_fts) VALUES ('rebuild')",
+      "DELETE FROM ingest_progress WHERE source = 'loc'",
     ],
     'write',
   );
 }
 
+export interface IngestCursor {
+  /** Next collection page to fetch; null once the collection is fully ingested. */
+  nextPage: number | null;
+  /** True when the source has been walked end-to-end. */
+  completed: boolean;
+}
+
+export async function readIngestCursor(
+  db: LibsqlClient,
+  source = 'loc',
+): Promise<IngestCursor | null> {
+  const result = await db.execute({
+    sql: 'SELECT next_page, completed FROM ingest_progress WHERE source = ? LIMIT 1',
+    args: [source],
+  });
+  const row = result.rows[0];
+  if (!row) return null;
+  const nextPageRaw = row.next_page;
+  const completedRaw = row.completed;
+  return {
+    nextPage:
+      typeof nextPageRaw === 'number'
+        ? nextPageRaw
+        : typeof nextPageRaw === 'bigint'
+          ? Number(nextPageRaw)
+          : null,
+    completed:
+      (typeof completedRaw === 'number' && completedRaw !== 0) ||
+      (typeof completedRaw === 'bigint' && completedRaw !== 0n),
+  };
+}
+
+export async function writeIngestCursor(
+  db: LibsqlClient,
+  cursor: IngestCursor,
+  source = 'loc',
+  nowIso: string = new Date().toISOString(),
+): Promise<void> {
+  await db.execute({
+    sql: `INSERT INTO ingest_progress (source, next_page, completed, updated_at)
+          VALUES (?, ?, ?, ?)
+          ON CONFLICT(source) DO UPDATE SET
+            next_page = excluded.next_page,
+            completed = excluded.completed,
+            updated_at = excluded.updated_at`,
+    args: [source, cursor.nextPage, cursor.completed ? 1 : 0, nowIso],
+  });
+}
+
+export async function clearIngestCursor(
+  db: LibsqlClient,
+  source = 'loc',
+): Promise<void> {
+  await db.execute({
+    sql: 'DELETE FROM ingest_progress WHERE source = ?',
+    args: [source],
+  });
+}
+
 export async function ingestLocCollection(options: LocIngestOptions): Promise<LocIngestReport> {
   const dryRun = options.dryRun ?? false;
-  const startPage = options.startPage ?? 1;
   const pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? (() => new Date());
@@ -701,6 +769,48 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
     logger.log('Dry run: reset requested, but no database rows were changed.');
   }
 
+  // Resolve the actual start page: explicit option wins; otherwise consult the
+  // ingest_progress cursor when autoResume is set. A completed cursor short-
+  // circuits the entire run so a fully-ingested collection costs ~one SELECT
+  // per build.
+  let startPage = options.startPage ?? 1;
+  if (
+    options.autoResume &&
+    options.startPage == null &&
+    !dryRun &&
+    options.db &&
+    !options.reset
+  ) {
+    const cursor = await readIngestCursor(options.db);
+    if (cursor) {
+      if (cursor.completed) {
+        logger.log(
+          'LoC ingest already completed (per ingest_progress); skipping. ' +
+            'Use --reset or --start-page to force a re-run.',
+        );
+        return {
+          scanned: 0,
+          mapped: 0,
+          written: 0,
+          skipped: 0,
+          withFullText: 0,
+          withoutFullText: 0,
+          failed: 0,
+          startPage: cursor.nextPage ?? 1,
+          pagesFetched: 0,
+          nextPage: null,
+          completed: true,
+          dryRun,
+          results: [],
+        };
+      }
+      if (cursor.nextPage != null && cursor.nextPage > startPage) {
+        logger.log(`Resuming LoC ingest at page ${cursor.nextPage} (from ingest_progress).`);
+        startPage = cursor.nextPage;
+      }
+    }
+  }
+
   const report: LocIngestReport = {
     scanned: 0,
     mapped: 0,
@@ -712,6 +822,7 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
     startPage,
     pagesFetched: 0,
     nextPage: startPage,
+    completed: false,
     dryRun,
     results: [],
   };
@@ -719,12 +830,24 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
   let page = startPage;
   let remaining = options.limit ?? Number.POSITIVE_INFINITY;
 
+  const persistCursor = async (cursor: IngestCursor): Promise<void> => {
+    if (dryRun || !options.db) return;
+    try {
+      await writeIngestCursor(options.db, cursor, 'loc', now().toISOString());
+    } catch (err) {
+      const d = describeError(err);
+      logger.warn(`[ingest-loc] failed to persist ingest_progress: ${d.name}: ${d.message}`);
+    }
+  };
+
   while (remaining > 0) {
     const collection = await fetchCollectionPage(makeDeps(null), page, pageSize);
     report.pagesFetched += 1;
     logger.log(`Fetched LoC page ${page} (${collection.results.length} result(s)).`);
     if (collection.results.length === 0) {
       report.nextPage = null;
+      report.completed = true;
+      await persistCursor({ nextPage: null, completed: true });
       break;
     }
 
@@ -836,17 +959,28 @@ export async function ingestLocCollection(options: LocIngestOptions): Promise<Lo
       }
     }
 
+    // --limit cut us off mid-page: the next build should re-fetch THIS page
+    // and rely on skip-if-exists to fast-skip the items already written.
     if (remaining <= 0 && processedOnPage < collection.results.length) {
-      report.nextPage = null;
+      report.nextPage = page;
+      report.completed = false;
+      await persistCursor({ nextPage: page, completed: false });
       break;
     }
 
+    // No more pages: collection is fully ingested.
     if (!collection.hasNext || collection.results.length < pageSize) {
       report.nextPage = null;
+      report.completed = true;
+      await persistCursor({ nextPage: null, completed: true });
       break;
     }
+
     page += 1;
     report.nextPage = page;
+    // Per-page checkpoint: persist before we even attempt the next page so a
+    // kill between pages still resumes correctly.
+    await persistCursor({ nextPage: page, completed: false });
   }
 
   return report;

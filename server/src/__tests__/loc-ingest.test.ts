@@ -565,4 +565,196 @@ describe('LoC ingestion', () => {
     expect(warning).toContain('stage=post-fetch');
     expect(warning).toContain('docId=loc-mss382990022');
   });
+
+  describe('chunked ingest with ingest_progress cursor', () => {
+    // A two-page collection: page 1 has the existing locItem; page 2 has a
+    // second item with a different id. The pagination.next field on page 1
+    // signals there's more to fetch; page 2's null next signals end.
+    const locItem2Url = 'https://www.loc.gov/item/mss382990099/';
+    const collectionPage1 = {
+      pagination: { next: 'https://www.loc.gov/collections/theodore-roosevelt-papers/?sp=2' },
+      results: [
+        {
+          id: 'http://www.loc.gov/item/mss382990022/',
+          url: LOC_ITEM_URL,
+          title: 'page 1 item',
+        },
+      ],
+    };
+    const collectionPage2 = {
+      pagination: { next: null },
+      results: [
+        {
+          id: 'http://www.loc.gov/item/mss382990099/',
+          url: locItem2Url,
+          title: 'page 2 item',
+        },
+      ],
+    };
+    const locItem2 = {
+      ...locItem,
+      id: 'http://www.loc.gov/item/mss382990099/',
+      url: locItem2Url,
+      number: ['mss382990099'],
+      resources: [
+        {
+          files: 1,
+          fulltext_file:
+            'https://tile.loc.gov/storage-services/service/gdc/gdccrowd/mss/page2-fulltext.txt',
+          url: 'https://www.loc.gov/resource/mss38299.page2/',
+        },
+      ],
+    };
+
+    function multiPageFetch(): FetchLike {
+      return async (url: string) => {
+        if (url.includes('sp=2') && isCollectionUrl(url)) return jsonResponse(collectionPage2);
+        if (isCollectionUrl(url)) return jsonResponse(collectionPage1);
+        if (url.startsWith(LOC_ITEM_URL)) return jsonResponse({ item: locItem });
+        if (url.startsWith(locItem2Url)) return jsonResponse({ item: locItem2 });
+        return new Response('LoC full text with unique-token-alpenglow.', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        });
+      };
+    }
+
+    it('writes the cursor with next_page=2 after page 1 completes (limit=1)', async () => {
+      db = await openInMemoryDatabase();
+      const report = await ingestLocCollection({
+        db,
+        limit: 1,
+        pageSize: 1,
+        fetchImpl: multiPageFetch(),
+        logger: silentLogger,
+      });
+      expect(report.written).toBe(1);
+      expect(report.completed).toBe(false);
+      expect(report.nextPage).toBe(2);
+      const row = await db.execute(
+        "SELECT next_page, completed FROM ingest_progress WHERE source = 'loc'",
+      );
+      expect(Number(row.rows[0]?.next_page)).toBe(2);
+      expect(Number(row.rows[0]?.completed)).toBe(0);
+    });
+
+    it('marks the cursor completed when the collection is fully ingested', async () => {
+      db = await openInMemoryDatabase();
+      const report = await ingestLocCollection({
+        db,
+        pageSize: 1,
+        fetchImpl: multiPageFetch(),
+        logger: silentLogger,
+      });
+      expect(report.written).toBe(2);
+      expect(report.completed).toBe(true);
+      expect(report.nextPage).toBeNull();
+      const row = await db.execute(
+        "SELECT next_page, completed FROM ingest_progress WHERE source = 'loc'",
+      );
+      expect(row.rows[0]?.next_page).toBeNull();
+      expect(Number(row.rows[0]?.completed)).toBe(1);
+    });
+
+    it('auto-resumes from the cursor when startPage is not explicitly set', async () => {
+      db = await openInMemoryDatabase();
+      // First chunk: ingest page 1 only.
+      await ingestLocCollection({
+        db,
+        limit: 1,
+        pageSize: 1,
+        fetchImpl: multiPageFetch(),
+        logger: silentLogger,
+      });
+      // Second chunk: autoResume should pick up at page 2 and write the
+      // second document.
+      const second = await ingestLocCollection({
+        db,
+        pageSize: 1,
+        autoResume: true,
+        fetchImpl: multiPageFetch(),
+        logger: silentLogger,
+      });
+      expect(second.startPage).toBe(2);
+      expect(second.written).toBe(1);
+      expect(second.completed).toBe(true);
+      const rows = await db.execute('SELECT COUNT(*) AS c FROM documents');
+      expect(Number(rows.rows[0]?.c)).toBe(2);
+    });
+
+    it('early-exits when the cursor is already marked completed', async () => {
+      db = await openInMemoryDatabase();
+      // Fully ingest first.
+      await ingestLocCollection({
+        db,
+        pageSize: 1,
+        fetchImpl: multiPageFetch(),
+        logger: silentLogger,
+      });
+      // Subsequent autoResume run must not call fetch at all.
+      const noFetch: FetchLike = async (url) => {
+        throw new Error(`unexpected fetch on completed cursor: ${url}`);
+      };
+      const report = await ingestLocCollection({
+        db,
+        autoResume: true,
+        fetchImpl: noFetch,
+        logger: silentLogger,
+      });
+      expect(report.scanned).toBe(0);
+      expect(report.completed).toBe(true);
+      expect(report.pagesFetched).toBe(0);
+    });
+
+    it('explicit startPage overrides the cursor (autoResume disabled)', async () => {
+      db = await openInMemoryDatabase();
+      // Seed a cursor that says "resume at page 2".
+      await ingestLocCollection({
+        db,
+        limit: 1,
+        pageSize: 1,
+        fetchImpl: multiPageFetch(),
+        logger: silentLogger,
+      });
+      // Caller passes startPage=1 explicitly — should NOT auto-resume.
+      const report = await ingestLocCollection({
+        db,
+        limit: 1,
+        pageSize: 1,
+        startPage: 1,
+        fetchImpl: multiPageFetch(),
+        logger: silentLogger,
+      });
+      expect(report.startPage).toBe(1);
+      // The page 1 item is already in the DB, so this re-fetch should skip.
+      expect(report.skipped).toBe(1);
+    });
+
+    it('--reset clears the cursor so the next run starts at page 1', async () => {
+      db = await openInMemoryDatabase();
+      await ingestLocCollection({
+        db,
+        limit: 1,
+        pageSize: 1,
+        fetchImpl: multiPageFetch(),
+        logger: silentLogger,
+      });
+      const cleared = await ingestLocCollection({
+        db,
+        reset: true,
+        limit: 1,
+        pageSize: 1,
+        autoResume: true,
+        fetchImpl: multiPageFetch(),
+        logger: silentLogger,
+      });
+      // After reset, the corpus is empty and the run starts back at page 1.
+      expect(cleared.startPage).toBe(1);
+      expect(cleared.written).toBe(1);
+      const row = await db.execute(
+        "SELECT next_page FROM ingest_progress WHERE source = 'loc'",
+      );
+      expect(Number(row.rows[0]?.next_page)).toBe(2);
+    });
+  });
 });

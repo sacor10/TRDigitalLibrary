@@ -49,6 +49,8 @@ interface CliOptions {
   force: boolean;
   limit?: number;
   startPage: number;
+  /** True when --start-page was passed explicitly (disables auto-resume). */
+  startPageExplicit: boolean;
   editor?: string;
 }
 
@@ -66,6 +68,7 @@ function parseCliArgs(argv: string[]): CliOptions {
     args: argv,
     options: {
       limit: { type: 'string' },
+      'chunk-size': { type: 'string' },
       'start-page': { type: 'string', default: '1' },
       db: { type: 'string' },
       'dry-run': { type: 'boolean', default: false },
@@ -83,6 +86,13 @@ function parseCliArgs(argv: string[]): CliOptions {
     process.exit(0);
   }
 
+  // parseArgs hides the difference between "default applied" and "user passed
+  // --start-page 1"; we need to know explicit user intent so auto-resume can
+  // be disabled when the operator overrides the cursor.
+  const startPageExplicit = argv.some(
+    (a) => a === '--start-page' || a.startsWith('--start-page='),
+  );
+
   const defaultDbPath = join(__dirname, '..', '..', 'data', 'library.db');
   const startPage = positiveInt(values['start-page'], '--start-page') ?? 1;
   const opts: CliOptions = {
@@ -91,9 +101,12 @@ function parseCliArgs(argv: string[]): CliOptions {
     reset: Boolean(values.reset),
     force: Boolean(values.force),
     startPage,
+    startPageExplicit,
   };
+  const chunkSize = positiveInt(values['chunk-size'], '--chunk-size');
   const limit = positiveInt(values.limit, '--limit');
-  if (limit != null) opts.limit = limit;
+  const effectiveLimit = limit ?? chunkSize;
+  if (effectiveLimit != null) opts.limit = effectiveLimit;
   if (values.editor) opts.editor = values.editor;
   return opts;
 }
@@ -104,11 +117,13 @@ function printUsage(): void {
 Imports source-item records from the Library of Congress Theodore Roosevelt Papers.
 
 Options:
-  --limit <n>       Maximum number of LoC items to ingest
-  --start-page <n>  LoC collection page to start from (default: 1)
+  --limit <n>       Maximum number of LoC items to ingest (alias: --chunk-size)
+  --chunk-size <n>  Synonym for --limit; used by the build orchestrator
+  --start-page <n>  LoC collection page to start from (default: auto-resume
+                    from ingest_progress, or 1 on first run)
   --db <path>       Database path (default: data/library.db)
   --dry-run         Fetch and map records but do not write the database
-  --reset           Clear existing corpus rows before importing
+  --reset           Clear existing corpus rows (and resume cursor) before importing
   --force           Bypass the fast no-op skip-if-exists check (re-fetch every item)
   --editor <name>   Editor identity recorded in field provenance
                    (default: 'loc-ingest')
@@ -127,12 +142,14 @@ function printReport(report: LocIngestReport): void {
   console.log(`  failed:           ${report.failed}`);
   if (!report.dryRun) console.log(`  inserted:         ${report.written}`);
   if (!report.dryRun) console.log(`  skipped (cached): ${report.skipped}`);
+  console.log(`  completed:        ${report.completed}`);
   if (report.nextPage) {
-    console.log(`  resume with:      npm run ingest-loc -- --start-page ${report.nextPage}`);
+    console.log(`  resume next build at page: ${report.nextPage} (auto via ingest_progress)`);
   }
   // Machine-readable summary line for the build orchestrator. Keeping the
   // shape stable: { source, scanned, written, skipped, failed, dryRun }.
-  // The orchestrator parses anything starting with "SUMMARY " on its own line.
+  // Adds nextPage + completed for diagnostics; the orchestrator ignores
+  // unknown keys.
   const summary = {
     source: 'loc',
     scanned: report.scanned,
@@ -140,6 +157,8 @@ function printReport(report: LocIngestReport): void {
     updated: 0,
     skipped: report.skipped,
     failed: report.failed,
+    nextPage: report.nextPage,
+    completed: report.completed,
     dryRun: report.dryRun,
   };
   console.log(`SUMMARY ${JSON.stringify(summary)}`);
@@ -165,8 +184,13 @@ async function main(): Promise<void> {
       dryRun: opts.dryRun,
       reset: opts.reset,
       force: opts.force,
-      startPage: opts.startPage,
+      // When the operator does not pass --start-page explicitly, let the
+      // ingest read the resume cursor from ingest_progress. --reset clears
+      // the cursor inside resetLibraryCorpus, so auto-resume on a reset run
+      // safely starts at page 1.
+      autoResume: !opts.startPageExplicit,
     };
+    if (opts.startPageExplicit) ingestOptions.startPage = opts.startPage;
     if (opts.limit != null) ingestOptions.limit = opts.limit;
     if (opts.editor) ingestOptions.editor = opts.editor;
     const report = await ingestLocCollection(ingestOptions);

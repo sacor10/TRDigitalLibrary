@@ -13,12 +13,21 @@
  *
  *   - If TURSO_LIBRARY_DATABASE_URL is unset, log a warning and exit 0
  *     so PR previews / forks without Turso secrets do not break.
- *   - Run `npm run ingest-loc -w server` and (if a tei/ folder exists at
- *     the repo root) `npm run ingest-tei -w server -- tei`.
+ *   - Run `npm run ingest-loc -w server -- --limit ${INGEST_CHUNK_SIZE}`
+ *     and (if a tei/ folder exists at the repo root)
+ *     `npm run ingest-tei -w server -- tei`.
  *   - Each ingest is expected to print a single line of the shape
  *         SUMMARY {"source":"loc","scanned":N,"written":W,...}
  *     We surface this to the build log and aggregate written+updated
  *     across all ingests.
+ *   - INGEST_CHUNK_SIZE (default 2000) caps the LoC ingest per build so a
+ *     single Netlify build stays well under the 18-minute wall. The
+ *     ingest persists a resume cursor in the `ingest_progress` table, so
+ *     subsequent builds pick up where this one left off automatically.
+ *   - Child stdout is streamed line-by-line to our stdout so per-page
+ *     progress shows up in the Netlify log in real time (the previous
+ *     spawnSync + buffered-stdout combo hid all progress until the child
+ *     exited, which never happened on a timed-out build).
  *   - A non-zero exit from any ingest fails the build LOUDLY (the plan's
  *     explicit requirement).
  *   - "No new content" — written + updated = 0 across both ingests — is
@@ -38,6 +47,8 @@
  * the no-op verification step in the plan is testable locally.
  *
  * Escape hatches (handy for local debugging):
+ *   - INGEST_CHUNK_SIZE=<n>       cap LoC ingest at <n> items per build
+ *                                (default 2000).
  *   - SKIP_ANALYSIS=1            don't run sentiment / topic-model even
  *                                if the corpus changed.
  *   - SKIP_PIP_INSTALL=1         skip `pip install -r python/requirements.txt`
@@ -45,9 +56,10 @@
  *   - FORCE_ANALYSIS=1           run sentiment + topic-model even if the
  *                                ingests reported a no-op.
  */
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -63,33 +75,71 @@ if (!TURSO_URL) {
   process.exit(0);
 }
 
+const DEFAULT_CHUNK_SIZE = 2000;
+function resolveChunkSize() {
+  const raw = process.env.INGEST_CHUNK_SIZE;
+  if (raw == null || raw === '') return DEFAULT_CHUNK_SIZE;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    console.warn(
+      `[build-ingest] INGEST_CHUNK_SIZE="${raw}" is not a positive integer; ` +
+        `falling back to ${DEFAULT_CHUNK_SIZE}.`,
+    );
+    return DEFAULT_CHUNK_SIZE;
+  }
+  return n;
+}
+
 /**
- * Run a child process, stream its stdout to our stdout AND capture it so we
- * can parse the trailing SUMMARY line. stderr is forwarded directly so build
- * logs preserve the order of stdout vs stderr where it matters.
+ * Spawn a child process, stream its stdout line-by-line to our stdout in
+ * real time (no buffering), and capture the trailing SUMMARY line for the
+ * orchestrator. stderr is forwarded directly so build logs preserve the
+ * relative order of stdout vs stderr where it matters.
+ *
+ * Switching from spawnSync to async spawn matters: spawnSync only flushes
+ * captured stdout after the child exits, so a long-running ingest looked
+ * completely silent in the Netlify log for ~18 minutes before the build
+ * was killed. Line-by-line streaming surfaces per-page progress as it
+ * happens, which is the whole point of the chunked-ingest plan.
  */
 function run(cmd, args, label) {
-  console.log(`\n[build-ingest] $ ${cmd} ${args.join(' ')}`);
-  const result = spawnSync(cmd, args, {
-    cwd: repoRoot,
-    env: process.env,
-    encoding: 'utf8',
-    shell: process.platform === 'win32',
-    stdio: ['ignore', 'pipe', 'inherit'],
+  return new Promise((resolveRun) => {
+    console.log(`\n[build-ingest] $ ${cmd} ${args.join(' ')}`);
+    const child = spawn(cmd, args, {
+      cwd: repoRoot,
+      env: process.env,
+      shell: process.platform === 'win32',
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+
+    let lastSummary = null;
+    const rl = createInterface({ input: child.stdout });
+    rl.on('line', (line) => {
+      process.stdout.write(line + '\n');
+      if (line.startsWith('SUMMARY ')) {
+        try {
+          lastSummary = JSON.parse(line.slice('SUMMARY '.length));
+        } catch {
+          console.warn(`[build-ingest] could not parse SUMMARY line: ${line}`);
+        }
+      }
+    });
+
+    child.on('error', (err) => {
+      console.error(`[build-ingest] failed to spawn ${label}: ${err.message}`);
+      process.exit(1);
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        console.error(
+          `[build-ingest] ${label} exited with status ${code}; failing build.`,
+        );
+        process.exit(code ?? 1);
+      }
+      resolveRun(lastSummary);
+    });
   });
-  if (result.error) {
-    console.error(`[build-ingest] failed to spawn ${label}: ${result.error.message}`);
-    process.exit(1);
-  }
-  const stdout = result.stdout ?? '';
-  process.stdout.write(stdout);
-  if (result.status !== 0) {
-    console.error(
-      `[build-ingest] ${label} exited with status ${result.status}; failing build.`,
-    );
-    process.exit(result.status ?? 1);
-  }
-  return parseSummary(stdout);
 }
 
 /**
@@ -117,22 +167,6 @@ function runStreaming(cmd, args, label) {
   }
 }
 
-function parseSummary(stdout) {
-  const lines = stdout.split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i];
-    if (line && line.startsWith('SUMMARY ')) {
-      try {
-        return JSON.parse(line.slice('SUMMARY '.length));
-      } catch (err) {
-        console.warn(`[build-ingest] could not parse SUMMARY line: ${line}`);
-        return null;
-      }
-    }
-  }
-  return null;
-}
-
 /**
  * Pick a Python launcher that exists on this machine. Mirrors the logic in
  * scripts/run-sentiment.mjs / scripts/run-topic-model.mjs so behaviour is
@@ -147,14 +181,23 @@ function pickPython() {
   return null;
 }
 
+const chunkSize = resolveChunkSize();
+console.log(`[build-ingest] LoC chunk size: ${chunkSize} items per build`);
+
 const summaries = [];
 
-summaries.push(run('npm', ['run', 'ingest-loc', '-w', 'server'], 'ingest-loc'));
+summaries.push(
+  await run(
+    'npm',
+    ['run', 'ingest-loc', '-w', 'server', '--', '--chunk-size', String(chunkSize)],
+    'ingest-loc',
+  ),
+);
 
 const teiFolder = join(repoRoot, 'tei');
 if (existsSync(teiFolder)) {
   summaries.push(
-    run('npm', ['run', 'ingest-tei', '-w', 'server', '--', teiFolder], 'ingest-tei'),
+    await run('npm', ['run', 'ingest-tei', '-w', 'server', '--', teiFolder], 'ingest-tei'),
   );
 } else {
   console.log(
@@ -168,10 +211,19 @@ const totalSkipped = summaries.reduce((acc, s) => acc + (s?.skipped ?? 0), 0);
 const totalFailed = summaries.reduce((acc, s) => acc + (s?.failed ?? 0), 0);
 const totalChanged = totalWritten + totalUpdated;
 
+const locSummary = summaries[0];
+const locDone = locSummary?.completed === true;
+const locNextPage = locSummary?.nextPage ?? null;
+
 console.log(
   `\n[build-ingest] Ingest done. new=${totalWritten} updated=${totalUpdated} ` +
     `skipped=${totalSkipped} failed=${totalFailed}` +
-    (totalChanged === 0 ? ' (no-op rebuild)' : ''),
+    (totalChanged === 0 ? ' (no-op rebuild)' : '') +
+    (locDone
+      ? ' [loc: collection fully ingested]'
+      : locNextPage != null
+        ? ` [loc: resume page=${locNextPage} on next build]`
+        : ''),
 );
 
 const skipAnalysis = process.env.SKIP_ANALYSIS === '1';
