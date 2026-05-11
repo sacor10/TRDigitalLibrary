@@ -72,6 +72,17 @@ describe('TR Digital Library API', () => {
       }
     });
 
+    it('omits heavyweight document fields from list items', async () => {
+      const res = await request(app).get('/api/documents');
+      expect(res.status).toBe(200);
+      expect(res.body.items.length).toBeGreaterThan(0);
+      for (const item of res.body.items) {
+        expect(item.transcription).toBe('');
+        expect(item.teiXml).toBeNull();
+        expect(() => DocumentSchema.parse(item)).not.toThrow();
+      }
+    });
+
     it('honors explicit limit + offset for paging', async () => {
       const first = await request(app).get('/api/documents?limit=5&offset=0&sort=date&order=asc');
       expect(first.status).toBe(200);
@@ -172,6 +183,7 @@ describe('TR Digital Library API', () => {
       const res = await request(app).get('/api/documents/man-in-the-arena');
       expect(res.status).toBe(200);
       expect(res.body.id).toBe('man-in-the-arena');
+      expect(res.body.transcription).toContain('Stub content for');
       expect(() => DocumentSchema.parse(res.body)).not.toThrow();
     });
 
@@ -214,6 +226,17 @@ describe('TR Digital Library API', () => {
       expect(first.snippet).toContain('<mark>');
       expect(first.snippet).toContain('</mark>');
       expect(() => DocumentSchema.parse(first.document)).not.toThrow();
+    });
+
+    it('omits heavyweight document fields from search result documents', async () => {
+      const res = await request(app).get('/api/search?q=alpenglow');
+      expect(res.status).toBe(200);
+      expect(res.body.results.length).toBeGreaterThan(0);
+      for (const result of res.body.results) {
+        expect(result.document.transcription).toBe('');
+        expect(result.document.teiXml).toBeNull();
+        expect(() => DocumentSchema.parse(result.document)).not.toThrow();
+      }
     });
 
     it('matches title tokens via FTS', async () => {

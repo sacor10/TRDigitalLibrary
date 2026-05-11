@@ -4,6 +4,26 @@ import { Router } from 'express';
 
 import { rowToDocument, rowToDocumentRow, type LibsqlClient } from '../db.js';
 
+const DOCUMENT_SUMMARY_COLUMNS = `
+  documents.id,
+  documents.title,
+  documents.type,
+  documents.date,
+  documents.recipient,
+  documents.location,
+  documents.author,
+  documents.transcription_url,
+  documents.transcription_format,
+  documents.facsimile_url,
+  documents.iiif_manifest_url,
+  documents.provenance,
+  documents.source,
+  documents.source_url,
+  documents.tags,
+  documents.mentions,
+  documents.tei_source_hash
+`;
+
 function buildFtsQuery(raw: string): string {
   const tokens = raw
     .split(/\s+/)
@@ -57,7 +77,7 @@ export function createSearchRouter(db: LibsqlClient): Router {
 
     const sql = `
       SELECT
-        documents.*,
+        ${DOCUMENT_SUMMARY_COLUMNS},
         snippet(documents_fts, -1, '<mark>', '</mark>', '…', 16) AS snippet,
         bm25(documents_fts) AS rank
       FROM documents_fts
