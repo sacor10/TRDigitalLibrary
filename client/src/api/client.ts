@@ -3,6 +3,7 @@ import {
   AnnotationSchema,
   AuthMeResponseSchema,
   CorrespondentGraphResponseSchema,
+  CorrespondentItemsResponseSchema,
   DocumentListResponseSchema,
   DocumentSchema,
   DocumentSentimentSchema,
@@ -18,6 +19,9 @@ import {
   type AnnotationPatch,
   type AuthUser,
   type CorrespondentGraphResponse,
+  type CorrespondentGraphQuery,
+  type CorrespondentItemsQuery,
+  type CorrespondentItemsResponse,
   type Document,
   type DocumentListQuery,
   type DocumentListResponse,
@@ -108,9 +112,35 @@ export function documentExportUrl(id: string, format: ExportFormat): string {
   return `${API_BASE}/api/documents/${encodeURIComponent(id)}/export.${ext}`;
 }
 
-export async function fetchCorrespondentGraph(): Promise<CorrespondentGraphResponse> {
-  return getJson('/api/correspondents/graph', (raw) =>
+export async function fetchCorrespondentGraph(
+  query: Partial<CorrespondentGraphQuery> = {},
+): Promise<CorrespondentGraphResponse> {
+  const qs = buildQuery({
+    dateFrom: query.dateFrom,
+    dateTo: query.dateTo,
+    direction: query.direction,
+    q: query.q,
+    minLetters: query.minLetters,
+    limit: query.limit,
+  });
+  return getJson(`/api/correspondents/graph${qs}`, (raw) =>
     CorrespondentGraphResponseSchema.parse(raw),
+  );
+}
+
+export async function fetchCorrespondentItems(
+  personId: string,
+  query: Partial<CorrespondentItemsQuery> = {},
+): Promise<CorrespondentItemsResponse> {
+  const qs = buildQuery({
+    dateFrom: query.dateFrom,
+    dateTo: query.dateTo,
+    direction: query.direction,
+    limit: query.limit,
+    offset: query.offset,
+  });
+  return getJson(`/api/correspondents/${encodeURIComponent(personId)}/items${qs}`, (raw) =>
+    CorrespondentItemsResponseSchema.parse(raw),
   );
 }
 

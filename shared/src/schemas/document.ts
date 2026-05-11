@@ -176,10 +176,41 @@ export const ErrorResponseSchema = z.object({
 
 export type ErrorResponse = z.infer<typeof ErrorResponseSchema>;
 
+const correspondenceDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+export const CorrespondentDirectionSchema = z.enum(['all', 'from-tr', 'to-tr']);
+
+export type CorrespondentDirection = z.infer<typeof CorrespondentDirectionSchema>;
+
+export const CorrespondentGraphQuerySchema = z.object({
+  dateFrom: correspondenceDate.optional(),
+  dateTo: correspondenceDate.optional(),
+  direction: CorrespondentDirectionSchema.default('all'),
+  q: z.string().optional(),
+  minLetters: z.coerce.number().int().positive().max(1000).default(1),
+  limit: z.coerce.number().int().positive().max(200).default(80),
+});
+
+export type CorrespondentGraphQuery = z.infer<typeof CorrespondentGraphQuerySchema>;
+
+export const CorrespondentItemsQuerySchema = z.object({
+  dateFrom: correspondenceDate.optional(),
+  dateTo: correspondenceDate.optional(),
+  direction: CorrespondentDirectionSchema.default('all'),
+  limit: z.coerce.number().int().positive().max(100).default(25),
+  offset: z.coerce.number().int().nonnegative().default(0),
+});
+
+export type CorrespondentItemsQuery = z.infer<typeof CorrespondentItemsQuerySchema>;
+
 export const CorrespondentNodeSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
-  letterCount: z.number().int().nonnegative(),
+  totalCount: z.number().int().nonnegative(),
+  inboundCount: z.number().int().nonnegative(),
+  outboundCount: z.number().int().nonnegative(),
+  firstDate: correspondenceDate.nullable(),
+  lastDate: correspondenceDate.nullable(),
   isTR: z.boolean(),
 });
 
@@ -188,26 +219,55 @@ export type CorrespondentNode = z.infer<typeof CorrespondentNodeSchema>;
 export const CorrespondentEdgeSchema = z.object({
   source: z.string().min(1),
   target: z.string().min(1),
-  letterIds: z.array(z.string().min(1)).min(1),
+  totalCount: z.number().int().nonnegative(),
+  fromTrCount: z.number().int().nonnegative(),
+  toTrCount: z.number().int().nonnegative(),
+  firstDate: correspondenceDate.nullable(),
+  lastDate: correspondenceDate.nullable(),
 });
 
 export type CorrespondentEdge = z.infer<typeof CorrespondentEdgeSchema>;
 
-export const CorrespondentLetterSchema = z.object({
+export const CorrespondentItemParticipantSchema = z.object({
   id: z.string().min(1),
-  title: z.string().min(1),
-  date: isoDate,
-  recipient: z.string().nullable(),
-  mentions: z.array(z.string()),
-  participantIds: z.array(z.string().min(1)),
+  label: z.string().min(1),
+  rawName: z.string().min(1),
+  role: z.enum(['creator', 'recipient']),
 });
 
-export type CorrespondentLetter = z.infer<typeof CorrespondentLetterSchema>;
+export type CorrespondentItemParticipant = z.infer<
+  typeof CorrespondentItemParticipantSchema
+>;
+
+export const CorrespondentItemSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  date: correspondenceDate.nullable(),
+  dateDisplay: z.string().nullable(),
+  resourceType: z.enum(['letter', 'telegram']),
+  sourceUrl: z.string().url(),
+  collection: z.string().nullable(),
+  creators: z.array(CorrespondentItemParticipantSchema),
+  recipients: z.array(CorrespondentItemParticipantSchema),
+});
+
+export type CorrespondentItem = z.infer<typeof CorrespondentItemSchema>;
 
 export const CorrespondentGraphResponseSchema = z.object({
   nodes: z.array(CorrespondentNodeSchema),
   edges: z.array(CorrespondentEdgeSchema),
-  letters: z.array(CorrespondentLetterSchema),
+  totalItems: z.number().int().nonnegative(),
+  totalCorrespondents: z.number().int().nonnegative(),
+  generatedAt: z.string().datetime({ offset: true }),
 });
 
 export type CorrespondentGraphResponse = z.infer<typeof CorrespondentGraphResponseSchema>;
+
+export const CorrespondentItemsResponseSchema = z.object({
+  items: z.array(CorrespondentItemSchema),
+  total: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
+});
+
+export type CorrespondentItemsResponse = z.infer<typeof CorrespondentItemsResponseSchema>;

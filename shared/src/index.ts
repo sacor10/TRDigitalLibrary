@@ -14,10 +14,15 @@ export {
   SearchResultSchema,
   SearchResponseSchema,
   ErrorResponseSchema,
+  CorrespondentDirectionSchema,
+  CorrespondentGraphQuerySchema,
+  CorrespondentItemsQuerySchema,
   CorrespondentNodeSchema,
   CorrespondentEdgeSchema,
-  CorrespondentLetterSchema,
+  CorrespondentItemParticipantSchema,
+  CorrespondentItemSchema,
   CorrespondentGraphResponseSchema,
+  CorrespondentItemsResponseSchema,
 } from './schemas/document.js';
 
 export {
@@ -72,10 +77,15 @@ export type {
   SearchResult,
   SearchResponse,
   ErrorResponse,
+  CorrespondentDirection,
+  CorrespondentGraphQuery,
+  CorrespondentItemsQuery,
   CorrespondentNode,
   CorrespondentEdge,
-  CorrespondentLetter,
+  CorrespondentItemParticipant,
+  CorrespondentItem,
   CorrespondentGraphResponse,
+  CorrespondentItemsResponse,
 } from './schemas/document.js';
 
 export type {

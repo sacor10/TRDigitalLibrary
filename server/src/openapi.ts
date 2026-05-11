@@ -5,6 +5,9 @@ import {
 } from '@asteasolutions/zod-to-openapi';
 import {
   CorrespondentGraphResponseSchema,
+  CorrespondentItemsQuerySchema,
+  CorrespondentItemsResponseSchema,
+  CorrespondentGraphQuerySchema,
   DocumentListQuerySchema,
   DocumentListResponseSchema,
   DocumentPatchSchema,
@@ -35,6 +38,7 @@ export function buildOpenApiDocument(): object {
   registry.register('FieldProvenance', FieldProvenanceSchema);
   registry.register('SearchResponse', SearchResponseSchema);
   registry.register('CorrespondentGraphResponse', CorrespondentGraphResponseSchema);
+  registry.register('CorrespondentItemsResponse', CorrespondentItemsResponseSchema);
   registry.register('Topic', TopicSchema);
   registry.register('TopicsResponse', TopicsResponseSchema);
   registry.register('TopicDetailResponse', TopicDetailResponseSchema);
@@ -137,11 +141,28 @@ export function buildOpenApiDocument(): object {
     method: 'get',
     path: '/api/correspondents/graph',
     summary:
-      'Network graph of letter correspondents derived from recipients and curated `mentions` per letter.',
+      'Aggregate TR ego-network graph derived from Theodore Roosevelt Center creator/recipient metadata.',
+    request: { query: CorrespondentGraphQuerySchema },
     responses: {
       200: {
-        description: 'Nodes (people), undirected edges (co-occurrence in letters), and the underlying letter index.',
+        description: 'Nodes and aggregate correspondence edges with counts and date spans.',
         content: { 'application/json': { schema: CorrespondentGraphResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/correspondents/{personId}/items',
+    summary: 'List paginated TRC correspondence items for one correspondent.',
+    request: {
+      params: z.object({ personId: z.string() }),
+      query: CorrespondentItemsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: 'Correspondence items with creator and recipient participants.',
+        content: { 'application/json': { schema: CorrespondentItemsResponseSchema } },
       },
     },
   });

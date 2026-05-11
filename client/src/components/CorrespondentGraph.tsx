@@ -27,8 +27,8 @@ const STYLESHEET: cytoscape.StylesheetJsonBlock[] = [
       'text-max-width': '120px',
       'border-width': 1,
       'border-color': '#3b2a1a',
-      width: 'mapData(letterCount, 1, 20, 22, 60)',
-      height: 'mapData(letterCount, 1, 20, 22, 60)',
+      width: 'data(size)',
+      height: 'data(size)',
     },
   },
   {
@@ -56,7 +56,7 @@ const STYLESHEET: cytoscape.StylesheetJsonBlock[] = [
       'curve-style': 'bezier',
       'line-color': '#a8a29e',
       'target-arrow-shape': 'none',
-      width: 'mapData(weight, 1, 10, 1, 6)',
+      width: 'data(width)',
       opacity: 0.7,
     },
   },
@@ -82,9 +82,13 @@ export function CorrespondentGraph({
     const nodeEls = nodes.map((n) => ({
       data: {
         id: n.id,
-        label: n.label,
-        letterCount: n.letterCount,
+        label:
+          n.isTR || n.id === selectedId || n.totalCount >= 5 || nodes.length <= 30
+            ? n.label
+            : '',
+        totalCount: n.totalCount,
         isTR: n.isTR,
+        size: n.isTR ? 58 : Math.max(18, Math.min(52, 18 + Math.sqrt(n.totalCount) * 5)),
       },
     }));
     const edgeEls = edges.map((e) => ({
@@ -92,11 +96,12 @@ export function CorrespondentGraph({
         id: `${e.source}__${e.target}`,
         source: e.source,
         target: e.target,
-        weight: e.letterIds.length,
+        weight: e.totalCount,
+        width: Math.max(1, Math.min(7, 1 + Math.sqrt(e.totalCount))),
       },
     }));
     return [...nodeEls, ...edgeEls];
-  }, [nodes, edges]);
+  }, [nodes, edges, selectedId]);
 
   useEffect(() => {
     const cy = cyRef.current;
@@ -116,11 +121,12 @@ export function CorrespondentGraph({
       stylesheet={STYLESHEET}
       layout={
         {
-          name: 'cose',
+          name: 'concentric',
           animate: false,
-          padding: 24,
-          nodeRepulsion: () => 8000,
-          idealEdgeLength: () => 90,
+          padding: 32,
+          minNodeSpacing: 18,
+          concentric: (node: cytoscape.NodeSingular) => (node.data('isTR') ? 2 : 1),
+          levelWidth: () => 1,
         } as cytoscape.LayoutOptions
       }
       style={{ width: '100%', height }}
