@@ -214,6 +214,10 @@ export function NetworkPage() {
                   onSelect={handleSelect}
                   height="min(72vh, 560px)"
                 />
+                <p className="border-t border-ink-700/10 px-3 py-2 text-xs text-ink-700/75 dark:border-parchment-50/10 dark:text-parchment-100/70">
+                  Arrows show direction. Select a node to focus its exchange with Theodore
+                  Roosevelt.
+                </p>
               </section>
 
               <aside className="flex flex-col gap-4 text-sm">
