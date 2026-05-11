@@ -48,7 +48,7 @@
  *
  * Escape hatches (handy for local debugging):
  *   - INGEST_CHUNK_SIZE=<n>       cap LoC ingest at <n> items per build
- *                                (default 500).
+ *                                (default 1000).
  *   - INGEST_CONCURRENCY=<n>     parallel LoC item fetches per page
  *                                (default 8; read by ingest-loc directly).
  *   - SKIP_ANALYSIS=1            don't run sentiment / topic-model even
@@ -77,7 +77,7 @@ if (!TURSO_URL) {
   process.exit(0);
 }
 
-const DEFAULT_CHUNK_SIZE = 500;
+const DEFAULT_CHUNK_SIZE = 1000;
 function resolveChunkSize() {
   const raw = process.env.INGEST_CHUNK_SIZE;
   if (raw == null || raw === '') return DEFAULT_CHUNK_SIZE;

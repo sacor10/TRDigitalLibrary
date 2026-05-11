@@ -730,6 +730,35 @@ describe('LoC ingestion', () => {
       expect(report.skipped).toBe(1);
     });
 
+    it('emits a heartbeat line while a page is in flight', async () => {
+      db = await openInMemoryDatabase();
+      // Stall every item fetch long enough that at least one heartbeat tick
+      // (interval=20ms) fires before the page completes.
+      const slowFetch: FetchLike = async (url: string) => {
+        if (isCollectionUrl(url)) return jsonResponse(collectionPage);
+        await new Promise((r) => setTimeout(r, 80));
+        if (url.startsWith(LOC_ITEM_URL)) return jsonResponse({ item: locItem });
+        return new Response('LoC full text', {
+          status: 200,
+          headers: { 'content-type': 'text/plain' },
+        });
+      };
+      const logger = makeRecordingLogger();
+      await ingestLocCollection({
+        db,
+        limit: 1,
+        fetchImpl: slowFetch,
+        logger,
+        heartbeatIntervalMs: 20,
+      });
+      const lines = logger.log.mock.calls.map((args) => String(args[0]));
+      const heartbeats = lines.filter((l) => l.includes('[heartbeat]'));
+      expect(heartbeats.length).toBeGreaterThan(0);
+      expect(heartbeats[0]).toMatch(/page \d+: \d+\/\d+ done/);
+      expect(heartbeats[0]).toContain('fetched=');
+      expect(heartbeats[0]).toContain('failed=');
+    });
+
     it('fetches items concurrently and flushes the page as a single batched write', async () => {
       db = await openInMemoryDatabase();
 
