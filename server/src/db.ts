@@ -504,6 +504,38 @@ export async function rowToDocumentWithProvenance(
   return doc;
 }
 
+// Batched provenance fetch used by the list endpoint. One IN-clause query
+// keeps a 50-row page at 3 round-trips total instead of 52 — the N+1 pattern
+// was timing out the Netlify function and surfacing as a 502 from the edge.
+export async function getFieldProvenanceForDocuments(
+  client: LibsqlClient,
+  documentIds: readonly string[],
+): Promise<Map<string, Record<string, FieldProvenance>>> {
+  const out = new Map<string, Record<string, FieldProvenance>>();
+  if (documentIds.length === 0) return out;
+  const placeholders = documentIds.map(() => '?').join(',');
+  const result = await client.execute({
+    sql: `SELECT document_id, field, source_url, fetched_at, editor
+          FROM document_field_provenance
+          WHERE document_id IN (${placeholders})`,
+    args: documentIds as InValue[],
+  });
+  for (const row of result.rows) {
+    const docId = asString(row.document_id);
+    let bucket = out.get(docId);
+    if (!bucket) {
+      bucket = {};
+      out.set(docId, bucket);
+    }
+    bucket[asString(row.field)] = {
+      sourceUrl: asNullableString(row.source_url),
+      fetchedAt: asString(row.fetched_at),
+      editor: asString(row.editor),
+    };
+  }
+  return out;
+}
+
 export async function patchDocumentFields(
   client: LibsqlClient,
   documentId: string,
