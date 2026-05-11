@@ -2,7 +2,7 @@
 /**
  * Build-time ingest + analysis orchestrator.
  *
- * Runs the LoC and TEI ingests against the configured Turso library DB,
+ * Runs the LoC, TRC, and TEI ingests against the configured Turso library DB,
  * captures their machine-readable SUMMARY lines, and — only when the
  * corpus actually changed — invokes the Python sidecars (sentiment +
  * topic-model) so the precomputed `topics`, `document_topics`,
@@ -13,14 +13,16 @@
  *
  *   - If TURSO_LIBRARY_DATABASE_URL is unset, log a warning and exit 0
  *     so PR previews / forks without Turso secrets do not break.
- *   - Run `npm run ingest-loc -w server -- --limit ${INGEST_CHUNK_SIZE}`
- *     and (if a tei/ folder exists at the repo root)
+ *   - Run `npm run ingest-loc -w server -- --limit ${INGEST_CHUNK_SIZE}`,
+ *     `npm run ingest-trc -w server -- --limit ${INGEST_CHUNK_SIZE}`, and
+ *     (if a tei/ folder exists at the repo root)
  *     `npm run ingest-tei -w server -- tei`.
  *   - Each ingest is expected to print a single line of the shape
  *         SUMMARY {"source":"loc","scanned":N,"written":W,...}
- *     We surface this to the build log and aggregate written+updated
- *     across all ingests.
- *   - INGEST_CHUNK_SIZE (default 2000) caps the LoC ingest per build so a
+ *     We surface this to the build log. Only LoC + TEI are counted toward
+ *     the corpus-change gate that controls sentiment/topic analysis; TRC
+ *     metadata updates are loaded into separate correspondence tables.
+ *   - INGEST_CHUNK_SIZE (default 2000) caps the LoC/TRC ingest per build so a
  *     single Netlify build stays well under the 18-minute wall. The
  *     ingest persists a resume cursor in the `ingest_progress` table, so
  *     subsequent builds pick up where this one left off automatically.
@@ -30,7 +32,7 @@
  *     exited, which never happened on a timed-out build).
  *   - A non-zero exit from any ingest fails the build LOUDLY (the plan's
  *     explicit requirement).
- *   - "No new content" — written + updated = 0 across both ingests — is
+ *   - "No new corpus content" — written + updated = 0 across LoC + TEI — is
  *     a successful build AND short-circuits the Python analysis pass.
  *     This is the no-op fast path: a rebuild with nothing to do finishes
  *     in seconds, not minutes.
@@ -47,7 +49,7 @@
  * the no-op verification step in the plan is testable locally.
  *
  * Escape hatches (handy for local debugging):
- *   - INGEST_CHUNK_SIZE=<n>       cap LoC ingest at <n> items per build
+ *   - INGEST_CHUNK_SIZE=<n>       cap LoC/TRC ingest at <n> items per build
  *                                (default 1000).
  *   - INGEST_CONCURRENCY=<n>     parallel LoC item fetches per page
  *                                (default 8; read by ingest-loc directly).
@@ -189,9 +191,9 @@ console.log(
   `[build-ingest] LoC chunk size: ${chunkSize} items/build, concurrency: ${concurrencyDisplay}`,
 );
 
-const summaries = [];
+const corpusSummaries = [];
 
-summaries.push(
+corpusSummaries.push(
   await run(
     'npm',
     ['run', 'ingest-loc', '-w', 'server', '--', '--chunk-size', String(chunkSize)],
@@ -199,9 +201,15 @@ summaries.push(
   ),
 );
 
+await run(
+  'npm',
+  ['run', 'ingest-trc', '-w', 'server', '--', '--chunk-size', String(chunkSize)],
+  'ingest-trc',
+);
+
 const teiFolder = join(repoRoot, 'tei');
 if (existsSync(teiFolder)) {
-  summaries.push(
+  corpusSummaries.push(
     await run('npm', ['run', 'ingest-tei', '-w', 'server', '--', teiFolder], 'ingest-tei'),
   );
 } else {
@@ -210,13 +218,13 @@ if (existsSync(teiFolder)) {
   );
 }
 
-const totalWritten = summaries.reduce((acc, s) => acc + (s?.written ?? 0), 0);
-const totalUpdated = summaries.reduce((acc, s) => acc + (s?.updated ?? 0), 0);
-const totalSkipped = summaries.reduce((acc, s) => acc + (s?.skipped ?? 0), 0);
-const totalFailed = summaries.reduce((acc, s) => acc + (s?.failed ?? 0), 0);
+const totalWritten = corpusSummaries.reduce((acc, s) => acc + (s?.written ?? 0), 0);
+const totalUpdated = corpusSummaries.reduce((acc, s) => acc + (s?.updated ?? 0), 0);
+const totalSkipped = corpusSummaries.reduce((acc, s) => acc + (s?.skipped ?? 0), 0);
+const totalFailed = corpusSummaries.reduce((acc, s) => acc + (s?.failed ?? 0), 0);
 const totalChanged = totalWritten + totalUpdated;
 
-const locSummary = summaries[0];
+const locSummary = corpusSummaries[0];
 const locDone = locSummary?.completed === true;
 const locNextPage = locSummary?.nextPage ?? null;
 
