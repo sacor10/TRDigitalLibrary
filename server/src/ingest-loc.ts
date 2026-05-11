@@ -236,7 +236,17 @@ async function main(): Promise<void> {
     );
     const report = await ingestLocCollection(ingestOptions);
     printReport(report);
-    process.exit(report.failed > 0 ? 1 : 0);
+    // Exit codes:
+    //   - 0 when we wrote anything (progress!) or the collection is complete
+    //     (scanned=0 means autoResume early-exited on a completed cursor).
+    //   - 0 when we scanned items but had only retryable failures — the
+    //     cursor was held, the next build will retry, and failing this build
+    //     would mask that recovery path behind a red banner.
+    //   - 1 when we scanned items, wrote nothing, AND had failures: that's a
+    //     real "stuck" condition that an operator should notice.
+    const noProgressWithFailures =
+      report.scanned > 0 && report.written === 0 && report.failed > 0;
+    process.exit(noProgressWithFailures ? 1 : 0);
   } finally {
     db?.close();
   }
