@@ -337,6 +337,64 @@ describe('LoC ingestion', () => {
     expect(retryLogs[0]).toContain('cause=Error: terminated');
   });
 
+  it('retries when the response body errors mid-stream (UND_ERR_SOCKET) and then succeeds', async () => {
+    db = await openInMemoryDatabase();
+    let itemCalls = 0;
+    // Mimics undici's "other side closed" mid-body failure: the Response is
+    // returned successfully (HTTP 200), but reading its body via .text()
+    // rejects with TypeError('terminated') / UND_ERR_SOCKET. Before the
+    // fix, body reads happened outside fetchWithRetry and these failures
+    // surfaced as 'stage=post-fetch' build breakage.
+    const fetchImpl: FetchLike = async (url: string) => {
+      if (isCollectionUrl(url)) return jsonResponse(collectionPage);
+      if (isItemUrl(url)) {
+        itemCalls += 1;
+        if (itemCalls === 1) {
+          const cause = Object.assign(new Error('terminated'), { code: 'UND_ERR_SOCKET' });
+          const streamErr = Object.assign(new TypeError('terminated'), { cause });
+          const stream = new ReadableStream({
+            start(controller) {
+              controller.error(streamErr);
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return jsonResponse({ item: locItem });
+      }
+      return new Response('LoC full text', {
+        status: 200,
+        headers: { 'content-type': 'text/plain' },
+      });
+    };
+    const logger = makeRecordingLogger();
+
+    const report = await ingestLocCollection({
+      db,
+      limit: 1,
+      fetchImpl,
+      logger,
+      sleep: noSleep,
+    });
+
+    expect(report.failed).toBe(0);
+    expect(report.written).toBe(1);
+    expect(itemCalls).toBe(2);
+    const retryLogs = logger.log.mock.calls
+      .map((args) => String(args[0]))
+      .filter((line) => line.includes('retry item'));
+    expect(retryLogs.length).toBeGreaterThanOrEqual(1);
+    expect(retryLogs[0]).toMatch(/terminated/);
+    // No post-fetch warning should fire: the body-stream failure was a
+    // retried network error, not an unstructured post-fetch crash.
+    const postFetchWarnings = logger.warn.mock.calls
+      .map((args) => String(args[0]))
+      .filter((line) => line.includes('stage=post-fetch'));
+    expect(postFetchWarnings).toEqual([]);
+  });
+
   it('exhausts retries on persistent 503 and records structured error info', async () => {
     db = await openInMemoryDatabase();
     let itemCalls = 0;
