@@ -13,6 +13,11 @@ export const LOC_SOURCE = 'Library of Congress Theodore Roosevelt Papers';
 const LOC_COLLECTION_URL = `https://www.loc.gov/collections/${LOC_COLLECTION_SLUG}/`;
 const USER_AGENT =
   'TRDigitalLibrary/0.1 (LoC ingestion; contact via https://github.com/sacor10/trdigitallibrary)';
+const LOC_DATE_OVERRIDES_BY_DOCUMENT_ID: Record<string, string> = {
+  // LoC item mss382990001 spans pre-Roosevelt related material, but the
+  // earliest TR-authored work in the range is the 1877 Summer Birds pamphlet.
+  'loc-mss382990001': '1877-01-01',
+};
 
 // Per-stage timeouts: collection-page + item JSON are usually small, but
 // fulltext transcription files can be several MB and were tripping the
@@ -268,21 +273,33 @@ function monthNumber(name: string): string {
   return String(idx + 1).padStart(2, '0');
 }
 
+function isoDateFromParts(year: string, month = '01', day = '01'): string {
+  const safeMonth = month === '00' ? '01' : month;
+  const safeDay = day === '00' ? '01' : day;
+  return `${year}-${safeMonth}-${safeDay}`;
+}
+
 export function normalizeLocDate(raw: string | null): string {
   if (!raw) return '1900-01-01';
   const trimmed = raw.trim();
   const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  if (iso) return isoDateFromParts(iso[1]!, iso[2]!, iso[3]!);
+  const isoMonth = trimmed.match(/^(\d{4})-(\d{2})(?:\b|$)/);
+  if (isoMonth) return isoDateFromParts(isoMonth[1]!, isoMonth[2]!);
   const compact = trimmed.match(/^(\d{4})(\d{2})(\d{2})/);
-  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
+  if (compact) return isoDateFromParts(compact[1]!, compact[2]!, compact[3]!);
   const month = trimmed.match(
     /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s*(\d{4})/i,
   );
   if (month) {
-    return `${month[3]}-${monthNumber(month[1]!)}-${month[2]!.padStart(2, '0')}`;
+    return isoDateFromParts(
+      month[3]!,
+      monthNumber(month[1]!),
+      month[2]!.padStart(2, '0'),
+    );
   }
   const year = trimmed.match(/\b(\d{4})\b/);
-  if (year) return `${year[1]}-01-01`;
+  if (year) return isoDateFromParts(year[1]!);
   return '1900-01-01';
 }
 
@@ -363,6 +380,8 @@ function extractTitle(item: JsonObject): string {
 
 function extractDate(item: JsonObject): string {
   const nested = objectAt(item, 'item');
+  const override = LOC_DATE_OVERRIDES_BY_DOCUMENT_ID[extractDocumentId(item)];
+  if (override) return override;
   return normalizeLocDate(
     stringAt(item, 'date') ??
       firstStringAt(item, 'created_published') ??
