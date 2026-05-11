@@ -56,28 +56,28 @@ export function createSearchRouter(db: LibsqlClient): Router {
     const ftsQuery = buildFtsQuery(q);
 
     const where: string[] = ['documents_fts MATCH @ftsQuery'];
-    const params: Record<string, string | number> = { ftsQuery, limit, offset };
+    const filterParams: Record<string, string | number> = { ftsQuery };
     const joins: string[] = [];
     if (type) {
       where.push('documents.type = @type');
-      params.type = type;
+      filterParams.type = type;
     }
     if (dateFrom) {
       where.push('documents.date >= @dateFrom');
-      params.dateFrom = dateFrom;
+      filterParams.dateFrom = dateFrom;
     }
     if (dateTo) {
       where.push('documents.date <= @dateTo');
-      params.dateTo = dateTo;
+      filterParams.dateTo = dateTo;
     }
     if (recipient) {
       where.push('documents.recipient LIKE @recipient');
-      params.recipient = `%${recipient}%`;
+      filterParams.recipient = `%${recipient}%`;
     }
     if (topicId !== undefined) {
       joins.push('JOIN document_topics ON document_topics.document_id = documents.id');
       where.push('document_topics.topic_id = @topicId');
-      params.topicId = topicId;
+      filterParams.topicId = topicId;
     }
     const joinSql = joins.join(' ');
     const whereSql = `WHERE ${where.join(' AND ')}`;
@@ -96,14 +96,14 @@ export function createSearchRouter(db: LibsqlClient): Router {
     `;
 
     try {
-      const result = await db.execute({ sql, args: params });
+      const result = await db.execute({ sql, args: { ...filterParams, limit, offset } });
       const countResult = await db.execute({
         sql: `SELECT COUNT(*) as c
               FROM documents_fts
               JOIN documents ON documents.rowid = documents_fts.rowid
               ${joinSql}
               ${whereSql}`,
-        args: params,
+        args: filterParams,
       });
       const total = asNumber(countResult.rows[0]?.c);
 

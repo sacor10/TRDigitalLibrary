@@ -289,6 +289,35 @@ describe('TR Digital Library API', () => {
       expect(res.body.total).toBe(2);
     });
 
+    it('does not pass pagination args to the search count query', async () => {
+      const executeCalls: unknown[] = [];
+      const countingDb = new Proxy(db, {
+        get(target, prop, receiver) {
+          if (prop === 'execute') {
+            return async (stmt: Parameters<LibsqlClient['execute']>[0]) => {
+              executeCalls.push(stmt);
+              return (target.execute as LibsqlClient['execute'])(stmt);
+            };
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      }) as LibsqlClient;
+      const countingApp = createApp(countingDb);
+
+      const res = await request(countingApp).get('/api/search?q=alpenglow&limit=5&offset=2');
+
+      expect(res.status).toBe(200);
+      const countCall = executeCalls.find((stmt): stmt is { args?: unknown; sql: unknown } => {
+        if (typeof stmt !== 'object' || stmt === null || !('sql' in stmt)) return false;
+        const sql = String((stmt as { sql: unknown }).sql);
+        return sql.includes('SELECT COUNT(*) as c') && sql.includes('documents_fts');
+      });
+      expect(countCall).toBeDefined();
+      if (countCall) {
+        expect(countCall.args).toEqual({ ftsQuery: '"alpenglow"' });
+      }
+    });
+
     it('paginates via offset', async () => {
       const first = await request(app).get('/api/search?q=alpenglow&limit=10&offset=0');
       expect(first.status).toBe(200);
