@@ -32,11 +32,11 @@ export function createSearchRouter(db: LibsqlClient): Router {
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
     }
-    const { q, type, dateFrom, dateTo, recipient, limit } = parsed.data;
+    const { q, type, dateFrom, dateTo, recipient, limit, offset } = parsed.data;
     const ftsQuery = buildFtsQuery(q);
 
     const where: string[] = ['documents_fts MATCH @ftsQuery'];
-    const params: Record<string, string | number> = { ftsQuery, limit };
+    const params: Record<string, string | number> = { ftsQuery, limit, offset };
     if (type) {
       where.push('documents.type = @type');
       params.type = type;
@@ -64,7 +64,7 @@ export function createSearchRouter(db: LibsqlClient): Router {
       JOIN documents ON documents.rowid = documents_fts.rowid
       ${whereSql}
       ORDER BY rank
-      LIMIT @limit
+      LIMIT @limit OFFSET @offset
     `;
 
     try {

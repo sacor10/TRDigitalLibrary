@@ -1,14 +1,24 @@
-import { useQuery } from '@tanstack/react-query';
-import { DocumentTypeSchema, type DocumentType } from '@tr/shared';
+// Lazy-loaded via "Load more" (chosen for accessibility over IntersectionObserver).
+// `q` input is debounced inside <SearchBar> (250 ms) so this page doesn't fetch on every keystroke.
+import { DocumentTypeSchema, type DocumentType, type SearchResult } from '@tr/shared';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-
 import { searchDocuments } from '../api/client';
+import { LoadMore } from '../components/LoadMore';
 import { SearchBar } from '../components/SearchBar';
 import { SearchResults } from '../components/SearchResults';
+import { usePagedQuery } from '../hooks/usePagedQuery';
 
 const TYPES: DocumentType[] = DocumentTypeSchema.options;
+
+interface SearchFilters {
+  q: string;
+  type: DocumentType | '';
+  recipient: string;
+  dateFrom: string;
+  dateTo: string;
+}
 
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -23,34 +33,40 @@ export function SearchPage() {
 
   const handleQueryChange = (value: string): void => {
     setQ(value);
-    if (value) {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('q', value);
-        return next;
-      });
-    } else {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete('q');
-        return next;
-      });
-    }
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set('q', value);
+      else next.delete('q');
+      return next;
+    });
   };
 
   const enabled = q.trim().length > 0;
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['search', { q, type, recipient, dateFrom, dateTo }],
-    queryFn: () =>
-      searchDocuments({
-        q,
-        ...(type ? { type } : {}),
-        ...(recipient ? { recipient } : {}),
-        ...(dateFrom ? { dateFrom } : {}),
-        ...(dateTo ? { dateTo } : {}),
-        limit: 20,
-      }),
+  const filters: SearchFilters = { q, type, recipient, dateFrom, dateTo };
+
+  const {
+    items,
+    total,
+    pageSize,
+    setPageSize,
+    loadMore,
+    isLoading,
+    isFetching,
+    error,
+  } = usePagedQuery<SearchResult, SearchFilters>({
+    baseKey: 'search',
+    filters,
     enabled,
+    fetcher: (f, limit, offset) =>
+      searchDocuments({
+        q: f.q,
+        ...(f.type ? { type: f.type } : {}),
+        ...(f.recipient ? { recipient: f.recipient } : {}),
+        ...(f.dateFrom ? { dateFrom: f.dateFrom } : {}),
+        ...(f.dateTo ? { dateTo: f.dateTo } : {}),
+        limit,
+        offset,
+      }).then((res) => ({ items: res.results, total: res.total })),
   });
 
   return (
@@ -123,18 +139,31 @@ export function SearchPage() {
           Type a query to search — try <em>arena</em>, <em>conservation</em>, or <em>strenuous</em>.
         </p>
       )}
-      {enabled && isLoading && <p>Searching…</p>}
-      {enabled && error && (
+      {enabled && isLoading && items.length === 0 && <p>Searching…</p>}
+      {enabled && error ? (
         <p className="text-red-600 dark:text-red-400">
           {error instanceof Error ? error.message : 'Search failed.'}
         </p>
+      ) : null}
+      {enabled && !isLoading && items.length === 0 && total === 0 && !error && (
+        <p className="text-ink-700 dark:text-parchment-100">
+          No matches. Try a different query or remove a filter.
+        </p>
       )}
-      {enabled && data && (
+      {enabled && items.length > 0 && (
         <>
           <p className="text-sm text-ink-700/80 dark:text-parchment-100/70 mb-3">
-            {data.total} match{data.total === 1 ? '' : 'es'}
+            {total} match{total === 1 ? '' : 'es'}
           </p>
-          <SearchResults results={data.results} />
+          <SearchResults results={items} />
+          <LoadMore
+            itemsLength={items.length}
+            total={total}
+            pageSize={pageSize}
+            onPageSizeChange={setPageSize}
+            onLoadMore={loadMore}
+            isFetching={isFetching}
+          />
         </>
       )}
     </div>

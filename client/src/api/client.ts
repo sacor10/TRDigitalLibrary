@@ -169,6 +169,7 @@ export async function searchDocuments(query: SearchQuery): Promise<SearchRespons
     dateTo: query.dateTo,
     recipient: query.recipient,
     limit: query.limit,
+    offset: query.offset,
   });
   return getJson(`/api/search${qs}`, (raw) => SearchResponseSchema.parse(raw));
 }

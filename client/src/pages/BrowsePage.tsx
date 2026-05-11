@@ -1,39 +1,56 @@
-import { useQuery } from '@tanstack/react-query';
-import { DocumentTypeSchema, type DocumentType } from '@tr/shared';
-import { useMemo, useState } from 'react';
-
+// Lazy-loaded via "Load more" (chosen for accessibility over IntersectionObserver).
+import { DocumentTypeSchema, type Document, type DocumentType } from '@tr/shared';
+import { useState } from 'react';
 
 import { fetchDocuments } from '../api/client';
 import { DocumentList } from '../components/DocumentList';
+import { LoadMore } from '../components/LoadMore';
+import { usePagedQuery } from '../hooks/usePagedQuery';
 
 const TYPES: DocumentType[] = DocumentTypeSchema.options;
 
 type Sort = 'date' | 'title';
 type Order = 'asc' | 'desc';
 
+interface BrowseFilters {
+  type: DocumentType | '';
+  sort: Sort;
+  order: Order;
+}
+
 export function BrowsePage() {
   const [type, setType] = useState<DocumentType | ''>('');
   const [sort, setSort] = useState<Sort>('date');
   const [order, setOrder] = useState<Order>('asc');
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['documents', { type, sort, order }],
-    queryFn: () =>
+  const {
+    items,
+    total,
+    pageSize,
+    setPageSize,
+    loadMore,
+    isLoading,
+    isFetching,
+    error,
+  } = usePagedQuery<Document, BrowseFilters>({
+    baseKey: 'documents',
+    filters: { type, sort, order },
+    fetcher: (filters, limit, offset) =>
       fetchDocuments({
-        ...(type ? { type } : {}),
-        sort,
-        order,
+        ...(filters.type ? { type: filters.type } : {}),
+        sort: filters.sort,
+        order: filters.order,
+        limit,
+        offset,
       }),
   });
-
-  const items = useMemo(() => data?.items ?? [], [data]);
 
   return (
     <div>
       <header className="mb-6">
         <h1 className="text-2xl font-semibold sm:text-3xl">Browse the collection</h1>
         <p className="text-ink-700 dark:text-parchment-100 mt-1">
-          {data ? `${data.total} documents` : 'Loading…'}
+          {isLoading && items.length === 0 ? 'Loading…' : `${total} documents`}
         </p>
       </header>
 
@@ -79,13 +96,28 @@ export function BrowsePage() {
         </label>
       </div>
 
-      {isLoading && <p>Loading…</p>}
-      {error && (
+      {isLoading && items.length === 0 && <p>Loading…</p>}
+      {error ? (
         <p className="text-red-600 dark:text-red-400">
           {error instanceof Error ? error.message : 'Failed to load documents.'}
         </p>
+      ) : null}
+      {items.length === 0 && !isLoading && !error && (
+        <p className="text-ink-700 dark:text-parchment-100">No documents match these filters.</p>
       )}
-      {data && <DocumentList documents={items} />}
+      {items.length > 0 && (
+        <>
+          <DocumentList documents={items} />
+          <LoadMore
+            itemsLength={items.length}
+            total={total}
+            pageSize={pageSize}
+            onPageSizeChange={setPageSize}
+            onLoadMore={loadMore}
+            isFetching={isFetching}
+          />
+        </>
+      )}
     </div>
   );
 }
