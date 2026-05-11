@@ -4,6 +4,11 @@ import {
   extendZodWithOpenApi,
 } from '@asteasolutions/zod-to-openapi';
 import {
+  ANNOTATION_JSONLD_CONTEXT,
+  AnnotationCollectionSchema,
+  AnnotationCreateInputSchema,
+  AnnotationPatchSchema,
+  AnnotationSchema,
   CorrespondentGraphResponseSchema,
   CorrespondentItemsQuerySchema,
   CorrespondentItemsResponseSchema,
@@ -46,7 +51,19 @@ export function buildOpenApiDocument(): object {
   registry.register('DocumentSentiment', DocumentSentimentSchema);
   registry.register('SentimentTimelineResponse', SentimentTimelineResponseSchema);
   registry.register('SentimentExtremesResponse', SentimentExtremesResponseSchema);
+  registry.register('Annotation', AnnotationSchema);
+  registry.register('AnnotationCreateInput', AnnotationCreateInputSchema);
+  registry.register('AnnotationPatch', AnnotationPatchSchema);
+  registry.register('AnnotationCollection', AnnotationCollectionSchema);
   registry.register('Error', ErrorResponseSchema);
+
+  const AnnotationJsonLdSchema = AnnotationSchema.omit({
+    documentId: true,
+    sectionId: true,
+  }).extend({
+    '@context': z.literal(ANNOTATION_JSONLD_CONTEXT),
+  });
+  registry.register('AnnotationJsonLd', AnnotationJsonLdSchema);
 
   registry.registerPath({
     method: 'get',
@@ -132,6 +149,144 @@ export function buildOpenApiDocument(): object {
       },
       404: {
         description: 'Document not found or unsupported extension',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/documents/{id}/annotations',
+    summary: 'List public annotations for a document.',
+    request: {
+      params: z.object({ id: z.string() }),
+    },
+    responses: {
+      200: {
+        description: 'W3C-shaped annotation collection for the document.',
+        content: { 'application/json': { schema: AnnotationCollectionSchema } },
+      },
+      400: {
+        description: 'Missing document id.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      404: {
+        description: 'Document not found.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/annotations',
+    summary: 'Create a highlight or note annotation for the signed-in user.',
+    request: {
+      body: { content: { 'application/json': { schema: AnnotationCreateInputSchema } } },
+    },
+    responses: {
+      201: {
+        description: 'Created annotation.',
+        content: { 'application/json': { schema: AnnotationSchema } },
+      },
+      400: {
+        description: 'Invalid body or missing required note text.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      401: {
+        description: 'Authentication required.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      404: {
+        description: 'Document not found.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/annotations/{id}',
+    summary: 'Get a public annotation by id.',
+    request: {
+      params: z.object({ id: z.string() }),
+    },
+    responses: {
+      200: {
+        description: 'Annotation as JSON or JSON-LD, based on the Accept header.',
+        content: {
+          'application/json': { schema: AnnotationSchema },
+          'application/ld+json': { schema: AnnotationJsonLdSchema },
+        },
+      },
+      400: {
+        description: 'Missing annotation id.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      404: {
+        description: 'Annotation not found.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'patch',
+    path: '/api/annotations/{id}',
+    summary: 'Edit note text or convert an owned annotation between note and highlight.',
+    request: {
+      params: z.object({ id: z.string() }),
+      body: { content: { 'application/json': { schema: AnnotationPatchSchema } } },
+    },
+    responses: {
+      200: {
+        description: 'Updated annotation.',
+        content: { 'application/json': { schema: AnnotationSchema } },
+      },
+      400: {
+        description: 'Invalid body or missing required note text.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      401: {
+        description: 'Authentication required.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      403: {
+        description: 'Only the author can edit this annotation.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      404: {
+        description: 'Annotation not found.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'delete',
+    path: '/api/annotations/{id}',
+    summary: 'Hard-delete an owned annotation.',
+    request: {
+      params: z.object({ id: z.string() }),
+    },
+    responses: {
+      204: {
+        description: 'Annotation deleted.',
+      },
+      400: {
+        description: 'Missing annotation id.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      401: {
+        description: 'Authentication required.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      403: {
+        description: 'Only the author can delete this annotation.',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+      404: {
+        description: 'Annotation not found.',
         content: { 'application/json': { schema: ErrorResponseSchema } },
       },
     },
@@ -308,7 +463,7 @@ export function buildOpenApiDocument(): object {
       title: 'TR Digital Library API',
       version: '0.1.0',
       description:
-        'A read-only API for searching and reading Theodore Roosevelt’s public-domain works and correspondence.',
+        'An API for searching, reading, and annotating Theodore Roosevelt’s public-domain works and correspondence.',
       license: { name: 'MIT' },
     },
     servers: [{ url: 'http://localhost:3001' }],

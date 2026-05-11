@@ -169,6 +169,42 @@ describe('Annotations API', () => {
     expect(ok.body.body[0].value).toBe('updated note');
   });
 
+  it('converts a note annotation to a highlight and clears the body', async () => {
+    const agent = await signedInAgent('a');
+    const created = await agent.post('/api/annotations').send(baseInput);
+    const id = created.body.id as string;
+
+    const converted = await agent
+      .patch(`/api/annotations/${id}`)
+      .send({ motivation: 'highlighting' });
+
+    expect(converted.status).toBe(200);
+    expect(converted.body.motivation).toBe('highlighting');
+    expect(converted.body.body).toBeUndefined();
+
+    const fetched = await request(app).get(`/api/annotations/${id}`);
+    expect(fetched.status).toBe(200);
+    expect(fetched.body.motivation).toBe('highlighting');
+    expect(fetched.body.body).toBeUndefined();
+  });
+
+  it('converts a highlight annotation to a note when bodyText is provided', async () => {
+    const agent = await signedInAgent('a');
+    const { bodyText: _bodyText, ...highlightInput } = baseInput;
+    const created = await agent
+      .post('/api/annotations')
+      .send({ ...highlightInput, motivation: 'highlighting' });
+    const id = created.body.id as string;
+
+    const converted = await agent
+      .patch(`/api/annotations/${id}`)
+      .send({ motivation: 'commenting', bodyText: 'Converted to a note.' });
+
+    expect(converted.status).toBe(200);
+    expect(converted.body.motivation).toBe('commenting');
+    expect(converted.body.body[0].value).toBe('Converted to a note.');
+  });
+
   it('only allows the author to DELETE their annotation', async () => {
     const authorAgent = await signedInAgent('a');
     const created = await authorAgent.post('/api/annotations').send(baseInput);

@@ -1,5 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Annotation, AnnotationCreateInput, Document } from '@tr/shared';
+import type {
+  Annotation,
+  AnnotationCollection,
+  AnnotationCreateInput,
+  AnnotationPatch,
+  Document,
+} from '@tr/shared';
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLocation } from 'react-router-dom';
 
@@ -27,6 +33,10 @@ interface Segment {
   start: number;
   end: number;
   annotationIds: string[];
+}
+
+function errorMessage(err: unknown): string | null {
+  return err instanceof Error ? err.message : null;
 }
 
 function buildSegments(
@@ -100,19 +110,48 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
     },
   });
   const patchMut = useMutation({
-    mutationFn: ({ id, bodyText }: { id: string; bodyText: string }) =>
-      patchAnnotation(id, { bodyText }),
-    onSuccess: () => {
+    mutationFn: ({ id, patch }: { id: string; patch: AnnotationPatch }) =>
+      patchAnnotation(id, patch),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<AnnotationCollection>(
+        ['annotations', document.id],
+        (existing) =>
+          existing
+            ? {
+                ...existing,
+                items: existing.items.map((annotation) =>
+                  annotation.id === updated.id ? updated : annotation,
+                ),
+              }
+            : existing,
+      );
+      setActiveId(updated.id);
       void queryClient.invalidateQueries({ queryKey: ['annotations', document.id] });
     },
   });
   const deleteMut = useMutation({
     mutationFn: (id: string) => deleteAnnotation(id),
-    onSuccess: () => {
+    onSuccess: (_deleted, id) => {
+      queryClient.setQueryData<AnnotationCollection>(
+        ['annotations', document.id],
+        (existing) =>
+          existing
+            ? {
+                ...existing,
+                total: Math.max(0, existing.total - 1),
+                items: existing.items.filter((annotation) => annotation.id !== id),
+              }
+            : existing,
+      );
       void queryClient.invalidateQueries({ queryKey: ['annotations', document.id] });
       setActiveId(null);
     },
   });
+
+  useEffect(() => {
+    patchMut.reset();
+    deleteMut.reset();
+  }, [activeId]);
 
   useEffect(() => {
     if (!annotationsQuery.data) return;
@@ -228,9 +267,10 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
             onDelete={async (id) => {
               await deleteMut.mutateAsync(id);
             }}
-            onPatch={async (id, bodyText) => {
-              await patchMut.mutateAsync({ id, bodyText });
+            onPatch={async (id, patch) => {
+              await patchMut.mutateAsync({ id, patch });
             }}
+            mutationError={errorMessage(patchMut.error ?? deleteMut.error)}
           />
         )}
       </div>
