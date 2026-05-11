@@ -1,8 +1,10 @@
+import express from 'express';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createApp } from '../app.js';
 import { openInMemoryDatabase, type LibsqlClient } from '../db.js';
+import { createCorrespondentsRouter } from '../routes/correspondents.js';
 import { upsertTrcCorrespondenceItems, type TrcCorrespondenceItem } from '../sources/trc.js';
 
 const baseItem = {
@@ -47,6 +49,15 @@ function item(overrides: Partial<TrcCorrespondenceItem>): TrcCorrespondenceItem 
     recipients: [person('Winslow, F T', 'winslow-f-t')],
     ...overrides,
   };
+}
+
+function createCorrespondentsOnlyApp(db: LibsqlClient) {
+  const app = express();
+  app.use('/api/correspondents', createCorrespondentsRouter(db));
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  });
+  return app;
 }
 
 describe('correspondents API', () => {
@@ -138,5 +149,71 @@ describe('correspondents API', () => {
   it('rejects malformed graph filters', async () => {
     const res = await request(app).get('/api/correspondents/graph?limit=9999');
     expect(res.status).toBe(400);
+  });
+
+  it('binds only graph query parameters used by each statement', async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [{ total_items: 0, total_correspondents: 0 }] });
+    const routerApp = createCorrespondentsOnlyApp({ execute } as unknown as LibsqlClient);
+
+    const res = await request(routerApp).get(
+      '/api/correspondents/graph?dateFrom=1900-01-01&q=Anna&minLetters=2&limit=7',
+    );
+
+    expect(res.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({
+      args: {
+        tr: 'theodore-roosevelt',
+        date_from: '1900-01-01',
+        q: '%Anna%',
+        min_letters: 2,
+        limit: 7,
+      },
+    });
+    expect(execute.mock.calls[1]?.[0]).toMatchObject({
+      args: {
+        tr: 'theodore-roosevelt',
+        date_from: '1900-01-01',
+        q: '%Anna%',
+      },
+    });
+    expect(execute.mock.calls[1]?.[0]?.args).not.toHaveProperty('min_letters');
+    expect(execute.mock.calls[1]?.[0]?.args).not.toHaveProperty('limit');
+  });
+
+  it('binds pagination only on the items listing query', async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ total: 0 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const routerApp = createCorrespondentsOnlyApp({ execute } as unknown as LibsqlClient);
+
+    const res = await request(routerApp).get(
+      '/api/correspondents/winslow-f-t/items?direction=to-tr&dateFrom=1900-01-01&limit=5&offset=10',
+    );
+
+    expect(res.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({
+      args: {
+        tr: 'theodore-roosevelt',
+        person_id: 'winslow-f-t',
+        date_from: '1900-01-01',
+      },
+    });
+    expect(execute.mock.calls[0]?.[0]?.args).not.toHaveProperty('limit');
+    expect(execute.mock.calls[0]?.[0]?.args).not.toHaveProperty('offset');
+    expect(execute.mock.calls[1]?.[0]).toMatchObject({
+      args: {
+        tr: 'theodore-roosevelt',
+        person_id: 'winslow-f-t',
+        date_from: '1900-01-01',
+        limit: 5,
+        offset: 10,
+      },
+    });
   });
 });

@@ -223,9 +223,12 @@ async function handleGraph(db: LibsqlClient, req: Request, res: Response) {
     return;
   }
   const query = parsed.data;
-  const { where, params } = graphWhere(query);
-  params.min_letters = query.minLetters;
-  params.limit = query.limit;
+  const { where, params: baseParams } = graphWhere(query);
+  const edgeArgs: Record<string, InValue> = {
+    ...baseParams,
+    min_letters: query.minLetters,
+    limit: query.limit,
+  };
 
   const cte = pairRowsCte(where.join(' AND '));
   const edgeResult = await db.execute({
@@ -246,7 +249,7 @@ async function handleGraph(db: LibsqlClient, req: Request, res: Response) {
       HAVING total_count >= @min_letters
       ORDER BY total_count DESC, target_label ASC
       LIMIT @limit`,
-    args: params,
+    args: edgeArgs,
   });
 
   const totalResult = await db.execute({
@@ -256,7 +259,7 @@ async function handleGraph(db: LibsqlClient, req: Request, res: Response) {
         COUNT(DISTINCT CASE WHEN target = @tr THEN source ELSE target END) AS total_correspondents
       FROM edge_rows
       WHERE source <> target`,
-    args: params,
+    args: baseParams,
   });
 
   const rows = edgeResult.rows.map(edgeRow);
@@ -334,28 +337,31 @@ async function handleItems(db: LibsqlClient, req: Request, res: Response) {
   }
 
   const query = parsed.data;
-  const params: Record<string, InValue> = {
+  const baseParams: Record<string, InValue> = {
     tr: TR_NODE_ID,
     person_id: personId,
-    limit: query.limit,
-    offset: query.offset,
   };
   const where = [`EXISTS (${pairExistsForPerson(personId, query.direction)})`];
-  addItemFilters(where, params, query);
+  addItemFilters(where, baseParams, query);
 
   const countResult = await db.execute({
     sql: `SELECT COUNT(*) AS total
           FROM correspondence_items i
           WHERE ${where.join(' AND ')}`,
-    args: params,
+    args: baseParams,
   });
+  const itemsArgs: Record<string, InValue> = {
+    ...baseParams,
+    limit: query.limit,
+    offset: query.offset,
+  };
   const itemsResult = await db.execute({
     sql: `SELECT id, title, date, date_display, resource_type, source_url, collection
           FROM correspondence_items i
           WHERE ${where.join(' AND ')}
           ORDER BY i.date IS NULL ASC, i.date DESC, i.title ASC
           LIMIT @limit OFFSET @offset`,
-    args: params,
+    args: itemsArgs,
   });
 
   const itemRows = itemsResult.rows.map(itemRow);
