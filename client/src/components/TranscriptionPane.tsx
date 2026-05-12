@@ -236,7 +236,7 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
   const activeAnnotation = activeId ? (located.find((a) => a.id === activeId) ?? null) : null;
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
       <div className="relative min-w-0">
         <article
           ref={rootRef}
@@ -260,6 +260,13 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
             await createMut.mutateAsync(input);
           }}
         />
+      </div>
+      <div className="space-y-4">
+        <AnnotationsSidePanel
+          annotations={located}
+          activeId={activeId}
+          onSelect={(id) => setActiveId(id)}
+        />
         {activeAnnotation && (
           <AnnotationPopover
             annotation={activeAnnotation}
@@ -274,11 +281,6 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
           />
         )}
       </div>
-      <AnnotationsSidePanel
-        annotations={located}
-        activeId={activeId}
-        onSelect={(id) => setActiveId(id)}
-      />
     </div>
   );
 }
