@@ -1,6 +1,5 @@
 import type { AnnotationCreateInput, AnnotationMotivation } from '@tr/shared';
-import { useEffect, useState, type RefObject } from 'react';
-
+import { useEffect, useRef, useState, type RefObject } from 'react';
 
 import { useAuth } from '../auth/AuthContext';
 import {
@@ -29,10 +28,16 @@ function clamp(value: number, min: number, max: number): number {
 
 export function AnnotationToolbar({ documentId, rootRef, onSave }: AnnotationToolbarProps) {
   const { user } = useAuth();
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const editingRef = useRef(false);
   const [state, setState] = useState<ToolbarState | null>(null);
   const [editing, setEditing] = useState<{ motivation: AnnotationMotivation } | null>(null);
   const [body, setBody] = useState('');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    editingRef.current = editing !== null;
+  }, [editing]);
 
   useEffect(() => {
     if (!user) return;
@@ -40,13 +45,18 @@ export function AnnotationToolbar({ documentId, rootRef, onSave }: AnnotationToo
     if (!root) return;
 
     const handler = (): void => {
+      const toolbarHasFocus =
+        document.activeElement instanceof HTMLElement &&
+        toolbarRef.current?.contains(document.activeElement);
       const sel = window.getSelection();
       if (!sel) {
+        if (editingRef.current || toolbarHasFocus) return;
         setState(null);
         return;
       }
       const capture = captureSelectionWithin(sel, root);
       if (!capture) {
+        if (editingRef.current || toolbarHasFocus) return;
         setState(null);
         return;
       }
@@ -54,7 +64,7 @@ export function AnnotationToolbar({ documentId, rootRef, onSave }: AnnotationToo
       const rect = range.getBoundingClientRect();
       const offsetParent = root.offsetParent;
       const container =
-        offsetParent instanceof HTMLElement ? offsetParent : root.parentElement ?? root;
+        offsetParent instanceof HTMLElement ? offsetParent : (root.parentElement ?? root);
       const containerRect = container.getBoundingClientRect();
       const centeredLeft = rect.left - containerRect.left + rect.width / 2;
       const maxLeft = Math.max(TOOLBAR_EDGE_GUTTER, containerRect.width - TOOLBAR_EDGE_GUTTER);
@@ -99,6 +109,7 @@ export function AnnotationToolbar({ documentId, rootRef, onSave }: AnnotationToo
 
   return (
     <div
+      ref={toolbarRef}
       role="toolbar"
       aria-label="Annotation toolbar"
       style={{
