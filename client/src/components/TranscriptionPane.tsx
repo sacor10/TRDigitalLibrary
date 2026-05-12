@@ -6,7 +6,16 @@ import type {
   AnnotationPatch,
   Document,
 } from '@tr/shared';
-import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { useLocation } from 'react-router-dom';
 
 
@@ -25,6 +34,7 @@ import { AnnotationsSidePanel } from './AnnotationsSidePanel';
 
 interface TranscriptionPaneProps {
   document: Document;
+  onSidebarChange?: (sidebar: ReactNode | null) => void;
 }
 
 type LocatedAnnotation = Annotation & { range: AnnotationRange | null };
@@ -69,7 +79,7 @@ function buildSegments(
   return segments;
 }
 
-export function TranscriptionPane({ document }: TranscriptionPaneProps) {
+export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPaneProps) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const rootRef = useRef<HTMLElement | null>(null);
@@ -172,6 +182,60 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
     });
   }, [location.hash, annotationsQuery.data]);
 
+  const activeAnnotation = activeId ? (located.find((a) => a.id === activeId) ?? null) : null;
+  const handleSelectAnnotation = useCallback((id: string) => {
+    setActiveId((current) => (current === id ? null : id));
+  }, []);
+  const handleDeleteAnnotation = useCallback(
+    async (id: string) => {
+      await deleteMut.mutateAsync(id);
+    },
+    [deleteMut.mutateAsync],
+  );
+  const handlePatchAnnotation = useCallback(
+    async (id: string, patch: AnnotationPatch) => {
+      await patchMut.mutateAsync({ id, patch });
+    },
+    [patchMut.mutateAsync],
+  );
+  const annotationSidebar = useMemo(() => {
+    if (!document.transcription) return null;
+    return (
+      <div className="space-y-4">
+        <AnnotationsSidePanel
+          annotations={located}
+          activeId={activeId}
+          onSelect={handleSelectAnnotation}
+        />
+        {activeAnnotation && (
+          <AnnotationPopover
+            annotation={activeAnnotation}
+            onClose={() => setActiveId(null)}
+            onDelete={handleDeleteAnnotation}
+            onPatch={handlePatchAnnotation}
+            mutationError={errorMessage(patchMut.error ?? deleteMut.error)}
+          />
+        )}
+      </div>
+    );
+  }, [
+    activeAnnotation,
+    activeId,
+    deleteMut.error,
+    document.transcription,
+    handleDeleteAnnotation,
+    handlePatchAnnotation,
+    handleSelectAnnotation,
+    located,
+    patchMut.error,
+  ]);
+
+  useEffect(() => {
+    if (!onSidebarChange) return;
+    onSidebarChange(annotationSidebar);
+    return () => onSidebarChange(null);
+  }, [annotationSidebar, onSidebarChange]);
+
   if (!document.transcription) {
     return (
       <article className="max-w-none space-y-3 rounded-md border border-dashed border-ink-700/20 p-4 dark:border-parchment-50/20 sm:p-6">
@@ -222,7 +286,7 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
               data-anno-id={top}
               data-anno-ids={seg.annotationIds.join(',')}
               style={style}
-              onClick={() => setActiveId(top)}
+              onClick={() => handleSelectAnnotation(top)}
               className="cursor-pointer"
             >
               {text}
@@ -233,54 +297,41 @@ export function TranscriptionPane({ document }: TranscriptionPaneProps) {
     );
   });
 
-  const activeAnnotation = activeId ? (located.find((a) => a.id === activeId) ?? null) : null;
+  const transcriptionContent = (
+    <div className="relative min-w-0">
+      <article
+        ref={rootRef}
+        className="max-w-none space-y-4 text-base leading-relaxed sm:text-lg"
+        aria-describedby={user ? 'annotation-help' : undefined}
+      >
+        {renderedParagraphs}
+      </article>
+      {user && (
+        <p
+          id="annotation-help"
+          className="mt-4 text-xs text-ink-700/60 dark:text-parchment-50/60"
+        >
+          Select any passage to highlight or attach a note.
+        </p>
+      )}
+      <AnnotationToolbar
+        documentId={document.id}
+        rootRef={rootRef}
+        onSave={async (input) => {
+          await createMut.mutateAsync(input);
+        }}
+      />
+    </div>
+  );
+
+  if (onSidebarChange) {
+    return transcriptionContent;
+  }
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
-      <div className="relative min-w-0">
-        <article
-          ref={rootRef}
-          className="max-w-none space-y-4 text-base leading-relaxed sm:text-lg"
-          aria-describedby={user ? 'annotation-help' : undefined}
-        >
-          {renderedParagraphs}
-        </article>
-        {user && (
-          <p
-            id="annotation-help"
-            className="mt-4 text-xs text-ink-700/60 dark:text-parchment-50/60"
-          >
-            Select any passage to highlight or attach a note.
-          </p>
-        )}
-        <AnnotationToolbar
-          documentId={document.id}
-          rootRef={rootRef}
-          onSave={async (input) => {
-            await createMut.mutateAsync(input);
-          }}
-        />
-      </div>
-      <div className="space-y-4">
-        <AnnotationsSidePanel
-          annotations={located}
-          activeId={activeId}
-          onSelect={(id) => setActiveId(id)}
-        />
-        {activeAnnotation && (
-          <AnnotationPopover
-            annotation={activeAnnotation}
-            onClose={() => setActiveId(null)}
-            onDelete={async (id) => {
-              await deleteMut.mutateAsync(id);
-            }}
-            onPatch={async (id, patch) => {
-              await patchMut.mutateAsync({ id, patch });
-            }}
-            mutationError={errorMessage(patchMut.error ?? deleteMut.error)}
-          />
-        )}
-      </div>
+      {transcriptionContent}
+      {annotationSidebar}
     </div>
   );
 }

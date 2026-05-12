@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { fetchDocument, fetchDocumentSentiment } from '../api/client';
@@ -9,6 +10,7 @@ import { SentimentBadge } from '../components/SentimentBadge';
 export function DocumentPage() {
   const { id } = useParams<{ id: string }>();
   const documentId = id ?? '';
+  const [annotationSidebar, setAnnotationSidebar] = useState<ReactNode | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['document', documentId],
@@ -60,9 +62,12 @@ export function DocumentPage() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-8">
         <div className="min-w-0">
-          <DocumentViewer document={data} />
+          <DocumentViewer document={data} onAnnotationSidebarChange={setAnnotationSidebar} />
         </div>
-        <MetadataSidebar document={data} />
+        <div className="space-y-4">
+          {annotationSidebar}
+          <MetadataSidebar document={data} />
+        </div>
       </div>
     </article>
   );

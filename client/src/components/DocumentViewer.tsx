@@ -1,5 +1,5 @@
 import type { Document } from '@tr/shared';
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 
 
 import { FacsimilePane } from './FacsimilePane';
@@ -9,11 +9,12 @@ type Tab = 'transcription' | 'facsimile';
 
 interface DocumentViewerProps {
   document: Document;
+  onAnnotationSidebarChange?: (sidebar: ReactNode | null) => void;
 }
 
-export function DocumentViewer({ document }: DocumentViewerProps) {
+export function DocumentViewer({ document, onAnnotationSidebarChange }: DocumentViewerProps) {
   const hasFacsimile = Boolean(document.iiifManifestUrl || document.facsimileUrl);
-  const initialTab: Tab = hasFacsimile ? 'facsimile' : 'transcription';
+  const initialTab: Tab = 'transcription';
   const [tab, setTab] = useState<Tab>(initialTab);
   const tabsId = useId();
 
@@ -67,7 +68,14 @@ export function DocumentViewer({ document }: DocumentViewerProps) {
         aria-labelledby={`${transcriptionPanelId}-tab`}
         hidden={tab !== 'transcription'}
       >
-        {tab === 'transcription' && <TranscriptionPane document={document} />}
+        {tab === 'transcription' && (
+          <TranscriptionPane
+            document={document}
+            {...(onAnnotationSidebarChange
+              ? { onSidebarChange: onAnnotationSidebarChange }
+              : {})}
+          />
+        )}
       </div>
       <div
         role="tabpanel"

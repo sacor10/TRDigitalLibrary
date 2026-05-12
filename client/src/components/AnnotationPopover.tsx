@@ -125,7 +125,7 @@ export function AnnotationPopover({
   }
 
   return (
-    <div className="card mt-4" id={`anno-${annotation.id}`}>
+    <div className="card" id={`anno-${annotation.id}`}>
       <header className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm">
