@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query';
 import type {
   CorrespondentDirection,
   CorrespondentGraphQuery,
-  CorrespondentItem,
 } from '@tr/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -38,8 +37,8 @@ function directionLabel(direction: CorrespondentDirection): string {
   return 'Either direction';
 }
 
-function sourceRecordPath(item: CorrespondentItem): string {
-  return item.documentId ? `/documents/${encodeURIComponent(item.documentId)}` : '/browse';
+function sourceRecordPath(documentId: string): string {
+  return `/documents/${encodeURIComponent(documentId)}`;
 }
 
 export function NetworkPage() {
@@ -274,12 +273,16 @@ export function NetworkPage() {
                           <ul className="flex flex-col gap-3">
                             {itemsQuery.data.items.map((item) => (
                               <li key={item.id}>
-                                <Link
-                                  className="font-medium underline decoration-accent-500/50 hover:decoration-accent-500"
-                                  to={sourceRecordPath(item)}
-                                >
-                                  {item.title}
-                                </Link>
+                                {item.documentId ? (
+                                  <Link
+                                    className="font-medium underline decoration-accent-500/50 hover:decoration-accent-500"
+                                    to={sourceRecordPath(item.documentId)}
+                                  >
+                                    {item.title}
+                                  </Link>
+                                ) : (
+                                  <span className="font-medium">{item.title}</span>
+                                )}
                                 <p className="text-ink-700/70 dark:text-parchment-100/70">
                                   {item.dateDisplay ?? item.date ?? 'undated'} &middot;{' '}
                                   {item.resourceType}

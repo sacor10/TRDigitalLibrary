@@ -158,4 +158,20 @@ describe('NetworkPage', () => {
       );
     });
   });
+
+  it('does not link unmatched records to the browse landing page', async () => {
+    fetchItemsMock.mockResolvedValueOnce({
+      ...itemsResponse,
+      items: [{ ...itemsResponse.items[0]!, documentId: null }],
+    });
+    renderPage();
+
+    await screen.findByText('2 source items');
+    fireEvent.click(screen.getByRole('button', { name: 'Winslow, F T' }));
+
+    await screen.findByText('Letter from Frank T. Winslow to Theodore Roosevelt');
+    expect(
+      screen.queryByRole('link', { name: 'Letter from Frank T. Winslow to Theodore Roosevelt' }),
+    ).toBeNull();
+  });
 });
