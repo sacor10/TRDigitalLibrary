@@ -20,6 +20,13 @@ interface ToolbarState {
   rect: { left: number; top: number };
 }
 
+const TOOLBAR_EDGE_GUTTER = 8;
+const TOOLBAR_VERTICAL_OFFSET = 48;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
 export function AnnotationToolbar({ documentId, rootRef, onSave }: AnnotationToolbarProps) {
   const { user } = useAuth();
   const [state, setState] = useState<ToolbarState | null>(null);
@@ -45,11 +52,17 @@ export function AnnotationToolbar({ documentId, rootRef, onSave }: AnnotationToo
       }
       const range = sel.getRangeAt(0);
       const rect = range.getBoundingClientRect();
+      const offsetParent = root.offsetParent;
+      const container =
+        offsetParent instanceof HTMLElement ? offsetParent : root.parentElement ?? root;
+      const containerRect = container.getBoundingClientRect();
+      const centeredLeft = rect.left - containerRect.left + rect.width / 2;
+      const maxLeft = Math.max(TOOLBAR_EDGE_GUTTER, containerRect.width - TOOLBAR_EDGE_GUTTER);
       setState({
         capture,
         rect: {
-          left: rect.left + window.scrollX + rect.width / 2,
-          top: rect.top + window.scrollY,
+          left: clamp(centeredLeft, TOOLBAR_EDGE_GUTTER, maxLeft),
+          top: Math.max(0, rect.top - containerRect.top),
         },
       });
     };
@@ -91,7 +104,7 @@ export function AnnotationToolbar({ documentId, rootRef, onSave }: AnnotationToo
       style={{
         position: 'absolute',
         left: state.rect.left,
-        top: Math.max(0, state.rect.top - 48),
+        top: Math.max(0, state.rect.top - TOOLBAR_VERTICAL_OFFSET),
         transform: 'translateX(-50%)',
         zIndex: 40,
       }}
