@@ -281,7 +281,15 @@ export function NetworkPage() {
                                     {item.title}
                                   </Link>
                                 ) : (
-                                  <span className="font-medium">{item.title}</span>
+                                  <a
+                                    className="font-medium underline decoration-ink-700/30 hover:decoration-ink-700 dark:decoration-parchment-100/30 dark:hover:decoration-parchment-100"
+                                    href={item.sourceUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    {item.title}
+                                    <span className="ml-1 text-xs text-ink-700/50 dark:text-parchment-100/50">↗</span>
+                                  </a>
                                 )}
                                 <p className="text-ink-700/70 dark:text-parchment-100/70">
                                   {item.dateDisplay ?? item.date ?? 'undated'} &middot;{' '}
