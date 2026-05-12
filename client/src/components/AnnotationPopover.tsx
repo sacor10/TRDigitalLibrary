@@ -1,7 +1,6 @@
 import type { Annotation, AnnotationMotivation, AnnotationPatch } from '@tr/shared';
 import { useEffect, useState } from 'react';
 
-
 import { annotationJsonLdUrl } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { annotationToJsonLdString } from '../lib/jsonld';
@@ -10,6 +9,7 @@ interface AnnotationPopoverProps {
   annotation: Annotation;
   onClose: () => void;
   onDelete: (id: string) => Promise<void>;
+  onJump?: (id: string) => void;
   onPatch: (id: string, patch: AnnotationPatch) => Promise<void>;
   mutationError?: string | null;
 }
@@ -18,6 +18,7 @@ export function AnnotationPopover({
   annotation,
   onClose,
   onDelete,
+  onJump,
   onPatch,
   mutationError = null,
 }: AnnotationPopoverProps) {
@@ -36,8 +37,7 @@ export function AnnotationPopover({
 
   const permalink = `${window.location.origin}/annotations/${annotation.id}`;
   const pending = busy || shareBusy;
-  const saveDisabled =
-    pending || (draftMotivation === 'commenting' && draft.trim().length === 0);
+  const saveDisabled = pending || (draftMotivation === 'commenting' && draft.trim().length === 0);
 
   useEffect(() => {
     setEditing(false);
@@ -145,9 +145,7 @@ export function AnnotationPopover({
         <p className="mt-2 whitespace-pre-wrap">{annotation.body[0]?.value}</p>
       )}
       {!editing && annotation.motivation === 'highlighting' && (
-        <p className="mt-2 text-sm text-ink-700/70 dark:text-parchment-50/70">
-          Highlight only.
-        </p>
+        <p className="mt-2 text-sm text-ink-700/70 dark:text-parchment-50/70">Highlight only.</p>
       )}
 
       {editing && (
@@ -232,6 +230,17 @@ export function AnnotationPopover({
       )}
 
       <div className="mt-3 flex flex-wrap gap-2 text-xs">
+        {onJump && (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              onJump(annotation.id);
+            }}
+          >
+            Jump to
+          </button>
+        )}
         <button
           type="button"
           className="btn btn-primary"
@@ -242,7 +251,12 @@ export function AnnotationPopover({
         >
           {shareBusy ? 'Sharing…' : 'Share'}
         </button>
-        <a className="btn" href={annotationJsonLdUrl(annotation.id)} target="_blank" rel="noreferrer">
+        <a
+          className="btn"
+          href={annotationJsonLdUrl(annotation.id)}
+          target="_blank"
+          rel="noreferrer"
+        >
           Open JSON-LD
         </a>
         <button

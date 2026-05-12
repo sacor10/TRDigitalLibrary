@@ -18,7 +18,6 @@ import {
 } from 'react';
 import { useLocation } from 'react-router-dom';
 
-
 import {
   createAnnotation,
   deleteAnnotation,
@@ -105,6 +104,17 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
     }));
   }, [annotationsQuery.data, fullText]);
 
+  const jumpToAnnotation = useCallback((id: string): void => {
+    requestAnimationFrame(() => {
+      const marks = rootRef.current?.querySelectorAll<HTMLElement>('[data-anno-ids]') ?? [];
+      const el = [...marks].find((mark) => mark.dataset.annoIds?.split(',').includes(id));
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('anno-flash');
+      window.setTimeout(() => el.classList.remove('anno-flash'), 1600);
+    });
+  }, []);
+
   const validRanges = useMemo(
     () =>
       located
@@ -123,17 +133,15 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
     mutationFn: ({ id, patch }: { id: string; patch: AnnotationPatch }) =>
       patchAnnotation(id, patch),
     onSuccess: (updated) => {
-      queryClient.setQueryData<AnnotationCollection>(
-        ['annotations', document.id],
-        (existing) =>
-          existing
-            ? {
-                ...existing,
-                items: existing.items.map((annotation) =>
-                  annotation.id === updated.id ? updated : annotation,
-                ),
-              }
-            : existing,
+      queryClient.setQueryData<AnnotationCollection>(['annotations', document.id], (existing) =>
+        existing
+          ? {
+              ...existing,
+              items: existing.items.map((annotation) =>
+                annotation.id === updated.id ? updated : annotation,
+              ),
+            }
+          : existing,
       );
       setActiveId(updated.id);
       void queryClient.invalidateQueries({ queryKey: ['annotations', document.id] });
@@ -142,16 +150,14 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
   const deleteMut = useMutation({
     mutationFn: (id: string) => deleteAnnotation(id),
     onSuccess: (_deleted, id) => {
-      queryClient.setQueryData<AnnotationCollection>(
-        ['annotations', document.id],
-        (existing) =>
-          existing
-            ? {
-                ...existing,
-                total: Math.max(0, existing.total - 1),
-                items: existing.items.filter((annotation) => annotation.id !== id),
-              }
-            : existing,
+      queryClient.setQueryData<AnnotationCollection>(['annotations', document.id], (existing) =>
+        existing
+          ? {
+              ...existing,
+              total: Math.max(0, existing.total - 1),
+              items: existing.items.filter((annotation) => annotation.id !== id),
+            }
+          : existing,
       );
       void queryClient.invalidateQueries({ queryKey: ['annotations', document.id] });
       setActiveId(null);
@@ -172,20 +178,20 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
     const exists = annotationsQuery.data.items.some((a) => a.id === id);
     if (!exists) return;
     setActiveId(id);
-    requestAnimationFrame(() => {
-      const el = window.document.querySelector<HTMLElement>(`[data-anno-id="${CSS.escape(id)}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.classList.add('anno-flash');
-        window.setTimeout(() => el.classList.remove('anno-flash'), 1600);
-      }
-    });
-  }, [location.hash, annotationsQuery.data]);
+    jumpToAnnotation(id);
+  }, [jumpToAnnotation, location.hash, annotationsQuery.data]);
 
   const activeAnnotation = activeId ? (located.find((a) => a.id === activeId) ?? null) : null;
   const handleSelectAnnotation = useCallback((id: string) => {
     setActiveId((current) => (current === id ? null : id));
   }, []);
+  const handleJumpAnnotation = useCallback(
+    (id: string) => {
+      setActiveId(id);
+      jumpToAnnotation(id);
+    },
+    [jumpToAnnotation],
+  );
   const handleDeleteAnnotation = useCallback(
     async (id: string) => {
       await deleteMut.mutateAsync(id);
@@ -212,6 +218,7 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
             annotation={activeAnnotation}
             onClose={() => setActiveId(null)}
             onDelete={handleDeleteAnnotation}
+            onJump={handleJumpAnnotation}
             onPatch={handlePatchAnnotation}
             mutationError={errorMessage(patchMut.error ?? deleteMut.error)}
           />
@@ -224,6 +231,7 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
     deleteMut.error,
     document.transcription,
     handleDeleteAnnotation,
+    handleJumpAnnotation,
     handlePatchAnnotation,
     handleSelectAnnotation,
     located,
@@ -241,9 +249,10 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
       <article className="max-w-none space-y-3 rounded-md border border-dashed border-ink-700/20 p-4 dark:border-parchment-50/20 sm:p-6">
         {import.meta.env.DEV ? (
           <p>
-            No cached transcription is available. This document was imported from a remote source. Run
-            <code className="mx-1">npm run ingest-loc -- --limit 25</code> with network access,
-            or read it directly at the source:
+            No cached transcription is available. This document was imported from a remote source.
+            Run
+            <code className="mx-1">npm run ingest-loc -- --limit 25</code> with network access, or
+            read it directly at the source:
           </p>
         ) : (
           <p>
@@ -307,10 +316,7 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
         {renderedParagraphs}
       </article>
       {user && (
-        <p
-          id="annotation-help"
-          className="mt-4 text-xs text-ink-700/60 dark:text-parchment-50/60"
-        >
+        <p id="annotation-help" className="mt-4 text-xs text-ink-700/60 dark:text-parchment-50/60">
           Select any passage to highlight or attach a note.
         </p>
       )}

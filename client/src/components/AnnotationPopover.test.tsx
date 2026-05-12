@@ -186,6 +186,23 @@ describe('AnnotationPopover actions', () => {
     });
   });
 
+  it('lets users jump to the annotation in the text body', () => {
+    const onJump = vi.fn();
+    render(
+      <AnnotationPopover
+        annotation={makeAnnotation()}
+        onClose={vi.fn()}
+        onDelete={vi.fn()}
+        onJump={onJump}
+        onPatch={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /jump to/i }));
+
+    expect(onJump).toHaveBeenCalledWith('anno-1');
+  });
+
   it('hides edit and remove controls from non-authors', () => {
     auth.user = otherUser;
 
