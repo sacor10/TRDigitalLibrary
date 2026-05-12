@@ -358,9 +358,37 @@ async function handleItems(db: LibsqlClient, req: Request, res: Response) {
     offset: query.offset,
   };
   const itemsResult = await db.execute({
-    sql: `SELECT i.id, d.id AS document_id, i.title, i.date, i.date_display, i.resource_type, i.source_url, i.collection
+    sql: `SELECT
+            i.id,
+            COALESCE(
+              (
+                SELECT d.id
+                FROM documents d
+                WHERE d.source_url = i.source_url
+                ORDER BY d.id
+                LIMIT 1
+              ),
+              (
+                SELECT d.id
+                FROM documents d
+                WHERE d.type = i.resource_type
+                  AND lower(trim(d.title)) = lower(trim(i.title))
+                  AND (
+                    d.date = i.date
+                    OR (i.date_display GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]' AND substr(d.date, 1, 7) = i.date_display)
+                    OR (i.date_display GLOB '[0-9][0-9][0-9][0-9]' AND substr(d.date, 1, 4) = i.date_display)
+                  )
+                ORDER BY d.id
+                LIMIT 1
+              )
+            ) AS document_id,
+            i.title,
+            i.date,
+            i.date_display,
+            i.resource_type,
+            i.source_url,
+            i.collection
           FROM correspondence_items i
-          LEFT JOIN documents d ON d.source_url = i.source_url
           WHERE ${where.join(' AND ')}
           ORDER BY i.date IS NULL ASC, i.date DESC, i.title ASC
           LIMIT @limit OFFSET @offset`,

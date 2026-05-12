@@ -105,7 +105,7 @@ describe('correspondents API', () => {
         author: 'Frank T. Winslow',
         transcription: '',
         source: 'Library of Congress',
-        source_url: 'https://www.theodorerooseveltcenter.org/digital-library/o2/',
+        source_url: 'https://www.loc.gov/item/mss382990002/',
         tags: '[]',
       },
     });
