@@ -341,7 +341,7 @@ async function handleItems(db: LibsqlClient, req: Request, res: Response) {
   const query = parsed.data;
   const baseParams: Record<string, InValue> = {
     tr: TR_NODE_ID,
-    person_id: personId,
+    ...(personId === TR_NODE_ID ? {} : { person_id: personId }),
   };
   const where = [`EXISTS (${pairExistsForPerson(personId, query.direction)})`];
   addItemFilters(where, baseParams, query);

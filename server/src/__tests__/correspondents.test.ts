@@ -165,6 +165,18 @@ describe('correspondents API', () => {
     });
   });
 
+  it('returns items for the Theodore Roosevelt graph node', async () => {
+    const res = await request(app).get('/api/correspondents/theodore-roosevelt/items?limit=5');
+
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(3);
+    expect(res.body.items).toHaveLength(3);
+    expect(res.body.items[0]).toMatchObject({
+      id: 'trc-o2',
+      title: 'Letter from Frank T. Winslow to Theodore Roosevelt',
+    });
+  });
+
   it('rejects malformed graph filters', async () => {
     const res = await request(app).get('/api/correspondents/graph?limit=9999');
     expect(res.status).toBe(400);
@@ -234,5 +246,38 @@ describe('correspondents API', () => {
         offset: 10,
       },
     });
+  });
+
+  it('omits person_id binds when listing items for the Theodore Roosevelt node', async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [{ total: 0 }] })
+      .mockResolvedValueOnce({ rows: [] });
+    const routerApp = createCorrespondentsOnlyApp({ execute } as unknown as LibsqlClient);
+
+    const res = await request(routerApp).get(
+      '/api/correspondents/theodore-roosevelt/items?dateFrom=1900-01-01&limit=5&offset=10',
+    );
+
+    expect(res.status).toBe(200);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({
+      args: {
+        tr: 'theodore-roosevelt',
+        date_from: '1900-01-01',
+      },
+    });
+    expect(execute.mock.calls[0]?.[0]?.args).not.toHaveProperty('person_id');
+    expect(execute.mock.calls[0]?.[0]?.args).not.toHaveProperty('limit');
+    expect(execute.mock.calls[0]?.[0]?.args).not.toHaveProperty('offset');
+    expect(execute.mock.calls[1]?.[0]).toMatchObject({
+      args: {
+        tr: 'theodore-roosevelt',
+        date_from: '1900-01-01',
+        limit: 5,
+        offset: 10,
+      },
+    });
+    expect(execute.mock.calls[1]?.[0]?.args).not.toHaveProperty('person_id');
   });
 });
