@@ -9,6 +9,7 @@ const INNER_RING_RADIUS = 180;
 const RING_GAP = 120;
 const MIN_ARC_SPACING = 110;
 const MIN_RING_CAPACITY = 8;
+const TIER_COUNT = 4;
 const TR_NODE_ID = 'theodore-roosevelt';
 
 type LabelPlacementClass = 'label-north' | 'label-south' | 'label-east' | 'label-west';
@@ -25,25 +26,16 @@ function labelBudgetFor(nodeCount: number): number {
   return PRIMARY_LABEL_COUNT_LARGE;
 }
 
-function ringCapacities(count: number): number[] {
-  const capacities: number[] = [];
-  let placed = 0;
-  let ringIndex = 0;
+function ringCapacityFor(ringIndex: number): number {
+  const radius = INNER_RING_RADIUS + ringIndex * RING_GAP;
+  return Math.max(MIN_RING_CAPACITY, Math.floor((2 * Math.PI * radius) / MIN_ARC_SPACING));
+}
 
-  while (placed < count) {
-    const radius = INNER_RING_RADIUS + ringIndex * RING_GAP;
-    const maxForRing = Math.max(
-      MIN_RING_CAPACITY,
-      Math.floor((2 * Math.PI * radius) / MIN_ARC_SPACING),
-    );
-    const remaining = count - placed;
-    const size = Math.min(maxForRing, remaining);
-    capacities.push(size);
-    placed += size;
-    ringIndex += 1;
-  }
-
-  return capacities;
+function assignTier(totalCount: number, tMin: number, tMax: number): number {
+  if (tMax === tMin) return 0;
+  const t = Math.log(totalCount + 1);
+  const raw = Math.floor(((tMax - t) / (tMax - tMin)) * TIER_COUNT);
+  return Math.max(0, Math.min(TIER_COUNT - 1, raw));
 }
 
 function labelPlacementFor(x: number, y: number): LabelPlacementClass {
@@ -80,7 +72,6 @@ export function buildCorrespondentGraphElements(
 ): cytoscape.ElementDefinition[] {
   const labelIds = visibleLabelIds(nodes, selectedId);
   const correspondents = nodes.filter((node) => !node.isTR).sort(compareNodes);
-  const capacities = ringCapacities(correspondents.length);
   const positionedNodes = new Map<
     string,
     { x: number; y: number; labelPlacementClass: LabelPlacementClass }
@@ -95,27 +86,70 @@ export function buildCorrespondentGraphElements(
     });
   }
 
-  let offset = 0;
-  capacities.forEach((capacity, ringIndex) => {
-    const radius = INNER_RING_RADIUS + ringIndex * RING_GAP;
-    const step = (2 * Math.PI) / capacity;
-    const start = -Math.PI / 2 + (ringIndex % 2 === 1 ? step / 2 : 0);
+  if (correspondents.length > 0) {
+    const counts = correspondents.map((node) => Math.log(node.totalCount + 1));
+    const tMin = Math.min(...counts);
+    const tMax = Math.max(...counts);
 
-    for (let index = 0; index < capacity; index += 1) {
-      const node = correspondents[offset];
-      if (!node) return;
+    const tiers: CorrespondentNode[][] = Array.from({ length: TIER_COUNT }, () => []);
+    correspondents.forEach((node) => {
+      const tierIndex = assignTier(node.totalCount, tMin, tMax);
+      tiers[tierIndex]!.push(node);
+    });
 
-      const angle = start + index * step;
-      const x = Math.round(Math.cos(angle) * radius);
-      const y = Math.round(Math.sin(angle) * radius);
-      positionedNodes.set(node.id, {
-        x,
-        y,
-        labelPlacementClass: labelPlacementFor(x, y),
+    type RingSlot = { ringIndex: number; capacity: number; nodes: CorrespondentNode[] };
+    const ringSlots: RingSlot[] = [];
+    let ringIndex = 0;
+    let currentRing: RingSlot = {
+      ringIndex,
+      capacity: ringCapacityFor(ringIndex),
+      nodes: [],
+    };
+    ringSlots.push(currentRing);
+
+    tiers.forEach((tierNodes) => {
+      if (tierNodes.length === 0) return;
+      if (currentRing.nodes.length > 0) {
+        ringIndex += 1;
+        currentRing = {
+          ringIndex,
+          capacity: ringCapacityFor(ringIndex),
+          nodes: [],
+        };
+        ringSlots.push(currentRing);
+      }
+      tierNodes.forEach((node) => {
+        if (currentRing.nodes.length >= currentRing.capacity) {
+          ringIndex += 1;
+          currentRing = {
+            ringIndex,
+            capacity: ringCapacityFor(ringIndex),
+            nodes: [],
+          };
+          ringSlots.push(currentRing);
+        }
+        currentRing.nodes.push(node);
       });
-      offset += 1;
-    }
-  });
+    });
+
+    ringSlots.forEach(({ ringIndex: ri, nodes: ringNodes }) => {
+      if (ringNodes.length === 0) return;
+      const radius = INNER_RING_RADIUS + ri * RING_GAP;
+      const step = (2 * Math.PI) / ringNodes.length;
+      const start = -Math.PI / 2 + (ri % 2 === 1 ? step / 2 : 0);
+
+      ringNodes.forEach((node, index) => {
+        const angle = start + index * step;
+        const x = Math.round(Math.cos(angle) * radius);
+        const y = Math.round(Math.sin(angle) * radius);
+        positionedNodes.set(node.id, {
+          x,
+          y,
+          labelPlacementClass: labelPlacementFor(x, y),
+        });
+      });
+    });
+  }
 
   const nodeElements: cytoscape.ElementDefinition[] = nodes.map((node) => {
     const placement = positionedNodes.get(node.id) ?? {
@@ -139,7 +173,7 @@ export function buildCorrespondentGraphElements(
         label: labelIds.has(node.id) ? node.label : '',
         totalCount: node.totalCount,
         isTR: node.isTR,
-        size: node.isTR ? 62 : Math.max(18, Math.min(46, 20 + Math.sqrt(node.totalCount) * 4)),
+        size: node.isTR ? 62 : Math.max(16, Math.min(54, 14 + Math.log(node.totalCount + 1) * 9)),
       },
       classes,
       position: { x: placement.x, y: placement.y },
