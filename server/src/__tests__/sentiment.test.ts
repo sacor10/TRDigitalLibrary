@@ -2,6 +2,7 @@ import type { InStatement } from '@libsql/client';
 import {
   DocumentSentimentSchema,
   SentimentExtremesResponseSchema,
+  SentimentRangeResponseSchema,
   SentimentTimelineResponseSchema,
   type Document,
 } from '@tr/shared';
@@ -185,13 +186,51 @@ describe('Sentiment API', () => {
     });
   });
 
+  describe('GET /api/sentiment/range', () => {
+    it('returns min/max dates and count from the seeded fixtures', async () => {
+      const res = await request(app).get('/api/sentiment/range');
+      expect(res.status).toBe(200);
+      const parsed = SentimentRangeResponseSchema.parse(res.body);
+      expect(parsed.count).toBe(SEEDS.length);
+      expect(parsed.minDate).toBe('1899-03-01');
+      expect(parsed.maxDate).toBe('1912-10-14');
+    });
+  });
+
   describe('OpenAPI', () => {
-    it('registers the three sentiment endpoints', async () => {
+    it('registers all sentiment endpoints', async () => {
       const res = await request(app).get('/api/openapi.json');
       expect(res.status).toBe(200);
       expect(res.body.paths['/api/sentiment/timeline']).toBeDefined();
       expect(res.body.paths['/api/sentiment/extremes']).toBeDefined();
+      expect(res.body.paths['/api/sentiment/range']).toBeDefined();
       expect(res.body.paths['/api/sentiment/documents/{id}']).toBeDefined();
     });
+  });
+});
+
+describe('Sentiment API — empty DB', () => {
+  // Isolated from the populated suite above; this one seeds documents but not
+  // document_sentiment, to assert the range endpoint's null/0 fallback.
+  let db: LibsqlClient;
+  let app: ReturnType<typeof createApp>;
+
+  beforeAll(async () => {
+    db = await openInMemoryDatabase();
+    for (const fixture of DOCS) {
+      await upsertDocument(db, baseDoc(fixture));
+    }
+    app = createApp(db);
+  });
+
+  afterAll(() => {
+    db.close();
+  });
+
+  it('GET /api/sentiment/range returns nulls and count 0 when no sentiment rows exist', async () => {
+    const res = await request(app).get('/api/sentiment/range');
+    expect(res.status).toBe(200);
+    const parsed = SentimentRangeResponseSchema.parse(res.body);
+    expect(parsed).toEqual({ minDate: null, maxDate: null, count: 0 });
   });
 });

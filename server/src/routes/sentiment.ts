@@ -5,6 +5,7 @@ import type {
   SentimentExtremeItem,
   SentimentExtremesResponse,
   SentimentLabel,
+  SentimentRangeResponse,
   SentimentTimelinePoint,
   SentimentTimelineResponse,
 } from '@tr/shared';
@@ -188,6 +189,27 @@ export function createSentimentRouter(db: LibsqlClient): Router {
       to,
       mostPositive: positiveRows.map(toItem),
       mostNegative: negativeRows.map(toItem),
+    };
+    return res.json(payload);
+  });
+
+  router.get('/range', async (_req, res) => {
+    // Powers the SentimentPage first-load effect: the client uses these bounds
+    // to seed the date filter so a fresh dev run lands on a populated chart
+    // instead of the hardcoded 1912 default range.
+    const result = await db.execute(
+      `SELECT MIN(d.date) AS min_date,
+              MAX(d.date) AS max_date,
+              COUNT(*)    AS count
+         FROM document_sentiment s
+         JOIN documents d ON d.id = s.document_id`,
+    );
+    const row = result.rows[0];
+    const count = asNumber(row?.count);
+    const payload: SentimentRangeResponse = {
+      minDate: count > 0 && row?.min_date != null ? String(row.min_date) : null,
+      maxDate: count > 0 && row?.max_date != null ? String(row.max_date) : null,
+      count,
     };
     return res.json(payload);
   });

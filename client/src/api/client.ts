@@ -9,6 +9,7 @@ import {
   DocumentSentimentSchema,
   SearchResponseSchema,
   SentimentExtremesResponseSchema,
+  SentimentRangeResponseSchema,
   SentimentTimelineResponseSchema,
   TopicComputeStatusSchema,
   TopicDetailResponseSchema,
@@ -31,6 +32,7 @@ import {
   type SearchResponse,
   type SentimentBin,
   type SentimentExtremesResponse,
+  type SentimentRangeResponse,
   type SentimentTimelineResponse,
   type TopicComputeStatus,
   type TopicDetailResponse,
@@ -187,6 +189,10 @@ export async function fetchSentimentExtremes(query: {
   return getJson(`/api/sentiment/extremes${qs}`, (raw) =>
     SentimentExtremesResponseSchema.parse(raw),
   );
+}
+
+export async function fetchSentimentRange(): Promise<SentimentRangeResponse> {
+  return getJson('/api/sentiment/range', (raw) => SentimentRangeResponseSchema.parse(raw));
 }
 
 export async function fetchDocumentSentiment(id: string): Promise<DocumentSentiment | null> {
