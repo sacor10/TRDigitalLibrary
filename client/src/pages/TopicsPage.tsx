@@ -1,10 +1,15 @@
-import { useQuery } from '@tanstack/react-query';
-import type { TopicDriftPoint } from '@tr/shared';
-import { useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { TopicComputeStatus, TopicDriftPoint } from '@tr/shared';
+import { useEffect, useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 
-import { fetchTopic, fetchTopicDrift, fetchTopics } from '../api/client';
+import {
+  fetchTopic,
+  fetchTopicComputeStatus,
+  fetchTopicDrift,
+  fetchTopics,
+} from '../api/client';
 
 const SPARK_W = 96;
 const SPARK_H = 28;
@@ -170,7 +175,46 @@ function KeywordChart({ keywords }: { keywords: string[] }) {
   );
 }
 
+function ComputingState({ status }: { status: TopicComputeStatus }) {
+  const pct = Math.round(status.progress * 100);
+  return (
+    <div className="rounded-md border border-ink-700/10 dark:border-parchment-50/10 bg-parchment-50/40 dark:bg-ink-800/40 p-6 text-sm">
+      <p className="font-medium">Generating topics from your corpus&hellip;</p>
+      <p className="mt-2 text-ink-700/70 dark:text-parchment-100/70">
+        Clustering {status.documentCount} documents on first boot. This takes a minute or so
+        while the embedding model downloads and runs; subsequent visits will be instant.
+      </p>
+      <div
+        className="mt-4 h-2 w-full overflow-hidden rounded-sm bg-parchment-200/60 dark:bg-ink-700"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-label="Topic compute progress"
+      >
+        <div
+          className="h-full bg-accent-500 transition-[width] duration-500 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ComputeError({ message }: { message: string }) {
+  return (
+    <div className="rounded-md border border-red-600/30 bg-red-50/60 dark:bg-red-950/30 p-6 text-sm">
+      <p className="font-medium text-red-700 dark:text-red-300">Topic compute failed.</p>
+      <p className="mt-2 text-ink-700/80 dark:text-parchment-100/80 break-words">{message}</p>
+      <p className="mt-2 text-ink-700/70 dark:text-parchment-100/70">
+        The server retries automatically the next time it starts.
+      </p>
+    </div>
+  );
+}
+
 function TopicsGrid() {
+  const queryClient = useQueryClient();
   const topicsQuery = useQuery({ queryKey: ['topics'], queryFn: fetchTopics });
   const driftQuery = useQuery({ queryKey: ['topics-drift'], queryFn: fetchTopicDrift });
 
@@ -178,6 +222,30 @@ function TopicsGrid() {
     () => (driftQuery.data ? uniqueSortedPeriods(driftQuery.data.points) : []),
     [driftQuery.data],
   );
+
+  const topics = topicsQuery.data?.items ?? [];
+  const needsCompute = !topicsQuery.isLoading && !topicsQuery.error && topics.length === 0;
+
+  // Poll the auto-compute status only while we have no topics. Once the
+  // grid populates, react-query stops polling -- the steady state has no
+  // extra traffic. `refetchInterval: 0` halts polling for ready/error/idle.
+  const statusQuery = useQuery({
+    queryKey: ['topics-status'],
+    queryFn: fetchTopicComputeStatus,
+    enabled: needsCompute,
+    refetchInterval: (query) => {
+      const data = query.state.data as TopicComputeStatus | undefined;
+      return data?.status === 'computing' ? 3000 : false;
+    },
+  });
+
+  // When auto-compute finishes, refresh the topic list and drift charts.
+  useEffect(() => {
+    if (statusQuery.data?.status === 'ready' && topics.length === 0) {
+      void queryClient.invalidateQueries({ queryKey: ['topics'] });
+      void queryClient.invalidateQueries({ queryKey: ['topics-drift'] });
+    }
+  }, [statusQuery.data?.status, topics.length, queryClient]);
 
   if (topicsQuery.isLoading || driftQuery.isLoading) return <p>Loading&hellip;</p>;
   if (topicsQuery.error) {
@@ -187,28 +255,18 @@ function TopicsGrid() {
       </p>
     );
   }
-  const topics = topicsQuery.data?.items ?? [];
 
   if (topics.length === 0) {
+    const s = statusQuery.data;
+    if (s?.status === 'computing') return <ComputingState status={s} />;
+    if (s?.status === 'error' && s.error) return <ComputeError message={s.error} />;
+    // 'idle' (no documents) or first-ever poll loading: show a quiet hint.
     return (
       <div className="rounded-md border border-ink-700/10 dark:border-parchment-50/10 bg-parchment-50/40 dark:bg-ink-800/40 p-6 text-sm">
-        <p>
-          No topics yet. Run{' '}
-          <code className="px-1 py-0.5 rounded bg-parchment-200/60 dark:bg-ink-700">
-            npm run topic-model
-          </code>{' '}
-          to populate them.
-        </p>
+        <p>No topics yet.</p>
         <p className="mt-2 text-ink-700/70 dark:text-parchment-100/70">
-          The 8-document POC corpus produces &le; 1 topic; meaningful clusters require the full
-          corpus. See{' '}
-          <a
-            className="underline decoration-accent-500/50 hover:decoration-accent-500"
-            href="https://github.com/sacor10/TRDigitalLibrary/blob/main/docs/topic-modeling.md"
-          >
-            docs/topic-modeling.md
-          </a>
-          .
+          Topics are generated automatically from the document corpus. If the documents table is
+          empty, ingest some letters first.
         </p>
       </div>
     );
@@ -343,8 +401,8 @@ export function TopicsPage() {
         <header className="mb-6">
           <h1 className="text-2xl font-semibold sm:text-3xl">Topics</h1>
           <p className="text-ink-700 dark:text-parchment-100 mt-1">
-            Themes BERTopic discovered across the corpus, ordered by size. Each card shows the top
-            keywords and the topic&rsquo;s share of documents over time. Click a card for details.
+            Themes discovered across the corpus, ordered by size. Each card shows the top keywords
+            and the topic&rsquo;s share of documents over time. Click a card for details.
           </p>
         </header>
         <TopicsGrid />

@@ -10,6 +10,7 @@ import {
   SearchResponseSchema,
   SentimentExtremesResponseSchema,
   SentimentTimelineResponseSchema,
+  TopicComputeStatusSchema,
   TopicDetailResponseSchema,
   TopicDriftResponseSchema,
   TopicsResponseSchema,
@@ -31,6 +32,7 @@ import {
   type SentimentBin,
   type SentimentExtremesResponse,
   type SentimentTimelineResponse,
+  type TopicComputeStatus,
   type TopicDetailResponse,
   type TopicDriftResponse,
   type TopicsResponse,
@@ -155,6 +157,10 @@ export async function fetchTopic(id: number, limit?: number): Promise<TopicDetai
 
 export async function fetchTopicDrift(): Promise<TopicDriftResponse> {
   return getJson('/api/topics/drift?bin=year', (raw) => TopicDriftResponseSchema.parse(raw));
+}
+
+export async function fetchTopicComputeStatus(): Promise<TopicComputeStatus> {
+  return getJson('/api/topics/status', (raw) => TopicComputeStatusSchema.parse(raw));
 }
 
 export interface SentimentTimelineQuery {

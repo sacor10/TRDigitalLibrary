@@ -182,6 +182,21 @@ export async function openLibraryDb(
 
   const client = await createLibsqlClient(url, authToken);
   await runMigrations(client);
+
+  // Fire-and-forget topic auto-compute. Dynamic import keeps transformers.js
+  // (~30MB of class declarations) out of the cold-start path of code that
+  // does not need it -- and out of in-memory test DBs entirely. Failures
+  // (e.g. offline model download) are caught and logged; the HTTP listener
+  // is never blocked by this pass.
+  if (process.env.TR_TOPICS_AUTO_COMPUTE !== '0') {
+    void import('./topics/ensure.js')
+      .then(({ ensureTopicsComputed }) => ensureTopicsComputed(client))
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('[topics] failed to schedule auto-compute:', message);
+      });
+  }
+
   return client;
 }
 

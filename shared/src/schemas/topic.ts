@@ -52,3 +52,14 @@ export const TopicDriftResponseSchema = z.object({
 });
 
 export type TopicDriftResponse = z.infer<typeof TopicDriftResponseSchema>;
+
+export const TopicComputeStatusSchema = z.object({
+  status: z.enum(['idle', 'computing', 'ready', 'error']),
+  progress: z.number().min(0).max(1),
+  documentCount: z.number().int().nonnegative(),
+  computedAt: z.string().datetime({ offset: true }).nullable(),
+  modelVersion: z.string().min(1),
+  error: z.string().nullable(),
+});
+
+export type TopicComputeStatus = z.infer<typeof TopicComputeStatusSchema>;

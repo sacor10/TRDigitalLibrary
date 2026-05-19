@@ -21,6 +21,7 @@ import {
   FieldProvenanceSchema,
   SearchQuerySchema,
   SearchResponseSchema,
+  TopicComputeStatusSchema,
   TopicDetailResponseSchema,
   TopicDriftResponseSchema,
   TopicSchema,
@@ -48,6 +49,7 @@ export function buildOpenApiDocument(): object {
   registry.register('TopicsResponse', TopicsResponseSchema);
   registry.register('TopicDetailResponse', TopicDetailResponseSchema);
   registry.register('TopicDriftResponse', TopicDriftResponseSchema);
+  registry.register('TopicComputeStatus', TopicComputeStatusSchema);
   registry.register('DocumentSentiment', DocumentSentimentSchema);
   registry.register('SentimentTimelineResponse', SentimentTimelineResponseSchema);
   registry.register('SentimentExtremesResponse', SentimentExtremesResponseSchema);
@@ -355,6 +357,19 @@ export function buildOpenApiDocument(): object {
       404: {
         description: 'Topic not found.',
         content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/topics/status',
+    summary:
+      'Current status of the JS topic auto-compute pass. Clients poll this while the topics table is empty so the empty-state can show progress and auto-refresh when ready.',
+    responses: {
+      200: {
+        description: 'Auto-compute status.',
+        content: { 'application/json': { schema: TopicComputeStatusSchema } },
       },
     },
   });

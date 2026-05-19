@@ -1,5 +1,6 @@
 import type {
   Topic,
+  TopicComputeStatus,
   TopicDriftPoint,
   TopicDetailResponse,
   TopicDriftResponse,
@@ -10,6 +11,7 @@ import { Router } from 'express';
 
 
 import type { LibsqlClient } from '../db.js';
+import { getComputeStatus } from '../topics/ensure.js';
 
 interface TopicRow {
   id: number;
@@ -84,6 +86,14 @@ export function createTopicsRouter(db: LibsqlClient): Router {
       items: rows.map(rowToTopic),
       total: rows.length,
     };
+    return res.json(payload);
+  });
+
+  // Read by the TopicsPage client while the JS auto-compute is running, so
+  // the empty-state can show a live progress bar and auto-refresh the grid
+  // when status flips to 'ready'. See server/src/topics/ensure.ts.
+  router.get('/status', (_req, res) => {
+    const payload: TopicComputeStatus = getComputeStatus();
     return res.json(payload);
   });
 

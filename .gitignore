@@ -40,3 +40,6 @@ data/annotations.db-shm
 
 # Netlify CLI state
 .netlify/
+
+# transformers.js model cache (downloaded by server/src/topics/embed.ts on first boot)
+server/.cache/
