@@ -3,7 +3,7 @@ import {
   clampRooseveltDocumentDate,
   type Document,
 } from '@tr/shared';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 
@@ -17,6 +17,7 @@ interface TimelineProps {
     dateTo: string;
     selectedDocumentId: string;
   }) => void;
+  onViewRangeChange?: (range: { dateFrom: string; dateTo: string }) => void;
 }
 
 const TYPE_COLORS: Record<Document['type'], string> = {
@@ -52,6 +53,10 @@ const LANE_GAP = (PLOT_H - 16) / LANES;
 const MARKER_R = 7;
 const MIN_SPACING = MARKER_R * 2 + 4;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+const DEFAULT_VIEW_FROM = '1897-01-01';
+const DEFAULT_VIEW_TO = '1919-12-31';
+const LATEST_VIEW_DATE = '1920-01-01';
 
 const MONTH_FORMATTER = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -110,6 +115,41 @@ function isRangeAtLeastSixMonths(dateFrom?: string, dateTo?: string): boolean {
   return addUtcMonths(dateFrom, 6) <= dateTo;
 }
 
+const EARLIEST_TS = parseIsoDate(EARLIEST_ROOSEVELT_DOCUMENT_DATE);
+const LATEST_TS = parseIsoDate(LATEST_VIEW_DATE);
+
+function shiftRange(
+  dateFrom: string,
+  dateTo: string,
+  deltaMs: number,
+): { dateFrom: string; dateTo: string } {
+  const fromTs = parseIsoDate(dateFrom);
+  const toTs = parseIsoDate(dateTo);
+  const span = Math.max(toTs - fromTs, DAY_MS);
+
+  let nextFrom = fromTs + deltaMs;
+  let nextTo = toTs + deltaMs;
+
+  if (nextFrom < EARLIEST_TS) {
+    nextFrom = EARLIEST_TS;
+    nextTo = nextFrom + span;
+  }
+  if (nextTo > LATEST_TS) {
+    nextTo = LATEST_TS;
+    nextFrom = nextTo - span;
+    if (nextFrom < EARLIEST_TS) nextFrom = EARLIEST_TS;
+  }
+
+  return { dateFrom: formatIsoDate(nextFrom), dateTo: formatIsoDate(nextTo) };
+}
+
+function rangesEqual(
+  a: { dateFrom: string; dateTo: string },
+  b: { dateFrom: string; dateTo: string },
+): boolean {
+  return a.dateFrom === b.dateFrom && a.dateTo === b.dateTo;
+}
+
 function buildYearTicks(minYear: number, maxYear: number): Tick[] {
   const step = chooseTickStep(maxYear - minYear);
   const ticks: Tick[] = [];
@@ -152,25 +192,32 @@ export function Timeline({
   dateTo,
   selectedDocumentId,
   onDateRangeChange,
+  onViewRangeChange,
 }: TimelineProps) {
   const navigate = useNavigate();
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const dragStateRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startFrom: string;
+    startTo: string;
+    width: number;
+    span: number;
+    moved: boolean;
+  } | null>(null);
+
+  const effectiveFrom = dateFrom || DEFAULT_VIEW_FROM;
+  const effectiveTo = dateTo || DEFAULT_VIEW_TO;
 
   const { plotted, ticks, minTs, maxTs } = useMemo(() => {
     if (documents.length === 0) {
       return { plotted: [] as Plotted[], ticks: [] as Tick[], minTs: 0, maxTs: 0 };
     }
-    const stamps = documents.map((d) => new Date(d.date).getTime());
-    const minDataTs = Math.min(...stamps);
-    const maxDataTs = Math.max(...stamps);
+    let min = parseIsoDate(effectiveFrom);
+    let max = parseIsoDate(effectiveTo);
 
-    const minYear = new Date(minDataTs).getUTCFullYear();
-    const maxYear = new Date(maxDataTs).getUTCFullYear();
-    const hasExplicitRange = Boolean(dateFrom || dateTo);
-    let min = dateFrom ? parseIsoDate(dateFrom) : Date.UTC(minYear, 0, 1);
-    let max = dateTo ? parseIsoDate(dateTo) : Date.UTC(maxYear + 1, 0, 1);
-
-    if (min < parseIsoDate(EARLIEST_ROOSEVELT_DOCUMENT_DATE)) {
-      min = parseIsoDate(EARLIEST_ROOSEVELT_DOCUMENT_DATE);
+    if (min < EARLIEST_TS) {
+      min = EARLIEST_TS;
     }
     if (max <= min) {
       max = min + DAY_MS;
@@ -203,26 +250,102 @@ export function Timeline({
     const rangeMinYear = new Date(min).getUTCFullYear();
     const rangeMaxYear = new Date(max).getUTCFullYear();
     const tickMarks =
-      hasExplicitRange && yearSpan < 1
+      yearSpan < 1
         ? buildMonthTicks(min, max)
-        : buildYearTicks(
-            hasExplicitRange ? rangeMinYear : minYear,
-            hasExplicitRange ? rangeMaxYear : maxYear,
-          );
+        : buildYearTicks(rangeMinYear, rangeMaxYear);
 
     return { plotted: placed, ticks: tickMarks, minTs: min, maxTs: max };
-  }, [dateFrom, dateTo, documents]);
+  }, [effectiveFrom, effectiveTo, documents]);
+
+  const span = Math.max(maxTs - minTs, DAY_MS);
+  const canPanEarlier = parseIsoDate(effectiveFrom) > EARLIEST_TS;
+  const canPanLater = parseIsoDate(effectiveTo) < LATEST_TS;
+
+  const emitShift = (deltaMs: number): void => {
+    if (!onViewRangeChange) return;
+    const next = shiftRange(effectiveFrom, effectiveTo, deltaMs);
+    if (rangesEqual(next, { dateFrom: effectiveFrom, dateTo: effectiveTo })) return;
+    onViewRangeChange(next);
+  };
+
+  const panBy = (fraction: number): void => {
+    emitShift(span * fraction);
+  };
+
+  useEffect(() => {
+    const node = wrapperRef.current;
+    if (!node || !onViewRangeChange) return;
+
+    const handleWheel = (e: WheelEvent): void => {
+      const delta = e.deltaX !== 0 ? e.deltaX : e.shiftKey ? e.deltaY : 0;
+      if (delta === 0) return;
+      const width = node.getBoundingClientRect().width || 1;
+      const deltaMs = delta * (span / width);
+      const next = shiftRange(effectiveFrom, effectiveTo, deltaMs);
+      if (rangesEqual(next, { dateFrom: effectiveFrom, dateTo: effectiveTo })) return;
+      e.preventDefault();
+      onViewRangeChange(next);
+    };
+
+    node.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      node.removeEventListener('wheel', handleWheel);
+    };
+  }, [effectiveFrom, effectiveTo, span, onViewRangeChange]);
+
+  const handlePointerDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!onViewRangeChange) return;
+    const target = e.target as Element | null;
+    const tag = target?.tagName?.toLowerCase();
+    if (tag === 'circle' || tag === 'button' || target?.closest('button')) return;
+    const node = wrapperRef.current;
+    if (!node) return;
+    const width = node.getBoundingClientRect().width || 1;
+    dragStateRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startFrom: effectiveFrom,
+      startTo: effectiveTo,
+      width,
+      span,
+      moved: false,
+    };
+    node.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== e.pointerId || !onViewRangeChange) return;
+    const dx = e.clientX - drag.startX;
+    if (!drag.moved && Math.abs(dx) < 3) return;
+    drag.moved = true;
+    const deltaMs = (-dx * drag.span) / drag.width;
+    const next = shiftRange(drag.startFrom, drag.startTo, deltaMs);
+    if (rangesEqual(next, { dateFrom: effectiveFrom, dateTo: effectiveTo })) return;
+    onViewRangeChange(next);
+  };
+
+  const endDrag = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    const drag = dragStateRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const node = wrapperRef.current;
+    if (node?.hasPointerCapture(e.pointerId)) {
+      node.releasePointerCapture(e.pointerId);
+    }
+    dragStateRef.current = null;
+  };
 
   const openDocument = (doc: Document): void => {
     navigate(`/documents/${doc.id}`);
   };
 
   const activateMarker = (doc: Document): void => {
+    if (dragStateRef.current?.moved) return;
     if (doc.id === selectedDocumentId) {
       openDocument(doc);
       return;
     }
-    if (onDateRangeChange && isRangeAtLeastSixMonths(dateFrom, dateTo)) {
+    if (onDateRangeChange && isRangeAtLeastSixMonths(effectiveFrom, effectiveTo)) {
       onDateRangeChange({ ...centeredSixMonthRange(doc.date), selectedDocumentId: doc.id });
       return;
     }
@@ -232,22 +355,29 @@ export function Timeline({
     ? documents.find((doc) => doc.id === selectedDocumentId)
     : undefined;
 
-  if (plotted.length === 0) {
+  if (plotted.length === 0 && documents.length === 0) {
     return <p className="py-12 text-center">No documents to plot.</p>;
   }
 
-  const span = Math.max(maxTs - minTs, 1);
   const axisY = MARGIN.top + PLOT_H;
 
   return (
     <figure className="card">
       <figcaption className="sr-only">
-        Timeline of {plotted.length} documents. Use Tab to focus a marker and Enter to open it.
+        Timeline of {plotted.length} documents. Use the arrow buttons, mouse wheel, or drag to pan.
+        Tab to focus a marker and Enter to open it.
       </figcaption>
-      <div className="relative -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <div
+        ref={wrapperRef}
+        className="relative touch-pan-y select-none"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+      >
         {selectedDocument && (
           <div
-            className="pointer-events-none absolute left-4 top-3 z-10 max-w-[min(28rem,calc(100%-2rem))] rounded-md border border-ink-700/15 bg-white/90 px-3 py-2 text-sm shadow-sm backdrop-blur dark:border-parchment-50/15 dark:bg-ink-900/90"
+            className="pointer-events-none absolute left-12 top-3 z-10 max-w-[min(28rem,calc(100%-6rem))] rounded-md border border-ink-700/15 bg-white/90 px-3 py-2 text-sm shadow-sm backdrop-blur dark:border-parchment-50/15 dark:bg-ink-900/90"
             aria-live="polite"
           >
             <p className="truncate font-medium text-ink-900 dark:text-parchment-50">
@@ -258,9 +388,45 @@ export function Timeline({
             </p>
           </div>
         )}
+        <button
+          type="button"
+          aria-label="Pan earlier"
+          disabled={!canPanEarlier}
+          onClick={() => panBy(-0.25)}
+          className="absolute left-1 top-1/2 z-10 -translate-y-1/2 rounded-full border border-ink-700/15 bg-white/80 p-1.5 text-ink-900 shadow-sm backdrop-blur transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-30 dark:border-parchment-50/15 dark:bg-ink-900/80 dark:text-parchment-50 dark:hover:bg-ink-900"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M10 2 L4 8 L10 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          aria-label="Pan later"
+          disabled={!canPanLater}
+          onClick={() => panBy(0.25)}
+          className="absolute right-1 top-1/2 z-10 -translate-y-1/2 rounded-full border border-ink-700/15 bg-white/80 p-1.5 text-ink-900 shadow-sm backdrop-blur transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-30 dark:border-parchment-50/15 dark:bg-ink-900/80 dark:text-parchment-50 dark:hover:bg-ink-900"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M6 2 L12 8 L6 14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
         <svg
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          className="h-auto min-w-[48rem] sm:min-w-0 sm:w-full"
+          className="h-auto w-full"
           aria-label="Document timeline"
           role="group"
         >

@@ -156,8 +156,8 @@ describe('buildCorrespondentGraphElements', () => {
     expect(medium).toBeLessThan(large);
     [small, medium, large].forEach((size) => {
       expect(size).toBeGreaterThanOrEqual(16);
-      expect(size).toBeLessThanOrEqual(54);
+      expect(size).toBeLessThanOrEqual(82);
     });
-    expect(tr).toBe(62);
+    expect(tr).toBe(84);
   });
 });

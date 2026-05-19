@@ -85,6 +85,8 @@ describe('TimelinePage filters', () => {
 
     await waitFor(() => {
       expect(fetchDocumentsMock).toHaveBeenCalledWith({
+        dateFrom: '1897-01-01',
+        dateTo: '1919-12-31',
         sort: 'date',
         order: 'asc',
         limit: 100,
@@ -96,6 +98,7 @@ describe('TimelinePage filters', () => {
     await waitFor(() => {
       expect(fetchDocumentsMock).toHaveBeenLastCalledWith({
         dateFrom: '1910-01-01',
+        dateTo: '1919-12-31',
         sort: 'date',
         order: 'asc',
         limit: 100,
@@ -118,6 +121,8 @@ describe('TimelinePage filters', () => {
 
     await waitFor(() => {
       expect(fetchDocumentsMock).toHaveBeenLastCalledWith({
+        dateFrom: '1897-01-01',
+        dateTo: '1919-12-31',
         sort: 'date',
         order: 'asc',
         limit: 100,

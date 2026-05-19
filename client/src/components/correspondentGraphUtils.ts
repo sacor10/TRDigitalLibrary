@@ -173,7 +173,12 @@ export function buildCorrespondentGraphElements(
         label: labelIds.has(node.id) ? node.label : '',
         totalCount: node.totalCount,
         isTR: node.isTR,
-        size: node.isTR ? 62 : Math.max(16, Math.min(54, 14 + Math.log(node.totalCount + 1) * 9)),
+        size: node.isTR
+          ? 84
+          : (() => {
+              const c = Math.log(node.totalCount + 1);
+              return Math.max(16, Math.min(82, 14 + c * 9 + Math.max(0, c - 2.5) * 13));
+            })(),
       },
       classes,
       position: { x: placement.x, y: placement.y },

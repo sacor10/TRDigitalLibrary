@@ -7,14 +7,17 @@ import { Timeline } from '../components/Timeline';
 
 const TYPES: DocumentType[] = DocumentTypeSchema.options;
 
+const DEFAULT_DATE_FROM = '1897-01-01';
+const DEFAULT_DATE_TO = '1919-12-31';
+
 interface TimelineDocuments {
   items: Document[];
   total: number;
 }
 
 export function TimelinePage() {
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [dateFrom, setDateFrom] = useState(DEFAULT_DATE_FROM);
+  const [dateTo, setDateTo] = useState(DEFAULT_DATE_TO);
   const [keyword, setKeyword] = useState('');
   const [type, setType] = useState<DocumentType | ''>('');
   const [recipient, setRecipient] = useState('');
@@ -61,8 +64,8 @@ export function TimelinePage() {
   };
 
   const resetFilters = (): void => {
-    setDateFrom('');
-    setDateTo('');
+    setDateFrom(DEFAULT_DATE_FROM);
+    setDateTo(DEFAULT_DATE_TO);
     setKeyword('');
     setType('');
     setRecipient('');
@@ -216,6 +219,10 @@ export function TimelinePage() {
             setDateFrom(range.dateFrom);
             setDateTo(range.dateTo);
             setSelectedDocumentId(range.selectedDocumentId);
+          }}
+          onViewRangeChange={(range) => {
+            setDateFrom(range.dateFrom);
+            setDateTo(range.dateTo);
           }}
         />
       )}

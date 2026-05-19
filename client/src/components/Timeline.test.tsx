@@ -68,7 +68,8 @@ describe('Timeline', () => {
     const { container } = renderTimeline();
     const svg = container.querySelector('svg[aria-label="Document timeline"]')!;
     const labels = Array.from(svg.querySelectorAll('text')).map((t) => t.textContent);
-    expect(labels).toContain('1899');
+    // Default view is 1897..1919, so the start and end of that window must appear.
+    expect(labels).toContain('1897');
     expect(labels).toContain('1919');
 
     // Every tick label sits inside the viewBox horizontally with margin to spare.
@@ -171,5 +172,108 @@ describe('Timeline', () => {
 
     expect(labels).toContain('Jan 1910');
     expect(labels).toContain('Jul 1910');
+  });
+
+  it('emits a shifted view range when the pan-earlier arrow is clicked', () => {
+    const onViewRangeChange = vi.fn();
+    renderTimeline(docs, {
+      dateFrom: '1900-01-01',
+      dateTo: '1910-01-01',
+      onViewRangeChange,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /pan earlier/i }));
+
+    expect(onViewRangeChange).toHaveBeenCalledTimes(1);
+    const arg = onViewRangeChange.mock.calls[0]![0]!;
+    // 25% of a 10-year span -> shift each edge ~2.5 years earlier.
+    expect(arg.dateFrom < '1900-01-01').toBe(true);
+    expect(arg.dateTo < '1910-01-01').toBe(true);
+    expect(arg.dateFrom >= '1877-01-01').toBe(true);
+  });
+
+  it('emits a shifted view range when the pan-later arrow is clicked', () => {
+    const onViewRangeChange = vi.fn();
+    renderTimeline(docs, {
+      dateFrom: '1900-01-01',
+      dateTo: '1910-01-01',
+      onViewRangeChange,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /pan later/i }));
+
+    expect(onViewRangeChange).toHaveBeenCalledTimes(1);
+    const arg = onViewRangeChange.mock.calls[0]![0]!;
+    expect(arg.dateFrom > '1900-01-01').toBe(true);
+    expect(arg.dateTo > '1910-01-01').toBe(true);
+    expect(arg.dateTo <= '1920-01-01').toBe(true);
+  });
+
+  it('disables the pan-earlier arrow at the lower bound', () => {
+    const onViewRangeChange = vi.fn();
+    renderTimeline(docs, {
+      dateFrom: '1877-01-01',
+      dateTo: '1899-01-01',
+      onViewRangeChange,
+    });
+
+    const earlier = screen.getByRole('button', { name: /pan earlier/i });
+    expect((earlier as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('disables the pan-later arrow at the upper bound', () => {
+    const onViewRangeChange = vi.fn();
+    renderTimeline(docs, {
+      dateFrom: '1900-01-01',
+      dateTo: '1920-01-01',
+      onViewRangeChange,
+    });
+
+    const later = screen.getByRole('button', { name: /pan later/i });
+    expect((later as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('pans on horizontal wheel input', () => {
+    const onViewRangeChange = vi.fn();
+    const { container } = renderTimeline(docs, {
+      dateFrom: '1900-01-01',
+      dateTo: '1910-01-01',
+      onViewRangeChange,
+    });
+
+    const wrapper = container.querySelector('[aria-label="Document timeline"]')!
+      .parentElement as HTMLDivElement;
+    const event = new WheelEvent('wheel', {
+      deltaX: 100,
+      deltaY: 0,
+      bubbles: true,
+      cancelable: true,
+    });
+    wrapper.dispatchEvent(event);
+
+    expect(onViewRangeChange).toHaveBeenCalled();
+    const arg = onViewRangeChange.mock.calls[0]![0]!;
+    expect(arg.dateFrom > '1900-01-01').toBe(true);
+  });
+
+  it('does not pan on plain vertical wheel input', () => {
+    const onViewRangeChange = vi.fn();
+    const { container } = renderTimeline(docs, {
+      dateFrom: '1900-01-01',
+      dateTo: '1910-01-01',
+      onViewRangeChange,
+    });
+
+    const wrapper = container.querySelector('[aria-label="Document timeline"]')!
+      .parentElement as HTMLDivElement;
+    const event = new WheelEvent('wheel', {
+      deltaX: 0,
+      deltaY: 100,
+      bubbles: true,
+      cancelable: true,
+    });
+    wrapper.dispatchEvent(event);
+
+    expect(onViewRangeChange).not.toHaveBeenCalled();
   });
 });

@@ -95,8 +95,8 @@ const STYLESHEET: cytoscape.StylesheetJsonBlock[] = [
       'background-color': '#b5533e',
       'border-color': '#6a281b',
       'border-width': 2.5,
-      width: 62,
-      height: 62,
+      width: 84,
+      height: 84,
       'font-weight': 'bold',
       'font-size': 13,
     },
@@ -206,7 +206,7 @@ export function CorrespondentGraph({
           name: 'preset',
           animate: false,
           fit: true,
-          padding: 72,
+          padding: 28,
         } as cytoscape.LayoutOptions
       }
       style={{ width: '100%', height }}
@@ -218,7 +218,7 @@ export function CorrespondentGraph({
           onSelect(id);
         });
       }}
-      wheelSensitivity={1}
+      wheelSensitivity={2}
     />
   );
 }
