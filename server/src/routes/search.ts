@@ -82,33 +82,63 @@ export function createSearchRouter(db: LibsqlClient): Router {
     const joinSql = joins.join(' ');
     const whereSql = `WHERE ${where.join(' AND ')}`;
 
-    const sql = `
-      SELECT
-        ${DOCUMENT_SUMMARY_COLUMNS},
-        snippet(documents_fts, -1, '<mark>', '</mark>', '…', 16) AS snippet,
-        bm25(documents_fts) AS rank
-      FROM documents_fts
-      JOIN documents ON documents.rowid = documents_fts.rowid
-      ${joinSql}
-      ${whereSql}
-      ORDER BY rank
+    // Phase 1: rank + page rowids + total, no snippets. Computing snippet() in
+    // the same SELECT as ORDER BY rank LIMIT forces FTS5 to read every matched
+    // row's transcription before truncating, which is what made this 21s.
+    //
+    // bm25() must live in a SELECT that references documents_fts directly and
+    // cannot share a SELECT with a window function (SQLite raises "unable to
+    // use function bm25 in the requested context"). So bm25() runs in the
+    // inner subquery; the outer SELECT adds COUNT(*) OVER () and pagination.
+    const rankSql = `
+      SELECT inner_q.rowid AS rowid, inner_q.rank AS rank,
+             COUNT(*) OVER () AS total_count
+      FROM (
+        SELECT documents.rowid AS rowid, bm25(documents_fts) AS rank
+        FROM documents_fts
+        JOIN documents ON documents.rowid = documents_fts.rowid
+        ${joinSql}
+        ${whereSql}
+      ) AS inner_q
+      ORDER BY inner_q.rank
       LIMIT @limit OFFSET @offset
     `;
 
     try {
-      const result = await db.execute({ sql, args: { ...filterParams, limit, offset } });
-      const countResult = await db.execute({
-        sql: `SELECT COUNT(*) as c
-              FROM documents_fts
-              JOIN documents ON documents.rowid = documents_fts.rowid
-              ${joinSql}
-              ${whereSql}`,
-        args: filterParams,
+      const rankResult = await db.execute({
+        sql: rankSql,
+        args: { ...filterParams, limit, offset },
       });
-      const total = asNumber(countResult.rows[0]?.c);
+
+      if (rankResult.rows.length === 0) {
+        return res.json({ results: [], total: 0 });
+      }
+
+      const total = asNumber(rankResult.rows[0]?.total_count);
+      const rowids = rankResult.rows.map((r) => asNumber(r.rowid));
+
+      // Phase 2: hydrate only the page. MATCH is required for snippet() to
+      // have positions to highlight; rowid IN (...) prunes to ≤limit rows.
+      // CASE preserves the rank order from phase 1 without re-scoring.
+      const placeholders = rowids.map(() => '?').join(', ');
+      const orderCase = rowids.map((_, i) => `WHEN ? THEN ${i}`).join(' ');
+      const hydrateSql = `
+        SELECT
+          ${DOCUMENT_SUMMARY_COLUMNS},
+          snippet(documents_fts, -1, '<mark>', '</mark>', '…', 16) AS snippet
+        FROM documents_fts
+        JOIN documents ON documents.rowid = documents_fts.rowid
+        WHERE documents_fts MATCH ?
+          AND documents.rowid IN (${placeholders})
+        ORDER BY CASE documents.rowid ${orderCase} END
+      `;
+      const hydrateResult = await db.execute({
+        sql: hydrateSql,
+        args: [ftsQuery, ...rowids, ...rowids],
+      });
 
       return res.json({
-        results: result.rows.map((row) => ({
+        results: hydrateResult.rows.map((row) => ({
           document: rowToDocument(rowToDocumentRow(row)),
           snippet: asString(row.snippet),
         })),

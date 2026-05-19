@@ -289,13 +289,25 @@ describe('TR Digital Library API', () => {
       expect(res.body.total).toBe(2);
     });
 
-    it('does not pass pagination args to the search count query', async () => {
-      const executeCalls: unknown[] = [];
+    it('issues a single ranking query (with COUNT OVER) plus a rowid-scoped hydration query', async () => {
+      // Regression guard for two perf properties of the two-phase search:
+      //  1. The unbounded total piggybacks on the ranking query via COUNT(*)
+      //     OVER (), so there is no separate COUNT round-trip. If we ever go
+      //     back to a 3rd query for the count, p50 latency regresses on Turso.
+      //  2. snippet()/transcription reads happen only in the hydration query
+      //     and only against the page rowids — never against the full match
+      //     set. If snippet() leaks into the ranking SELECT, every match
+      //     materializes its transcription before LIMIT (the original 21s
+      //     bug).
+      const executeCalls: Array<{ sql: string; args?: unknown }> = [];
       const countingDb = new Proxy(db, {
         get(target, prop, receiver) {
           if (prop === 'execute') {
             return async (stmt: Parameters<LibsqlClient['execute']>[0]) => {
-              executeCalls.push(stmt);
+              if (typeof stmt === 'object' && stmt !== null && 'sql' in stmt) {
+                const s = stmt as { sql: unknown; args?: unknown };
+                executeCalls.push({ sql: String(s.sql), args: s.args });
+              }
               return (target.execute as LibsqlClient['execute'])(stmt);
             };
           }
@@ -305,17 +317,32 @@ describe('TR Digital Library API', () => {
       const countingApp = createApp(countingDb);
 
       const res = await request(countingApp).get('/api/search?q=alpenglow&limit=5&offset=2');
-
       expect(res.status).toBe(200);
-      const countCall = executeCalls.find((stmt): stmt is { args?: unknown; sql: unknown } => {
-        if (typeof stmt !== 'object' || stmt === null || !('sql' in stmt)) return false;
-        const sql = String((stmt as { sql: unknown }).sql);
-        return sql.includes('SELECT COUNT(*) as c') && sql.includes('documents_fts');
-      });
-      expect(countCall).toBeDefined();
-      if (countCall) {
-        expect(countCall.args).toEqual({ ftsQuery: '"alpenglow"' });
-      }
+
+      const ftsCalls = executeCalls.filter((c) => c.sql.includes('documents_fts'));
+      expect(ftsCalls).toHaveLength(2);
+
+      const rankingCall = ftsCalls.find((c) => c.sql.includes('COUNT(*) OVER'));
+      expect(rankingCall, 'ranking query should carry COUNT(*) OVER ()').toBeDefined();
+      // Ranking query must not compute snippets; that's the whole point.
+      expect(rankingCall!.sql).not.toContain('snippet(');
+
+      const hydrateCall = ftsCalls.find((c) => c !== rankingCall);
+      expect(hydrateCall, 'hydration query should exist').toBeDefined();
+      expect(hydrateCall!.sql).toContain('snippet(');
+      expect(hydrateCall!.sql).toContain('documents.rowid IN');
+      // Hydration is rowid-bound: args are positional [ftsQuery, ...rowids, ...rowids],
+      // never @limit/@offset.
+      expect(Array.isArray(hydrateCall!.args)).toBe(true);
+      const hydrateArgs = hydrateCall!.args as unknown[];
+      expect(hydrateArgs[0]).toBe('"alpenglow"');
+      expect(hydrateArgs.length).toBeGreaterThan(1);
+
+      // Belt-and-braces: no separate COUNT(*) query survives.
+      const standaloneCount = executeCalls.find((c) =>
+        /\bSELECT\s+COUNT\(\*\)\s+as\s+c\b/i.test(c.sql),
+      );
+      expect(standaloneCount).toBeUndefined();
     });
 
     it('paginates via offset', async () => {
