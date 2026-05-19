@@ -9,8 +9,8 @@ import { useNavigate } from 'react-router-dom';
 
 interface TimelineProps {
   documents: Document[];
-  dateFrom?: string;
-  dateTo?: string;
+  dateFrom?: string | undefined;
+  dateTo?: string | undefined;
   selectedDocumentId?: string | null;
   onDateRangeChange?: (range: {
     dateFrom: string;
@@ -206,8 +206,21 @@ export function Timeline({
     moved: boolean;
   } | null>(null);
 
-  const effectiveFrom = dateFrom || DEFAULT_VIEW_FROM;
-  const effectiveTo = dateTo || DEFAULT_VIEW_TO;
+  const { effectiveFrom, effectiveTo } = useMemo(() => {
+    if (dateFrom && dateTo) {
+      return { effectiveFrom: dateFrom, effectiveTo: dateTo };
+    }
+    if (documents.length === 0) {
+      return { effectiveFrom: dateFrom || DEFAULT_VIEW_FROM, effectiveTo: dateTo || DEFAULT_VIEW_TO };
+    }
+    const stamps = documents.map((d) => new Date(d.date).getTime());
+    const dataMinYear = new Date(Math.min(...stamps)).getUTCFullYear();
+    const dataMaxYear = new Date(Math.max(...stamps)).getUTCFullYear();
+    return {
+      effectiveFrom: dateFrom || formatIsoDate(Date.UTC(dataMinYear, 0, 1)),
+      effectiveTo: dateTo || formatIsoDate(Date.UTC(dataMaxYear + 1, 0, 1)),
+    };
+  }, [dateFrom, dateTo, documents]);
 
   const { plotted, ticks, minTs, maxTs } = useMemo(() => {
     if (documents.length === 0) {

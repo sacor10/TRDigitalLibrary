@@ -23,6 +23,7 @@ export function TimelinePage() {
   const [recipient, setRecipient] = useState('');
   const [topicId, setTopicId] = useState('');
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [view, setView] = useState<{ from: string; to: string } | null>(null);
 
   const numericTopicId = topicId ? Number(topicId) : undefined;
   const filters = useMemo(
@@ -61,6 +62,7 @@ export function TimelinePage() {
 
   const clearSelection = (): void => {
     setSelectedDocumentId(null);
+    setView(null);
   };
 
   const resetFilters = (): void => {
@@ -212,17 +214,15 @@ export function TimelinePage() {
       {data && (
         <Timeline
           documents={data.items}
-          dateFrom={dateFrom}
-          dateTo={dateTo}
+          dateFrom={view?.from}
+          dateTo={view?.to}
           selectedDocumentId={selectedDocumentId}
           onDateRangeChange={(range) => {
-            setDateFrom(range.dateFrom);
-            setDateTo(range.dateTo);
+            setView({ from: range.dateFrom, to: range.dateTo });
             setSelectedDocumentId(range.selectedDocumentId);
           }}
           onViewRangeChange={(range) => {
-            setDateFrom(range.dateFrom);
-            setDateTo(range.dateTo);
+            setView({ from: range.dateFrom, to: range.dateTo });
           }}
         />
       )}

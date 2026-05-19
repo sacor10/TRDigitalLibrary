@@ -68,8 +68,8 @@ describe('Timeline', () => {
     const { container } = renderTimeline();
     const svg = container.querySelector('svg[aria-label="Document timeline"]')!;
     const labels = Array.from(svg.querySelectorAll('text')).map((t) => t.textContent);
-    // Default view is 1897..1919, so the start and end of that window must appear.
-    expect(labels).toContain('1897');
+    // With no explicit range, the timeline auto-fits to the data (1899..1919).
+    expect(labels).toContain('1899');
     expect(labels).toContain('1919');
 
     // Every tick label sits inside the viewBox horizontally with margin to spare.
