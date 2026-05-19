@@ -218,7 +218,7 @@ export function CorrespondentGraph({
           onSelect(id);
         });
       }}
-      wheelSensitivity={0.2}
+      wheelSensitivity={0.6}
     />
   );
 }
