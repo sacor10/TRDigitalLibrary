@@ -275,8 +275,8 @@ async function handleGraph(db: LibsqlClient, req: Request, res: Response) {
     tr.lastDate = mergeLast(tr.lastDate, row.lastDate);
 
     other.totalCount += row.totalCount;
-    other.inboundCount += row.fromTrCount;
-    other.outboundCount += row.toTrCount;
+    other.outboundCount += row.fromTrCount;
+    other.inboundCount += row.toTrCount;
     other.firstDate = mergeFirst(other.firstDate, row.firstDate);
     other.lastDate = mergeLast(other.lastDate, row.lastDate);
 
