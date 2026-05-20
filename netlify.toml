@@ -30,6 +30,14 @@
   HF_HOME = "/opt/build/cache/huggingface"
   TRANSFORMERS_CACHE = "/opt/build/cache/huggingface/transformers"
   SENTENCE_TRANSFORMERS_HOME = "/opt/build/cache/huggingface/sentence-transformers"
+  # The canonical topic compute is the Python sidecar (python/topic_model.py)
+  # that runs at build time and writes to Turso. Disable the JS fallback
+  # auto-compute in the serverless function: with it off, the dynamic import
+  # in server/src/db.ts never tries to resolve @huggingface/transformers at
+  # runtime, which is required because we intentionally exclude that package
+  # from the function bundle (see [functions].external_node_modules below
+  # and server/src/topics/embed.ts).
+  TR_TOPICS_AUTO_COMPUTE = "0"
 
 # Persist the pip + HuggingFace caches between builds. Netlify's automatic
 # cache only covers a small allow-list of paths (npm, yarn, etc.); for
@@ -45,6 +53,15 @@
 
 [functions]
   node_bundler = "esbuild"
+  # `@huggingface/transformers` is intentionally NOT listed in
+  # external_node_modules: doing so would tell ZISI to ship the package as
+  # a runtime node_module (~150 MB on disk) and blow the function size
+  # limit. Instead, server/src/topics/embed.ts uses a variable-indirected
+  # `await import('@huggingface/transformers')` that esbuild and
+  # @vercel/nft both refuse to statically resolve, so the package is
+  # excluded from the bundle entirely. TR_TOPICS_AUTO_COMPUTE=0 (set
+  # above) keeps that code path from executing at runtime, which is what
+  # we want because the package is not in the zip.
 
 [functions."api"]
   # Library data lives in Turso (TURSO_LIBRARY_DATABASE_URL); we no longer

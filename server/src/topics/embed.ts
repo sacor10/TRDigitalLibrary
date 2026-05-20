@@ -1,7 +1,12 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { env, pipeline } from '@huggingface/transformers';
+// Type-only import — erased at compile time. The runtime resolution below
+// uses a variable specifier so esbuild and `@vercel/nft` cannot statically
+// trace `@huggingface/transformers`, keeping it (and its ~50–100 MB native
+// onnxruntime / sharp chain) out of the Netlify function zip. The package
+// remains in `dependencies` for local dev / build-time use.
+import type { env as HFEnv, pipeline as HFPipeline } from '@huggingface/transformers';
 
 const __dirname = (() => {
   try {
@@ -10,12 +15,6 @@ const __dirname = (() => {
     return process.cwd();
   }
 })();
-
-// Cache HF model downloads inside the workspace. The directory is small
-// (~22MB for the quantized all-MiniLM-L6-v2) and gitignored, so a clone +
-// `npm run dev` triggers exactly one download per machine.
-env.cacheDir = join(__dirname, '..', '..', '.cache', 'transformers');
-env.allowLocalModels = false;
 
 const MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
 const BATCH_SIZE = 16;
@@ -30,7 +29,21 @@ let cached: Promise<Extractor> | null = null;
 
 function loadPipeline(): Promise<Extractor> {
   if (!cached) {
-    cached = pipeline('feature-extraction', MODEL_ID) as unknown as Promise<Extractor>;
+    cached = (async () => {
+      // Variable indirection — the literal must not appear inside `import()`
+      // or both esbuild and NFT will resolve and bundle it.
+      const modSpec = '@huggingface/transformers';
+      const hf = (await import(modSpec)) as {
+        env: typeof HFEnv;
+        pipeline: typeof HFPipeline;
+      };
+      // Cache HF model downloads inside the workspace. The directory is small
+      // (~22MB for the quantized all-MiniLM-L6-v2) and gitignored, so a clone
+      // + `npm run dev` triggers exactly one download per machine.
+      hf.env.cacheDir = join(__dirname, '..', '..', '.cache', 'transformers');
+      hf.env.allowLocalModels = false;
+      return hf.pipeline('feature-extraction', MODEL_ID) as unknown as Extractor;
+    })();
   }
   return cached;
 }

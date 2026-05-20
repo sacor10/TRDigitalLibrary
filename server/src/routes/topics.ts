@@ -11,7 +11,7 @@ import { Router } from 'express';
 
 
 import type { LibsqlClient } from '../db.js';
-import { getComputeStatus } from '../topics/ensure.js';
+import { getComputeStatus } from '../topics/status.js';
 
 interface TopicRow {
   id: number;

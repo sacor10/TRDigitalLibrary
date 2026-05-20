@@ -6,10 +6,13 @@ import type { LibsqlClient } from '../db.js';
 import { selectAndCluster } from './cluster.js';
 import { embedTexts, type EmbedFn } from './embed.js';
 import { shortLabel, topKeywordsPerCluster } from './keywords.js';
+import { TOPIC_MODEL_VERSION } from './status.js';
 
-// Bump this string when the algorithm changes in a way that should force a
-// recompute on the next boot, even if the document count is unchanged.
-export const TOPIC_MODEL_VERSION = 'ts-bootstrap:Xenova/all-MiniLM-L6-v2:kmeans-v1';
+// Re-exported so existing call sites (incl. tests) can keep importing
+// TOPIC_MODEL_VERSION from `./compute.js`. The canonical declaration lives
+// in `./status.js` so the routes layer can read it without dragging the
+// embed/transformers chain into the Netlify function bundle.
+export { TOPIC_MODEL_VERSION };
 
 export type ComputeStage =
   | 'loading'
