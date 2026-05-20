@@ -13,9 +13,6 @@ import {
 const CHART_W = 720;
 const CHART_H = 260;
 
-const DEFAULT_FROM = '1912-01-01';
-const DEFAULT_TO = '1912-12-31';
-
 function formatPolarity(value: number): string {
   return value >= 0 ? `+${value.toFixed(2)}` : value.toFixed(2);
 }
@@ -166,8 +163,8 @@ function ExtremeList({
 }
 
 export function SentimentPage() {
-  const [from, setFrom] = useState<string>(DEFAULT_FROM);
-  const [to, setTo] = useState<string>(DEFAULT_TO);
+  const [from, setFrom] = useState<string | null>(null);
+  const [to, setTo] = useState<string | null>(null);
   const [bin, setBin] = useState<SentimentBin>('month');
   // Once the user touches a filter, never auto-seed again. Lets us land on a
   // populated chart by default without trapping the user inside it.
@@ -176,26 +173,36 @@ export function SentimentPage() {
   const rangeQuery = useQuery({
     queryKey: ['sentiment-range'],
     queryFn: () => fetchSentimentRange(),
+    staleTime: Infinity,
   });
+  const corpusMin = rangeQuery.data?.minDate ?? null;
+  const corpusMax = rangeQuery.data?.maxDate ?? null;
+  const corpusCount = rangeQuery.data?.count ?? 0;
+  const datesReady = from !== null && to !== null;
+  const corpusEmpty = rangeQuery.isSuccess && corpusCount === 0;
+
   const timelineQuery = useQuery({
     queryKey: ['sentiment-timeline', from, to, bin],
-    queryFn: () => fetchSentimentTimeline({ from, to, bin }),
+    queryFn: () => fetchSentimentTimeline({ from: from!, to: to!, bin }),
+    enabled: datesReady,
   });
   const extremesQuery = useQuery({
     queryKey: ['sentiment-extremes', from, to],
-    queryFn: () => fetchSentimentExtremes({ from, to, limit: 5 }),
+    queryFn: () => fetchSentimentExtremes({ from: from!, to: to!, limit: 5 }),
+    enabled: datesReady,
   });
 
   useEffect(() => {
     if (userTouchedDates.current) return;
-    const r = rangeQuery.data;
-    if (!r || r.count === 0 || !r.minDate || !r.maxDate) return;
-    setFrom(r.minDate);
-    setTo(r.maxDate);
-  }, [rangeQuery.data]);
+    if (!corpusMin || !corpusMax || corpusCount === 0) return;
+    setFrom(corpusMin);
+    setTo(corpusMax);
+  }, [corpusMin, corpusMax, corpusCount]);
 
-  const isLoading = timelineQuery.isLoading || extremesQuery.isLoading;
-  const error = timelineQuery.error ?? extremesQuery.error;
+  const isLoading =
+    rangeQuery.isLoading ||
+    (datesReady && (timelineQuery.isLoading || extremesQuery.isLoading));
+  const error = rangeQuery.error ?? timelineQuery.error ?? extremesQuery.error;
   const points = timelineQuery.data?.points ?? [];
   const extremes = extremesQuery.data;
 
@@ -205,8 +212,9 @@ export function SentimentPage() {
         <h1 className="text-2xl font-semibold sm:text-3xl">Sentiment</h1>
         <p className="text-ink-700 dark:text-parchment-100 mt-1">
           Per-document polarity scored by VADER (lexicon-based, sentence-level length-weighted
-          compound). The default range traces TR&rsquo;s mood across the 1912 campaign. Each
-          polarity is in <code className="text-xs">[-1, +1]</code>; values near zero are neutral.
+          compound). The page opens on the full span of dated documents with sentiment scores;
+          narrow the range to focus on a specific period. Each polarity is in{' '}
+          <code className="text-xs">[-1, +1]</code>; values near zero are neutral.
         </p>
       </header>
 
@@ -219,7 +227,8 @@ export function SentimentPage() {
           From
           <input
             type="date"
-            value={from}
+            value={from ?? ''}
+            disabled={!datesReady || corpusEmpty}
             onChange={(e) => {
               userTouchedDates.current = true;
               setFrom(e.target.value);
@@ -231,7 +240,8 @@ export function SentimentPage() {
           To
           <input
             type="date"
-            value={to}
+            value={to ?? ''}
+            disabled={!datesReady || corpusEmpty}
             onChange={(e) => {
               userTouchedDates.current = true;
               setTo(e.target.value);
@@ -243,6 +253,7 @@ export function SentimentPage() {
           Bin
           <select
             value={bin}
+            disabled={!datesReady || corpusEmpty}
             onChange={(e) => {
               userTouchedDates.current = true;
               setBin(e.target.value as SentimentBin);
@@ -256,14 +267,15 @@ export function SentimentPage() {
         <button
           type="button"
           className="btn"
+          disabled={!corpusMin || !corpusMax}
           onClick={() => {
-            userTouchedDates.current = true;
-            setFrom(DEFAULT_FROM);
-            setTo(DEFAULT_TO);
+            userTouchedDates.current = false;
+            setFrom(corpusMin);
+            setTo(corpusMax);
             setBin('month');
           }}
         >
-          Reset to 1912
+          Reset
         </button>
       </form>
 
@@ -274,7 +286,13 @@ export function SentimentPage() {
         </p>
       )}
 
-      {!isLoading && !error && (
+      {!isLoading && !error && corpusEmpty && (
+        <div className="rounded-md border border-ink-700/10 dark:border-parchment-50/10 bg-parchment-50/40 dark:bg-ink-800/40 p-6 text-sm">
+          <p>No sentiment data has been computed yet.</p>
+        </div>
+      )}
+
+      {!isLoading && !error && !corpusEmpty && datesReady && (
         <>
           <section className="mb-10">
             <h2 className="uppercase tracking-wide text-xs text-ink-700/70 dark:text-parchment-100/70 mb-3">
@@ -282,10 +300,9 @@ export function SentimentPage() {
             </h2>
             {points.length === 0 ? (
               <div className="rounded-md border border-ink-700/10 dark:border-parchment-50/10 bg-parchment-50/40 dark:bg-ink-800/40 p-6 text-sm">
-                <p>No sentiment data in this range. Try widening the date filter.</p>
-                <p className="mt-2 text-ink-700/70 dark:text-parchment-100/70">
-                  The 8-document POC corpus covers 1899&ndash;1910, so the 1912 default range is
-                  empty until the full Morison corpus is loaded.
+                <p>
+                  No sentiment data in this range. Try widening the date filter, or click Reset to
+                  restore the full corpus range.
                 </p>
               </div>
             ) : (
