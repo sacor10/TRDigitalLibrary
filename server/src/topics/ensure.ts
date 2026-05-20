@@ -1,11 +1,12 @@
 import type { LibsqlClient } from '../db.js';
 
+import { type ComputeOptions, type ComputeStage, computeTopics } from './compute.js';
 import {
-  type ComputeOptions,
-  type ComputeStage,
   TOPIC_MODEL_VERSION,
-  computeTopics,
-} from './compute.js';
+  getComputeStatus,
+  setComputeStatus,
+  _resetComputeStatusForTests as resetStatusSingleton,
+} from './status.js';
 
 // Recompute when the document count drifts by at least this fraction from
 // the last recorded run. Picked to be tolerant of small ingest tweaks but
@@ -13,16 +14,10 @@ import {
 // clustering pass.
 const RECOMPUTE_RATIO = 0.1;
 
-export type TopicComputeStatusValue = 'idle' | 'computing' | 'ready' | 'error';
-
-export interface TopicComputeStatus {
-  status: TopicComputeStatusValue;
-  progress: number;
-  documentCount: number;
-  computedAt: string | null;
-  modelVersion: string;
-  error: string | null;
-}
+// Re-exported so existing tests (and any other call sites) keep working
+// after the singleton was moved into `./status.js`.
+export { getComputeStatus };
+export type { TopicComputeStatus, TopicComputeStatusValue } from './status.js';
 
 // Approximate share of total wall time each stage takes on a 500-doc corpus.
 // Used to advance the progress bar so the user has feedback during the slow
@@ -42,30 +37,11 @@ const STAGES: ComputeStage[] = [
   'persisting',
 ];
 
-let state: TopicComputeStatus = {
-  status: 'idle',
-  progress: 0,
-  documentCount: 0,
-  computedAt: null,
-  modelVersion: TOPIC_MODEL_VERSION,
-  error: null,
-};
 let inFlight: Promise<void> | null = null;
 
-export function getComputeStatus(): TopicComputeStatus {
-  return { ...state };
-}
-
-/** @internal Test-only reset for the module-level status singleton. */
+/** @internal Test-only reset for both the status singleton and the in-flight latch. */
 export function _resetComputeStatusForTests(): void {
-  state = {
-    status: 'idle',
-    progress: 0,
-    documentCount: 0,
-    computedAt: null,
-    modelVersion: TOPIC_MODEL_VERSION,
-    error: null,
-  };
+  resetStatusSingleton();
   inFlight = null;
 }
 
@@ -133,38 +109,38 @@ export async function ensureTopicsComputed(
   const topicsRows = await countTopics(db);
 
   if (docs === 0) {
-    state = {
+    setComputeStatus({
       status: 'idle',
       progress: 0,
       documentCount: 0,
       computedAt: meta.computedAt,
       modelVersion: meta.modelVersion ?? TOPIC_MODEL_VERSION,
       error: null,
-    };
+    });
     return;
   }
 
   const recompute = topicsRows === 0 || shouldRecompute(docs, meta);
   if (!recompute) {
-    state = {
+    setComputeStatus({
       status: 'ready',
       progress: 1,
       documentCount: meta.documentCount,
       computedAt: meta.computedAt,
       modelVersion: meta.modelVersion ?? TOPIC_MODEL_VERSION,
       error: null,
-    };
+    });
     return;
   }
 
-  state = {
+  setComputeStatus({
     status: 'computing',
     progress: 0,
     documentCount: docs,
     computedAt: meta.computedAt,
     modelVersion: TOPIC_MODEL_VERSION,
     error: null,
-  };
+  });
 
   inFlight = (async () => {
     try {
@@ -175,27 +151,27 @@ export async function ensureTopicsComputed(
             (s, k) => s + STAGE_WEIGHTS[k],
             0,
           );
-          state = { ...state, progress };
+          setComputeStatus({ ...getComputeStatus(), progress });
         },
       };
       if (opts.embed) compOpts.embed = opts.embed;
       const result = await computeTopics(db, compOpts);
       if (!result) {
-        state = { ...state, status: 'idle', progress: 0 };
+        setComputeStatus({ ...getComputeStatus(), status: 'idle', progress: 0 });
         return;
       }
-      state = {
+      setComputeStatus({
         status: 'ready',
         progress: 1,
         documentCount: result.documentCount,
         computedAt: result.computedAt,
         modelVersion: TOPIC_MODEL_VERSION,
         error: null,
-      };
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[topics] auto-compute failed:', message);
-      state = { ...state, status: 'error', error: message };
+      setComputeStatus({ ...getComputeStatus(), status: 'error', error: message });
     } finally {
       inFlight = null;
     }
