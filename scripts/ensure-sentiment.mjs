@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * Idempotent JS-only sentiment bootstrap. Wired into `predev` so every
- * `npm run dev` keeps `document_sentiment` in sync with `documents` without
- * shelling to Python.
+ * Idempotent JS-only sentiment bootstrap. Wired into `predev` / `prebuild` so
+ * local runs keep `document_sentiment` in sync with `documents` without
+ * shelling to Python. The production build orchestrator can opt into the same
+ * JS path for Turso by setting SENTIMENT_BOOTSTRAP_ALLOW_REMOTE=1.
  *
- * Skips on Turso (build orchestrator owns that path) and when there's nothing
- * to score. Mirrors the algorithm in `python/sentiment.py`:
+ * Skips on Turso unless explicitly allowed, and skips when there's nothing to
+ * score. Mirrors the algorithm in `python/sentiment.py`:
  *   - sentence split with the same fallback regex
  *   - character-length-weighted aggregation of per-sentence compound/pos/neu/neg
  *   - DELETE-then-INSERT in a single libsql write batch
@@ -139,21 +140,28 @@ async function runMigrations(client) {
 }
 
 async function main() {
-  if (process.env.TURSO_LIBRARY_DATABASE_URL) {
-    log("Turso configured; bootstrap is the build orchestrator's responsibility — skipping");
+  const configuredUrl = process.env.TURSO_LIBRARY_DATABASE_URL;
+  const allowRemote = process.env.SENTIMENT_BOOTSTRAP_ALLOW_REMOTE === '1';
+  if (configuredUrl && !allowRemote) {
+    log("Turso configured; bootstrap is the build orchestrator's responsibility - skipping");
     return 0;
   }
   if (process.env.SKIP_SENTIMENT_BOOTSTRAP === '1') {
     log('SKIP_SENTIMENT_BOOTSTRAP=1 — skipping');
     return 0;
   }
-  if (!existsSync(DB_PATH)) {
+  if (!configuredUrl && !existsSync(DB_PATH)) {
     log(`no library DB at ${DB_PATH} — skipping (run \`npm run ingest\` first)`);
     return 0;
   }
 
-  const { createClient } = await import('@libsql/client');
-  const client = createClient({ url: `file:${DB_PATH}` });
+  const url = configuredUrl ?? `file:${DB_PATH}`;
+  const authToken = process.env.TURSO_LIBRARY_AUTH_TOKEN;
+  const config = authToken ? { url, authToken } : { url };
+  const { createClient } = /^(?:libsql|https?):/i.test(url)
+    ? await import('@libsql/client/http')
+    : await import('@libsql/client');
+  const client = createClient(config);
   try {
     await runMigrations(client);
 

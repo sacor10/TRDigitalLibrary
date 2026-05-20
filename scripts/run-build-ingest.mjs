@@ -4,7 +4,7 @@
  *
  * Runs the LoC, TRC, and TEI ingests against the configured Turso library DB,
  * captures their machine-readable SUMMARY lines, and — only when the
- * corpus actually changed — invokes the Python sentiment sidecar so the
+ * corpus actually changed — invokes the JS sentiment bootstrap so the
  * precomputed `document_sentiment` table stays in sync with the documents
  * table. It also backfills sentiment when a no-op ingest finds missing or
  * stale sentiment rows. (Topics are aggregated on the fly from documents.tags;
@@ -37,9 +37,8 @@
  *     a successful build, but the script still verifies sentiment coverage
  *     before taking the fast path. If documents exist without matching
  *     `document_sentiment` rows, the sidecar runs as a backfill.
- *   - Otherwise: install Python deps once (pip is cached across builds
- *     via PIP_CACHE_DIR) and run `python python/sentiment.py`. The
- *     sentiment failure fails the build loudly.
+ *   - Otherwise: run `node scripts/ensure-sentiment.mjs` with remote Turso
+ *     writes explicitly enabled. Sentiment failure fails the build loudly.
  *
  * Local parity: running this script with
  *     TURSO_LIBRARY_DATABASE_URL=file:./data/library.db
@@ -53,8 +52,6 @@
  *                                (default 8; read by ingest-loc directly).
  *   - SKIP_ANALYSIS=1            don't run sentiment even if the corpus
  *                                changed.
- *   - SKIP_PIP_INSTALL=1         skip `pip install -r python/requirements.txt`
- *                                (assume the venv is already set up).
  *   - FORCE_ANALYSIS=1           run sentiment even if the ingests reported
  *                                a no-op.
  */
@@ -147,15 +144,14 @@ function run(cmd, args, label) {
 }
 
 /**
- * Like `run`, but inherits stdio directly so multi-line / progress-bar output
- * (e.g. pip install) renders correctly in the Netlify log. We don't need to
- * capture stdout for these.
+ * Like `run`, but inherits stdio directly so child output renders correctly in
+ * the Netlify log. We don't need to capture stdout for these.
  */
-function runStreaming(cmd, args, label) {
+function runStreaming(cmd, args, label, env = process.env) {
   console.log(`\n[build-ingest] $ ${cmd} ${args.join(' ')}`);
   const result = spawnSync(cmd, args, {
     cwd: repoRoot,
-    env: process.env,
+    env,
     shell: process.platform === 'win32',
     stdio: 'inherit',
   });
@@ -169,20 +165,6 @@ function runStreaming(cmd, args, label) {
     );
     process.exit(result.status ?? 1);
   }
-}
-
-/**
- * Pick a Python launcher that exists on this machine. Mirrors the logic in
- * scripts/run-sentiment.mjs so behaviour is consistent between
- * `npm run sentiment` and the build orchestrator.
- */
-function pickPython() {
-  const candidates = process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python'];
-  for (const cmd of candidates) {
-    const probe = spawnSync(cmd, ['--version'], { encoding: 'utf8' });
-    if (!probe.error && probe.status === 0) return cmd;
-  }
-  return null;
 }
 
 async function createLibraryClient() {
@@ -292,28 +274,11 @@ if (!analysisDecision.shouldRun) {
   process.exit(0);
 }
 
-const python = pickPython();
-if (!python) {
-  console.error(
-    '[build-ingest] `python` not found on PATH. Install Python 3.10+ and ' +
-      'retry, or set SKIP_ANALYSIS=1 to bypass.',
-  );
-  process.exit(1);
-}
-
-if (process.env.SKIP_PIP_INSTALL !== '1') {
-  // `python -m pip` is the cross-platform invocation that works whether
-  // pip is on PATH as `pip`, `pip3`, or only available as `py -m pip`.
-  // PIP_CACHE_DIR is set in netlify.toml so re-builds reuse the wheel cache.
-  runStreaming(
-    python,
-    ['-m', 'pip', 'install', '--quiet', '-r', join(repoRoot, 'python', 'requirements.txt')],
-    'pip install',
-  );
-} else {
-  console.log('[build-ingest] SKIP_PIP_INSTALL=1; assuming Python deps are already installed.');
-}
-
-runStreaming(python, [join(repoRoot, 'python', 'sentiment.py')], 'sentiment');
+runStreaming(
+  process.execPath,
+  [join(repoRoot, 'scripts', 'ensure-sentiment.mjs')],
+  'sentiment',
+  { ...process.env, SENTIMENT_BOOTSTRAP_ALLOW_REMOTE: '1' },
+);
 
 console.log('\n[build-ingest] Done. Ingest + analysis complete.');

@@ -5,9 +5,9 @@
   #     against the configured Turso DB (idempotent — a no-op rebuild
   #     finishes in seconds).
   #   - If any new/updated rows were written, or if existing documents are
-  #     missing sentiment rows, run python/sentiment.py to keep the
+  #     missing sentiment rows, run the JS sentiment bootstrap to keep the
   #     precomputed sentiment table in sync. A no-op ingest with complete
-  #     sentiment coverage skips the Python pass (fast path).
+  #     sentiment coverage skips the sentiment pass (fast path).
   #   - If TURSO_LIBRARY_DATABASE_URL is not set, log a warning and exit 0
   #     so PR previews / forks without the Turso secrets do not fail the
   #     build.
@@ -19,18 +19,6 @@
 
 [build.environment]
   NODE_VERSION = "20"
-  PIP_CACHE_DIR = "/opt/build/cache/pip"
-
-# Persist the pip cache between builds. Netlify's automatic cache only
-# covers a small allow-list of paths (npm, yarn, etc.); for arbitrary paths
-# we use netlify-plugin-cache, declared as a devDependency at the repo root
-# and resolved from local node_modules at build time.
-[[plugins]]
-  package = "netlify-plugin-cache"
-  [plugins.inputs]
-    paths = [
-      "/opt/build/cache/pip",
-    ]
 
 [functions]
   node_bundler = "esbuild"
