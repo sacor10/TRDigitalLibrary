@@ -21,24 +21,23 @@ export function TimelinePage() {
   const [keyword, setKeyword] = useState('');
   const [type, setType] = useState<DocumentType | ''>('');
   const [recipient, setRecipient] = useState('');
-  const [topicId, setTopicId] = useState('');
+  const [tag, setTag] = useState('');
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [view, setView] = useState<{ from: string; to: string } | null>(null);
 
-  const numericTopicId = topicId ? Number(topicId) : undefined;
   const filters = useMemo(
     () => ({
       ...(dateFrom ? { dateFrom } : {}),
       ...(dateTo ? { dateTo } : {}),
       ...(type ? { type } : {}),
       ...(recipient ? { recipient } : {}),
-      ...(numericTopicId !== undefined ? { topicId: numericTopicId } : {}),
+      ...(tag ? { tag } : {}),
     }),
-    [dateFrom, dateTo, numericTopicId, recipient, type],
+    [dateFrom, dateTo, recipient, tag, type],
   );
 
   const timelineQuery = useQuery<TimelineDocuments>({
-    queryKey: ['documents', 'timeline', dateFrom, dateTo, keyword, type, recipient, topicId],
+    queryKey: ['documents', 'timeline', dateFrom, dateTo, keyword, type, recipient, tag],
     queryFn: async () => {
       const q = keyword.trim();
       if (q) {
@@ -71,7 +70,7 @@ export function TimelinePage() {
     setKeyword('');
     setType('');
     setRecipient('');
-    setTopicId('');
+    setTag('');
     clearSelection();
   };
 
@@ -112,9 +111,9 @@ export function TimelinePage() {
           </span>
           <select
             className="input"
-            value={topicId}
+            value={tag}
             onChange={(e) => {
-              setTopicId(e.target.value);
+              setTag(e.target.value);
               clearSelection();
             }}
             disabled={topicsQuery.isLoading}

@@ -6,7 +6,6 @@ Reads transcribed documents from the configured library DB (Turso in
 production, ``data/library.db`` locally), scores each with NLTK VADER
 (sentence-level, length-weighted compound aggregation), and writes
 ``document_sentiment`` in a single transaction (DELETE-then-INSERT).
-Mirrors the design of ``python/topic_model.py``.
 
 Connection precedence (see ``python/_libsql.py``):
   1. ``--db PATH`` (legacy local file flag)

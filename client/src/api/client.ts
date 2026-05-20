@@ -11,7 +11,6 @@ import {
   SentimentExtremesResponseSchema,
   SentimentRangeResponseSchema,
   SentimentTimelineResponseSchema,
-  TopicComputeStatusSchema,
   TopicDetailResponseSchema,
   TopicDriftResponseSchema,
   TopicsResponseSchema,
@@ -34,7 +33,6 @@ import {
   type SentimentExtremesResponse,
   type SentimentRangeResponse,
   type SentimentTimelineResponse,
-  type TopicComputeStatus,
   type TopicDetailResponse,
   type TopicDriftResponse,
   type TopicsResponse,
@@ -96,7 +94,7 @@ export async function fetchDocuments(
     dateFrom: query.dateFrom,
     dateTo: query.dateTo,
     recipient: query.recipient,
-    topicId: query.topicId,
+    tag: query.tag,
     sort: query.sort,
     order: query.order,
     limit: query.limit,
@@ -152,17 +150,15 @@ export async function fetchTopics(): Promise<TopicsResponse> {
   return getJson('/api/topics', (raw) => TopicsResponseSchema.parse(raw));
 }
 
-export async function fetchTopic(id: number, limit?: number): Promise<TopicDetailResponse> {
+export async function fetchTopic(id: string, limit?: number): Promise<TopicDetailResponse> {
   const qs = buildQuery({ limit });
-  return getJson(`/api/topics/${id}${qs}`, (raw) => TopicDetailResponseSchema.parse(raw));
+  return getJson(`/api/topics/${encodeURIComponent(id)}${qs}`, (raw) =>
+    TopicDetailResponseSchema.parse(raw),
+  );
 }
 
 export async function fetchTopicDrift(): Promise<TopicDriftResponse> {
   return getJson('/api/topics/drift?bin=year', (raw) => TopicDriftResponseSchema.parse(raw));
-}
-
-export async function fetchTopicComputeStatus(): Promise<TopicComputeStatus> {
-  return getJson('/api/topics/status', (raw) => TopicComputeStatusSchema.parse(raw));
 }
 
 export interface SentimentTimelineQuery {
@@ -211,7 +207,7 @@ export async function searchDocuments(query: SearchQuery): Promise<SearchRespons
     dateFrom: query.dateFrom,
     dateTo: query.dateTo,
     recipient: query.recipient,
-    topicId: query.topicId,
+    tag: query.tag,
     limit: query.limit,
     offset: query.offset,
   });

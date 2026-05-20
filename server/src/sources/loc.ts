@@ -727,9 +727,6 @@ async function fetchItem(deps: RetryDeps, result: JsonObject): Promise<JsonObjec
 export async function resetLibraryCorpus(db: LibsqlClient): Promise<void> {
   await db.batch(
     [
-      'DELETE FROM topic_drift',
-      'DELETE FROM document_topics',
-      'DELETE FROM topics',
       'DELETE FROM document_sentiment',
       'DELETE FROM document_field_provenance_history',
       'DELETE FROM document_field_provenance',

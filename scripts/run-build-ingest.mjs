@@ -4,10 +4,10 @@
  *
  * Runs the LoC, TRC, and TEI ingests against the configured Turso library DB,
  * captures their machine-readable SUMMARY lines, and — only when the
- * corpus actually changed — invokes the Python sidecars (sentiment +
- * topic-model) so the precomputed `topics`, `document_topics`,
- * `topic_drift`, and `document_sentiment` tables stay in sync with the
- * documents table.
+ * corpus actually changed — invokes the Python sentiment sidecar so the
+ * precomputed `document_sentiment` table stays in sync with the documents
+ * table. (Topics are aggregated on the fly from documents.tags; no sidecar
+ * needed.)
  *
  * Behaviour:
  *
@@ -20,7 +20,7 @@
  *   - Each ingest is expected to print a single line of the shape
  *         SUMMARY {"source":"loc","scanned":N,"written":W,...}
  *     We surface this to the build log. Only LoC + TEI are counted toward
- *     the corpus-change gate that controls sentiment/topic analysis; TRC
+ *     the corpus-change gate that controls sentiment analysis; TRC
  *     metadata updates are loaded into separate correspondence tables.
  *   - INGEST_CHUNK_SIZE (default 2000) caps the LoC/TRC ingest per build so a
  *     single Netlify build stays well under the 18-minute wall. The
@@ -33,15 +33,12 @@
  *   - A non-zero exit from any ingest fails the build LOUDLY (the plan's
  *     explicit requirement).
  *   - "No new corpus content" — written + updated = 0 across LoC + TEI — is
- *     a successful build AND short-circuits the Python analysis pass.
+ *     a successful build AND short-circuits the Python sentiment pass.
  *     This is the no-op fast path: a rebuild with nothing to do finishes
  *     in seconds, not minutes.
  *   - Otherwise: install Python deps once (pip is cached across builds
- *     via PIP_CACHE_DIR) and run `python python/sentiment.py` followed by
- *     `python python/topic_model.py`. Either Python failure fails the
- *     build loudly. The HuggingFace model cache (HF_HOME) is set in
- *     netlify.toml so the heavy sentence-transformers download only
- *     happens on the first cold build.
+ *     via PIP_CACHE_DIR) and run `python python/sentiment.py`. The
+ *     sentiment failure fails the build loudly.
  *
  * Local parity: running this script with
  *     TURSO_LIBRARY_DATABASE_URL=file:./data/library.db
@@ -53,12 +50,12 @@
  *                                (default 1000).
  *   - INGEST_CONCURRENCY=<n>     parallel LoC item fetches per page
  *                                (default 8; read by ingest-loc directly).
- *   - SKIP_ANALYSIS=1            don't run sentiment / topic-model even
- *                                if the corpus changed.
+ *   - SKIP_ANALYSIS=1            don't run sentiment even if the corpus
+ *                                changed.
  *   - SKIP_PIP_INSTALL=1         skip `pip install -r python/requirements.txt`
  *                                (assume the venv is already set up).
- *   - FORCE_ANALYSIS=1           run sentiment + topic-model even if the
- *                                ingests reported a no-op.
+ *   - FORCE_ANALYSIS=1           run sentiment even if the ingests reported
+ *                                a no-op.
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -148,8 +145,8 @@ function run(cmd, args, label) {
 
 /**
  * Like `run`, but inherits stdio directly so multi-line / progress-bar output
- * (pip install, sentence-transformers download) renders correctly in the
- * Netlify log. We don't need to capture stdout for these.
+ * (e.g. pip install) renders correctly in the Netlify log. We don't need to
+ * capture stdout for these.
  */
 function runStreaming(cmd, args, label) {
   console.log(`\n[build-ingest] $ ${cmd} ${args.join(' ')}`);
@@ -173,8 +170,8 @@ function runStreaming(cmd, args, label) {
 
 /**
  * Pick a Python launcher that exists on this machine. Mirrors the logic in
- * scripts/run-sentiment.mjs / scripts/run-topic-model.mjs so behaviour is
- * consistent between `npm run sentiment` and the build orchestrator.
+ * scripts/run-sentiment.mjs so behaviour is consistent between
+ * `npm run sentiment` and the build orchestrator.
  */
 function pickPython() {
   const candidates = process.platform === 'win32' ? ['python', 'py'] : ['python3', 'python'];
@@ -243,20 +240,20 @@ const skipAnalysis = process.env.SKIP_ANALYSIS === '1';
 const forceAnalysis = process.env.FORCE_ANALYSIS === '1';
 
 if (skipAnalysis) {
-  console.log('[build-ingest] SKIP_ANALYSIS=1; not running sentiment / topic-model.');
+  console.log('[build-ingest] SKIP_ANALYSIS=1; not running sentiment.');
   process.exit(0);
 }
 
 if (totalChanged === 0 && !forceAnalysis) {
   console.log(
-    '[build-ingest] No new corpus rows. Skipping topic-model + sentiment ' +
+    '[build-ingest] No new corpus rows. Skipping sentiment ' +
       '(set FORCE_ANALYSIS=1 to override).',
   );
   process.exit(0);
 }
 
 console.log(
-  `\n[build-ingest] ${totalChanged} corpus row(s) changed; running sentiment + topic-model.`,
+  `\n[build-ingest] ${totalChanged} corpus row(s) changed; running sentiment.`,
 );
 
 const python = pickPython();
@@ -282,6 +279,5 @@ if (process.env.SKIP_PIP_INSTALL !== '1') {
 }
 
 runStreaming(python, [join(repoRoot, 'python', 'sentiment.py')], 'sentiment');
-runStreaming(python, [join(repoRoot, 'python', 'topic_model.py')], 'topic-model');
 
 console.log('\n[build-ingest] Done. Ingest + analysis complete.');

@@ -52,12 +52,11 @@ export function createSearchRouter(db: LibsqlClient): Router {
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
     }
-    const { q, type, dateFrom, dateTo, recipient, topicId, limit, offset } = parsed.data;
+    const { q, type, dateFrom, dateTo, recipient, tag, limit, offset } = parsed.data;
     const ftsQuery = buildFtsQuery(q);
 
     const where: string[] = ['documents_fts MATCH @ftsQuery'];
     const filterParams: Record<string, string | number> = { ftsQuery };
-    const joins: string[] = [];
     if (type) {
       where.push('documents.type = @type');
       filterParams.type = type;
@@ -74,12 +73,10 @@ export function createSearchRouter(db: LibsqlClient): Router {
       where.push('documents.recipient LIKE @recipient');
       filterParams.recipient = `%${recipient}%`;
     }
-    if (topicId !== undefined) {
-      joins.push('JOIN document_topics ON document_topics.document_id = documents.id');
-      where.push('document_topics.topic_id = @topicId');
-      filterParams.topicId = topicId;
+    if (tag !== undefined) {
+      where.push('EXISTS (SELECT 1 FROM json_each(documents.tags) WHERE value = @tag)');
+      filterParams.tag = tag;
     }
-    const joinSql = joins.join(' ');
     const whereSql = `WHERE ${where.join(' AND ')}`;
 
     // Phase 1: rank + page rowids + total, no snippets. Computing snippet() in
@@ -97,7 +94,6 @@ export function createSearchRouter(db: LibsqlClient): Router {
         SELECT documents.rowid AS rowid, bm25(documents_fts) AS rank
         FROM documents_fts
         JOIN documents ON documents.rowid = documents_fts.rowid
-        ${joinSql}
         ${whereSql}
       ) AS inner_q
       ORDER BY inner_q.rank

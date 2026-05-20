@@ -1,6 +1,5 @@
 import type {
   Topic,
-  TopicComputeStatus,
   TopicDriftPoint,
   TopicDetailResponse,
   TopicDriftResponse,
@@ -9,32 +8,7 @@ import type {
 } from '@tr/shared';
 import { Router } from 'express';
 
-
 import type { LibsqlClient } from '../db.js';
-import { getComputeStatus } from '../topics/status.js';
-
-interface TopicRow {
-  id: number;
-  label: string;
-  keywords: string;
-  size: number;
-  computed_at: string;
-  model_version: string;
-}
-
-interface TopicMemberRow {
-  document_id: string;
-  probability: number;
-  title: string;
-  date: string;
-}
-
-interface TopicDriftRow {
-  topic_id: number;
-  period: string;
-  document_count: number;
-  share: number;
-}
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 200;
@@ -47,53 +21,21 @@ function asNumber(v: unknown): number {
   return typeof v === 'bigint' ? Number(v) : Number(v ?? 0);
 }
 
-function rowToTopic(row: TopicRow): Topic {
-  let keywords: string[] = [];
-  try {
-    const parsed = JSON.parse(row.keywords) as unknown;
-    if (Array.isArray(parsed)) {
-      keywords = parsed.filter((k): k is string => typeof k === 'string');
-    }
-  } catch {
-    keywords = [];
-  }
-  return {
-    id: row.id,
-    label: row.label,
-    keywords,
-    size: row.size,
-    computedAt: row.computed_at,
-    modelVersion: row.model_version,
-  };
-}
-
 export function createTopicsRouter(db: LibsqlClient): Router {
   const router = Router();
 
   router.get('/', async (_req, res) => {
     const result = await db.execute(
-      'SELECT id, label, keywords, size, computed_at, model_version FROM topics ORDER BY size DESC, id ASC',
+      `SELECT je.value AS tag, COUNT(*) AS size
+         FROM documents d, json_each(d.tags) je
+        GROUP BY je.value
+        ORDER BY size DESC, tag ASC`,
     );
-    const rows: TopicRow[] = result.rows.map((row) => ({
-      id: asNumber(row.id),
-      label: asString(row.label),
-      keywords: asString(row.keywords),
-      size: asNumber(row.size),
-      computed_at: asString(row.computed_at),
-      model_version: asString(row.model_version),
-    }));
-    const payload: TopicsResponse = {
-      items: rows.map(rowToTopic),
-      total: rows.length,
-    };
-    return res.json(payload);
-  });
-
-  // Read by the TopicsPage client while the JS auto-compute is running, so
-  // the empty-state can show a live progress bar and auto-refresh the grid
-  // when status flips to 'ready'. See server/src/topics/ensure.ts.
-  router.get('/status', (_req, res) => {
-    const payload: TopicComputeStatus = getComputeStatus();
+    const items: Topic[] = result.rows.map((row) => {
+      const tag = asString(row.tag);
+      return { id: tag, label: tag, size: asNumber(row.size) };
+    });
+    const payload: TopicsResponse = { items, total: items.length };
     return res.json(payload);
   });
 
@@ -104,85 +46,84 @@ export function createTopicsRouter(db: LibsqlClient): Router {
         error: `Unsupported bin: ${bin}. Only 'year' is supported in this release.`,
       });
     }
-    const result = await db.execute(
-      'SELECT topic_id, period, document_count, share FROM topic_drift ORDER BY period ASC, topic_id ASC',
+
+    // Tagged docs per (tag, year).
+    const perTagResult = await db.execute(
+      `SELECT je.value AS tag,
+              substr(d.date, 1, 4) AS period,
+              COUNT(*) AS document_count
+         FROM documents d, json_each(d.tags) je
+        WHERE d.date <> ''
+        GROUP BY tag, period
+        ORDER BY period ASC, tag ASC`,
     );
-    const rows: TopicDriftRow[] = result.rows.map((row) => ({
-      topic_id: asNumber(row.topic_id),
-      period: asString(row.period),
-      document_count: asNumber(row.document_count),
-      share: asNumber(row.share),
-    }));
-    const totalShareByPeriod = new Map<string, number>();
-    for (const row of rows) {
-      totalShareByPeriod.set(row.period, (totalShareByPeriod.get(row.period) ?? 0) + row.share);
+
+    // Total tagged documents per year (denominator for share). A doc with N
+    // tags counts N times — keeps shares comparable to the per-tag count and
+    // ensures shares sum to 1.0 per period.
+    const totalsResult = await db.execute(
+      `SELECT substr(d.date, 1, 4) AS period,
+              COUNT(*) AS total
+         FROM documents d, json_each(d.tags) je
+        WHERE d.date <> ''
+        GROUP BY period`,
+    );
+    const totalsByPeriod = new Map<string, number>();
+    for (const row of totalsResult.rows) {
+      totalsByPeriod.set(asString(row.period), asNumber(row.total));
     }
-    const points: TopicDriftPoint[] = rows.map((r) => ({
-      topicId: r.topic_id,
-      period: r.period,
-      documentCount: r.document_count,
-      share:
-        (totalShareByPeriod.get(r.period) ?? 0) > 1
-          ? r.share / (totalShareByPeriod.get(r.period) ?? 1)
-          : r.share,
-    }));
+
+    const points: TopicDriftPoint[] = perTagResult.rows.map((row) => {
+      const period = asString(row.period);
+      const documentCount = asNumber(row.document_count);
+      const total = totalsByPeriod.get(period) ?? 0;
+      return {
+        topicId: asString(row.tag),
+        period,
+        documentCount,
+        share: total > 0 ? documentCount / total : 0,
+      };
+    });
     const payload: TopicDriftResponse = { points };
     return res.json(payload);
   });
 
   router.get('/:id', async (req, res) => {
-    const id = Number.parseInt(req.params.id, 10);
-    if (!Number.isFinite(id) || id < 0) {
-      return res.status(400).json({ error: `Invalid topic id: ${req.params.id}` });
+    const tag = decodeURIComponent(req.params.id);
+    if (!tag) {
+      return res.status(400).json({ error: `Invalid tag: ${req.params.id}` });
     }
-    const limitRaw = typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : DEFAULT_LIMIT;
+    const limitRaw =
+      typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : DEFAULT_LIMIT;
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, MAX_LIMIT) : DEFAULT_LIMIT;
 
-    const topicResult = await db.execute({
-      sql: 'SELECT id, label, keywords, size, computed_at, model_version FROM topics WHERE id = ?',
-      args: [id],
+    const sizeResult = await db.execute({
+      sql: `SELECT COUNT(*) AS size
+              FROM documents d
+             WHERE EXISTS (SELECT 1 FROM json_each(d.tags) WHERE value = ?)`,
+      args: [tag],
     });
-    if (topicResult.rows.length === 0) {
+    const size = asNumber(sizeResult.rows[0]?.size);
+    if (size === 0) {
       return res.status(404).json({ error: 'Topic not found' });
     }
-    const tRow = topicResult.rows[0]!;
-    const row: TopicRow = {
-      id: asNumber(tRow.id),
-      label: asString(tRow.label),
-      keywords: asString(tRow.keywords),
-      size: asNumber(tRow.size),
-      computed_at: asString(tRow.computed_at),
-      model_version: asString(tRow.model_version),
-    };
 
     const memberResult = await db.execute({
-      sql: `SELECT dt.document_id AS document_id,
-                   dt.probability  AS probability,
-                   d.title         AS title,
-                   d.date          AS date
-              FROM document_topics dt
-              JOIN documents d ON d.id = dt.document_id
-             WHERE dt.topic_id = ?
-             ORDER BY dt.probability DESC, dt.document_id ASC
+      sql: `SELECT id AS document_id, title, date
+              FROM documents d
+             WHERE EXISTS (SELECT 1 FROM json_each(d.tags) WHERE value = ?)
+             ORDER BY date DESC, id ASC
              LIMIT ?`,
-      args: [id, limit],
+      args: [tag, limit],
     });
-    const memberRows: TopicMemberRow[] = memberResult.rows.map((m) => ({
-      document_id: asString(m.document_id),
-      probability: asNumber(m.probability),
+    const members: TopicMember[] = memberResult.rows.map((m) => ({
+      documentId: asString(m.document_id),
       title: asString(m.title),
       date: asString(m.date),
     }));
 
-    const members: TopicMember[] = memberRows.map((m) => ({
-      documentId: m.document_id,
-      probability: m.probability,
-      title: m.title,
-      date: m.date,
-    }));
-
     const payload: TopicDetailResponse = {
-      topic: rowToTopic(row),
+      topic: { id: tag, label: tag, size },
       members,
     };
     return res.json(payload);

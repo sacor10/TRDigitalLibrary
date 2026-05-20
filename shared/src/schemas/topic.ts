@@ -5,19 +5,15 @@ const isoDate = z
   .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format');
 
 export const TopicSchema = z.object({
-  id: z.number().int().nonnegative(),
+  id: z.string().min(1),
   label: z.string().min(1),
-  keywords: z.array(z.string()).default([]),
   size: z.number().int().nonnegative(),
-  computedAt: z.string().datetime({ offset: true }),
-  modelVersion: z.string().min(1),
 });
 
 export type Topic = z.infer<typeof TopicSchema>;
 
 export const TopicMemberSchema = z.object({
   documentId: z.string().min(1),
-  probability: z.number().min(0).max(1),
   title: z.string().min(1),
   date: isoDate,
 });
@@ -25,7 +21,7 @@ export const TopicMemberSchema = z.object({
 export type TopicMember = z.infer<typeof TopicMemberSchema>;
 
 export const TopicDriftPointSchema = z.object({
-  topicId: z.number().int().nonnegative(),
+  topicId: z.string().min(1),
   period: z.string().min(1),
   documentCount: z.number().int().nonnegative(),
   share: z.number().min(0).max(1),
@@ -52,14 +48,3 @@ export const TopicDriftResponseSchema = z.object({
 });
 
 export type TopicDriftResponse = z.infer<typeof TopicDriftResponseSchema>;
-
-export const TopicComputeStatusSchema = z.object({
-  status: z.enum(['idle', 'computing', 'ready', 'error']),
-  progress: z.number().min(0).max(1),
-  documentCount: z.number().int().nonnegative(),
-  computedAt: z.string().datetime({ offset: true }).nullable(),
-  modelVersion: z.string().min(1),
-  error: z.string().nullable(),
-});
-
-export type TopicComputeStatus = z.infer<typeof TopicComputeStatusSchema>;

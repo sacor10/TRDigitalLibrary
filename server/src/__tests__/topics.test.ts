@@ -1,4 +1,3 @@
-import type { InStatement } from '@libsql/client';
 import {
   TopicDetailResponseSchema,
   TopicDriftResponseSchema,
@@ -8,7 +7,6 @@ import {
 import request from 'supertest';
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 
-
 import { createApp } from '../app.js';
 import { openInMemoryDatabase, upsertDocument, type LibsqlClient } from '../db.js';
 
@@ -16,17 +14,22 @@ interface FixtureDoc {
   id: string;
   date: string;
   title: string;
+  tags: string[];
 }
 
+// Designed so:
+//  - "conservation" tag spans 1899/1901/1912 (drift across periods)
+//  - "progressive" tag is post-1900 only (asserts absence in 1899)
+//  - "family" tag covers a single document (size 1)
 const DOCS: FixtureDoc[] = [
-  { id: 'doc-1899-a', date: '1899-03-01', title: 'Pre-1900 letter A' },
-  { id: 'doc-1899-b', date: '1899-09-12', title: 'Pre-1900 letter B' },
-  { id: 'doc-1899-c', date: '1899-11-04', title: 'Pre-1900 letter C' },
-  { id: 'doc-1901-a', date: '1901-04-22', title: 'Post-1900 letter A' },
-  { id: 'doc-1901-b', date: '1901-07-15', title: 'Post-1900 letter B' },
-  { id: 'doc-1912-a', date: '1912-06-18', title: '1912 campaign A' },
-  { id: 'doc-1912-b', date: '1912-08-30', title: '1912 campaign B' },
-  { id: 'doc-1912-c', date: '1912-10-14', title: '1912 campaign C' },
+  { id: 'doc-1899-a', date: '1899-03-01', title: 'Pre-1900 letter A', tags: ['conservation', 'family'] },
+  { id: 'doc-1899-b', date: '1899-09-12', title: 'Pre-1900 letter B', tags: ['conservation'] },
+  { id: 'doc-1899-c', date: '1899-11-04', title: 'Pre-1900 letter C', tags: ['navy'] },
+  { id: 'doc-1901-a', date: '1901-04-22', title: 'Post-1900 letter A', tags: ['conservation', 'progressive'] },
+  { id: 'doc-1901-b', date: '1901-07-15', title: 'Post-1900 letter B', tags: ['navy'] },
+  { id: 'doc-1912-a', date: '1912-06-18', title: '1912 campaign A', tags: ['conservation', 'progressive'] },
+  { id: 'doc-1912-b', date: '1912-08-30', title: '1912 campaign B', tags: ['navy'] },
+  { id: 'doc-1912-c', date: '1912-10-14', title: '1912 campaign C', tags: ['progressive'] },
 ];
 
 function baseDoc(fixture: FixtureDoc): Document {
@@ -46,115 +49,10 @@ function baseDoc(fixture: FixtureDoc): Document {
     provenance: null,
     source: 'Fixture',
     sourceUrl: null,
-    tags: [],
+    tags: fixture.tags,
     mentions: [],
     teiXml: null,
   };
-}
-
-const COMPUTED_AT = '2026-05-09T12:00:00Z';
-const MODEL_VERSION = 'fixture:sentence-transformers==2.7';
-
-interface TopicSeed {
-  id: number;
-  label: string;
-  keywords: string[];
-  members: { documentId: string; probability: number }[];
-}
-
-const TOPIC_SEEDS: TopicSeed[] = [
-  {
-    id: 0,
-    label: 'conservation, parks, forest',
-    keywords: ['conservation', 'parks', 'forest', 'wildlife', 'land'],
-    members: [
-      { documentId: 'doc-1899-a', probability: 0.92 },
-      { documentId: 'doc-1899-b', probability: 0.85 },
-      { documentId: 'doc-1901-a', probability: 0.71 },
-      { documentId: 'doc-1912-a', probability: 0.66 },
-    ],
-  },
-  {
-    id: 1,
-    label: 'navy, fleet, battleship',
-    keywords: ['navy', 'fleet', 'battleship'],
-    members: [
-      { documentId: 'doc-1899-c', probability: 0.88 },
-      { documentId: 'doc-1901-b', probability: 0.74 },
-      { documentId: 'doc-1912-b', probability: 0.5 },
-    ],
-  },
-  {
-    // post-1900-only topic — drives the drift acceptance test
-    id: 2,
-    label: 'progressive, party, primary',
-    keywords: ['progressive', 'party', 'primary'],
-    members: [
-      { documentId: 'doc-1901-a', probability: 0.4 },
-      { documentId: 'doc-1912-a', probability: 0.95 },
-      { documentId: 'doc-1912-c', probability: 0.93 },
-    ],
-  },
-  {
-    id: 3,
-    label: 'family, children, sagamore',
-    keywords: ['family', 'children', 'sagamore'],
-    members: [{ documentId: 'doc-1899-a', probability: 0.3 }],
-  },
-];
-
-async function seedTopics(db: LibsqlClient): Promise<void> {
-  const stmts: InStatement[] = [];
-
-  // Total docs per period across all topics (deduplicated by document).
-  const docsPerPeriod = new Map<string, Set<string>>();
-  for (const seed of TOPIC_SEEDS) {
-    for (const m of seed.members) {
-      const fixture = DOCS.find((d) => d.id === m.documentId);
-      if (!fixture) continue;
-      const period = fixture.date.slice(0, 4);
-      if (!docsPerPeriod.has(period)) docsPerPeriod.set(period, new Set());
-      docsPerPeriod.get(period)!.add(m.documentId);
-    }
-  }
-
-  for (const seed of TOPIC_SEEDS) {
-    stmts.push({
-      sql: 'INSERT INTO topics (id, label, keywords, size, computed_at, model_version) VALUES (?, ?, ?, ?, ?, ?)',
-      args: [
-        seed.id,
-        seed.label,
-        JSON.stringify(seed.keywords),
-        seed.members.length,
-        COMPUTED_AT,
-        MODEL_VERSION,
-      ],
-    });
-    for (const m of seed.members) {
-      stmts.push({
-        sql: 'INSERT INTO document_topics (document_id, topic_id, probability) VALUES (?, ?, ?)',
-        args: [m.documentId, seed.id, m.probability],
-      });
-    }
-    // drift = (docs in topic for that period) / (total docs in any topic for that period)
-    const perTopicPeriodCounts = new Map<string, number>();
-    for (const m of seed.members) {
-      const fixture = DOCS.find((d) => d.id === m.documentId);
-      if (!fixture) continue;
-      const period = fixture.date.slice(0, 4);
-      perTopicPeriodCounts.set(period, (perTopicPeriodCounts.get(period) ?? 0) + 1);
-    }
-    for (const [period, count] of perTopicPeriodCounts) {
-      const totalForPeriod = docsPerPeriod.get(period)?.size ?? 0;
-      const share = totalForPeriod > 0 ? count / totalForPeriod : 0;
-      stmts.push({
-        sql: 'INSERT INTO topic_drift (topic_id, period, document_count, share) VALUES (?, ?, ?, ?)',
-        args: [seed.id, period, count, share],
-      });
-    }
-  }
-
-  await db.batch(stmts, 'write');
 }
 
 describe('Topics API', () => {
@@ -166,7 +64,6 @@ describe('Topics API', () => {
     for (const fixture of DOCS) {
       await upsertDocument(db, baseDoc(fixture));
     }
-    await seedTopics(db);
     app = createApp(db);
   });
 
@@ -175,29 +72,30 @@ describe('Topics API', () => {
   });
 
   describe('GET /api/topics', () => {
-    it('returns all topics ordered by size DESC', async () => {
+    it('aggregates tags into topics ordered by size DESC', async () => {
       const res = await request(app).get('/api/topics');
       expect(res.status).toBe(200);
       const parsed = TopicsResponseSchema.parse(res.body);
+      // 4 distinct tags: conservation, navy, progressive, family
       expect(parsed.total).toBe(4);
       const sizes = parsed.items.map((t) => t.size);
       expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
-      expect(parsed.items[0]!.size).toBe(4);
-      expect(parsed.items[parsed.items.length - 1]!.size).toBe(1);
-      expect(parsed.items[0]!.keywords.length).toBeGreaterThan(0);
+      expect(parsed.items[0]!.size).toBe(4); // conservation
+      expect(parsed.items[0]!.id).toBe('conservation');
+      expect(parsed.items[parsed.items.length - 1]!.size).toBe(1); // family
     });
   });
 
   describe('GET /api/topics/:id', () => {
-    it('returns the topic plus its members in probability-desc order', async () => {
-      const res = await request(app).get('/api/topics/0');
+    it('returns the topic plus its members in date-desc order', async () => {
+      const res = await request(app).get('/api/topics/conservation');
       expect(res.status).toBe(200);
       const parsed = TopicDetailResponseSchema.parse(res.body);
-      expect(parsed.topic.id).toBe(0);
+      expect(parsed.topic.id).toBe('conservation');
+      expect(parsed.topic.size).toBe(4);
       expect(parsed.members.length).toBe(4);
-      const probs = parsed.members.map((m) => m.probability);
-      expect(probs).toEqual([...probs].sort((a, b) => b - a));
-      // Members include joined title + date from the documents table.
+      const dates = parsed.members.map((m) => m.date);
+      expect(dates).toEqual([...dates].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)));
       for (const m of parsed.members) {
         expect(m.title.length).toBeGreaterThan(0);
         expect(m.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
@@ -205,24 +103,34 @@ describe('Topics API', () => {
     });
 
     it('caps member count to the requested limit', async () => {
-      const res = await request(app).get('/api/topics/0?limit=2');
+      const res = await request(app).get('/api/topics/conservation?limit=2');
       expect(res.status).toBe(200);
       expect(res.body.members).toHaveLength(2);
     });
 
-    it('returns 404 for unknown topic id', async () => {
-      const res = await request(app).get('/api/topics/999');
+    it('returns 404 for an unknown tag', async () => {
+      const res = await request(app).get('/api/topics/no-such-tag');
       expect(res.status).toBe(404);
     });
 
-    it('returns 400 for malformed topic id', async () => {
-      const res = await request(app).get('/api/topics/not-a-number');
-      expect(res.status).toBe(400);
+    it('decodes URL-encoded tag values', async () => {
+      // Add a doc with a tag containing a space + comma (LoC subject-heading style).
+      await upsertDocument(db, baseDoc({
+        id: 'doc-encoded',
+        date: '1905-01-01',
+        title: 'Encoded tag fixture',
+        tags: ['Politics and government'],
+      }));
+      const encoded = encodeURIComponent('Politics and government');
+      const res = await request(app).get(`/api/topics/${encoded}`);
+      expect(res.status).toBe(200);
+      expect(res.body.topic.id).toBe('Politics and government');
+      expect(res.body.topic.size).toBe(1);
     });
   });
 
   describe('GET /api/topics/drift', () => {
-    it('returns drift points whose per-period shares sum to <= 1', async () => {
+    it('returns drift points whose per-period shares sum to ~1', async () => {
       const res = await request(app).get('/api/topics/drift');
       expect(res.status).toBe(200);
       const parsed = TopicDriftResponseSchema.parse(res.body);
@@ -231,19 +139,18 @@ describe('Topics API', () => {
         sumByPeriod.set(point.period, (sumByPeriod.get(point.period) ?? 0) + point.share);
       }
       for (const [, total] of sumByPeriod) {
-        expect(total).toBeLessThanOrEqual(1 + 1e-9);
+        expect(total).toBeCloseTo(1, 5);
       }
     });
 
-    it('reports zero presence for the post-1900 topic in the 1899 period', async () => {
+    it('reports zero presence for the progressive tag in 1899', async () => {
       const res = await request(app).get('/api/topics/drift');
       expect(res.status).toBe(200);
       const parsed = TopicDriftResponseSchema.parse(res.body);
-      const post1900 = parsed.points.filter((p) => p.topicId === 2);
-      expect(post1900.length).toBeGreaterThan(0);
-      const periods = post1900.map((p) => p.period);
+      const progressive = parsed.points.filter((p) => p.topicId === 'progressive');
+      expect(progressive.length).toBeGreaterThan(0);
+      const periods = progressive.map((p) => p.period);
       expect(periods).not.toContain('1899');
-      // ...and it has presence in 1901 and 1912.
       expect(periods).toContain('1901');
       expect(periods).toContain('1912');
     });
@@ -266,6 +173,7 @@ describe('Topics API', () => {
       expect(res.body.paths['/api/topics']).toBeDefined();
       expect(res.body.paths['/api/topics/{id}']).toBeDefined();
       expect(res.body.paths['/api/topics/drift']).toBeDefined();
+      expect(res.body.paths['/api/topics/status']).toBeUndefined();
     });
   });
 });

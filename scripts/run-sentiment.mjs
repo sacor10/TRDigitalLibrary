@@ -4,7 +4,7 @@
  *
  * Invokes `python python/sentiment.py` with any forwarded args. If Python is
  * not on PATH, prints a clear message and exits with code 2 — same shape as
- * `npm run topic-model` / `npm run validate-tei` when their tools are absent.
+ * `npm run validate-tei` when its tool is absent.
  */
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';

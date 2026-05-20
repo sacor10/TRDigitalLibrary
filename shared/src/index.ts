@@ -32,7 +32,6 @@ export {
   TopicsResponseSchema,
   TopicDetailResponseSchema,
   TopicDriftResponseSchema,
-  TopicComputeStatusSchema,
 } from './schemas/topic.js';
 
 export {
@@ -97,7 +96,6 @@ export type {
   TopicsResponse,
   TopicDetailResponse,
   TopicDriftResponse,
-  TopicComputeStatus,
 } from './schemas/topic.js';
 
 export type {

@@ -21,7 +21,6 @@ import {
   FieldProvenanceSchema,
   SearchQuerySchema,
   SearchResponseSchema,
-  TopicComputeStatusSchema,
   TopicDetailResponseSchema,
   TopicDriftResponseSchema,
   TopicSchema,
@@ -50,7 +49,6 @@ export function buildOpenApiDocument(): object {
   registry.register('TopicsResponse', TopicsResponseSchema);
   registry.register('TopicDetailResponse', TopicDetailResponseSchema);
   registry.register('TopicDriftResponse', TopicDriftResponseSchema);
-  registry.register('TopicComputeStatus', TopicComputeStatusSchema);
   registry.register('DocumentSentiment', DocumentSentimentSchema);
   registry.register('SentimentTimelineResponse', SentimentTimelineResponseSchema);
   registry.register('SentimentExtremesResponse', SentimentExtremesResponseSchema);
@@ -329,10 +327,10 @@ export function buildOpenApiDocument(): object {
   registry.registerPath({
     method: 'get',
     path: '/api/topics',
-    summary: 'List all topics produced by the most recent BERTopic run, ordered by size.',
+    summary: 'List tag-based topics aggregated from the documents.tags column, ordered by document count.',
     responses: {
       200: {
-        description: 'Topics with labels, top keywords, document counts, and the model version that produced them.',
+        description: 'Topics with id (= tag value), label, and document counts.',
         content: { 'application/json': { schema: TopicsResponseSchema } },
       },
     },
@@ -341,9 +339,9 @@ export function buildOpenApiDocument(): object {
   registry.registerPath({
     method: 'get',
     path: '/api/topics/{id}',
-    summary: 'Get a single topic plus its top member documents (highest probability first).',
+    summary: 'Get a single topic (tag) plus its member documents in reverse-chronological order.',
     request: {
-      params: z.object({ id: z.string().describe('Numeric topic id') }),
+      params: z.object({ id: z.string().describe('URL-encoded tag value') }),
       query: z.object({
         limit: z
           .string()
@@ -365,21 +363,8 @@ export function buildOpenApiDocument(): object {
 
   registry.registerPath({
     method: 'get',
-    path: '/api/topics/status',
-    summary:
-      'Current status of the JS topic auto-compute pass. Clients poll this while the topics table is empty so the empty-state can show progress and auto-refresh when ready.',
-    responses: {
-      200: {
-        description: 'Auto-compute status.',
-        content: { 'application/json': { schema: TopicComputeStatusSchema } },
-      },
-    },
-  });
-
-  registry.registerPath({
-    method: 'get',
     path: '/api/topics/drift',
-    summary: 'Per-period share of each topic across the corpus, precomputed at sidecar run time.',
+    summary: 'Per-period share of each tag across the corpus.',
     request: {
       query: z.object({
         bin: z.enum(['year']).optional().describe('Drift binning granularity (only `year` supported).'),
@@ -387,7 +372,7 @@ export function buildOpenApiDocument(): object {
     },
     responses: {
       200: {
-        description: 'Drift points; per-period shares sum to <= 1 (HDBSCAN noise excluded).',
+        description: 'Drift points; per-period shares sum to 1.0 across all tags.',
         content: { 'application/json': { schema: TopicDriftResponseSchema } },
       },
       400: {

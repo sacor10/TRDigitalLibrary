@@ -1,15 +1,9 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { TopicComputeStatus, TopicDriftPoint } from '@tr/shared';
-import { useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import type { TopicDriftPoint } from '@tr/shared';
+import { useMemo } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
-
-import {
-  fetchTopic,
-  fetchTopicComputeStatus,
-  fetchTopicDrift,
-  fetchTopics,
-} from '../api/client';
+import { fetchTopic, fetchTopicDrift, fetchTopics } from '../api/client';
 
 const SPARK_W = 96;
 const SPARK_H = 28;
@@ -22,7 +16,7 @@ function uniqueSortedPeriods(points: TopicDriftPoint[]): string[] {
   return Array.from(set).sort();
 }
 
-function pointsForTopic(points: TopicDriftPoint[], topicId: number): TopicDriftPoint[] {
+function pointsForTopic(points: TopicDriftPoint[], topicId: string): TopicDriftPoint[] {
   return points
     .filter((p) => p.topicId === topicId)
     .sort((a, b) => (a.period < b.period ? -1 : a.period > b.period ? 1 : 0));
@@ -144,77 +138,7 @@ function DriftChart({ points, periods }: { points: TopicDriftPoint[]; periods: s
   );
 }
 
-function KeywordChart({ keywords }: { keywords: string[] }) {
-  const items = keywords.slice(0, 15);
-  if (items.length === 0) {
-    return (
-      <p className="text-ink-700/70 dark:text-parchment-100/70">
-        No keywords recorded for this topic.
-      </p>
-    );
-  }
-  return (
-    <ul className="flex flex-col gap-1">
-      {items.map((kw, i) => {
-        const width = ((items.length - i) / items.length) * 100;
-        return (
-          <li key={kw} className="flex items-center gap-3 text-sm">
-            <span className="w-24 shrink-0 truncate sm:w-32" title={kw}>
-              {kw}
-            </span>
-            <span className="min-w-0 flex-1" aria-hidden>
-              <span
-                className="block h-3 rounded-sm bg-accent-500/70"
-                style={{ width: `${width}%` }}
-              />
-            </span>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function ComputingState({ status }: { status: TopicComputeStatus }) {
-  const pct = Math.round(status.progress * 100);
-  return (
-    <div className="rounded-md border border-ink-700/10 dark:border-parchment-50/10 bg-parchment-50/40 dark:bg-ink-800/40 p-6 text-sm">
-      <p className="font-medium">Generating topics from your corpus&hellip;</p>
-      <p className="mt-2 text-ink-700/70 dark:text-parchment-100/70">
-        Clustering {status.documentCount} documents on first boot. This takes a minute or so
-        while the embedding model downloads and runs; subsequent visits will be instant.
-      </p>
-      <div
-        className="mt-4 h-2 w-full overflow-hidden rounded-sm bg-parchment-200/60 dark:bg-ink-700"
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={pct}
-        aria-label="Topic compute progress"
-      >
-        <div
-          className="h-full bg-accent-500 transition-[width] duration-500 ease-out"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function ComputeError({ message }: { message: string }) {
-  return (
-    <div className="rounded-md border border-red-600/30 bg-red-50/60 dark:bg-red-950/30 p-6 text-sm">
-      <p className="font-medium text-red-700 dark:text-red-300">Topic compute failed.</p>
-      <p className="mt-2 text-ink-700/80 dark:text-parchment-100/80 break-words">{message}</p>
-      <p className="mt-2 text-ink-700/70 dark:text-parchment-100/70">
-        The server retries automatically the next time it starts.
-      </p>
-    </div>
-  );
-}
-
 function TopicsGrid() {
-  const queryClient = useQueryClient();
   const topicsQuery = useQuery({ queryKey: ['topics'], queryFn: fetchTopics });
   const driftQuery = useQuery({ queryKey: ['topics-drift'], queryFn: fetchTopicDrift });
 
@@ -222,30 +146,6 @@ function TopicsGrid() {
     () => (driftQuery.data ? uniqueSortedPeriods(driftQuery.data.points) : []),
     [driftQuery.data],
   );
-
-  const topics = topicsQuery.data?.items ?? [];
-  const needsCompute = !topicsQuery.isLoading && !topicsQuery.error && topics.length === 0;
-
-  // Poll the auto-compute status only while we have no topics. Once the
-  // grid populates, react-query stops polling -- the steady state has no
-  // extra traffic. `refetchInterval: 0` halts polling for ready/error/idle.
-  const statusQuery = useQuery({
-    queryKey: ['topics-status'],
-    queryFn: fetchTopicComputeStatus,
-    enabled: needsCompute,
-    refetchInterval: (query) => {
-      const data = query.state.data as TopicComputeStatus | undefined;
-      return data?.status === 'computing' ? 3000 : false;
-    },
-  });
-
-  // When auto-compute finishes, refresh the topic list and drift charts.
-  useEffect(() => {
-    if (statusQuery.data?.status === 'ready' && topics.length === 0) {
-      void queryClient.invalidateQueries({ queryKey: ['topics'] });
-      void queryClient.invalidateQueries({ queryKey: ['topics-drift'] });
-    }
-  }, [statusQuery.data?.status, topics.length, queryClient]);
 
   if (topicsQuery.isLoading || driftQuery.isLoading) return <p>Loading&hellip;</p>;
   if (topicsQuery.error) {
@@ -256,17 +156,14 @@ function TopicsGrid() {
     );
   }
 
+  const topics = topicsQuery.data?.items ?? [];
   if (topics.length === 0) {
-    const s = statusQuery.data;
-    if (s?.status === 'computing') return <ComputingState status={s} />;
-    if (s?.status === 'error' && s.error) return <ComputeError message={s.error} />;
-    // 'idle' (no documents) or first-ever poll loading: show a quiet hint.
     return (
       <div className="rounded-md border border-ink-700/10 dark:border-parchment-50/10 bg-parchment-50/40 dark:bg-ink-800/40 p-6 text-sm">
         <p>No topics yet.</p>
         <p className="mt-2 text-ink-700/70 dark:text-parchment-100/70">
-          Topics are generated automatically from the document corpus. If the documents table is
-          empty, ingest some letters first.
+          Topics come from document tags. Ingest documents with tagged metadata, or add tags to
+          existing documents.
         </p>
       </div>
     );
@@ -279,10 +176,10 @@ function TopicsGrid() {
         return (
           <li key={topic.id}>
             <Link
-              to={`/topics/${topic.id}`}
+              to={`/topics/${encodeURIComponent(topic.id)}`}
               className="block h-full rounded-md border border-ink-700/10 dark:border-parchment-50/10 bg-parchment-50/40 dark:bg-ink-800/40 p-4 hover:bg-parchment-100 dark:hover:bg-ink-700/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500"
             >
-              <div className="flex items-baseline justify-between gap-2 mb-2">
+              <div className="flex items-baseline justify-between gap-2 mb-3">
                 <h2 className="font-semibold truncate" title={topic.label}>
                   {topic.label}
                 </h2>
@@ -290,16 +187,6 @@ function TopicsGrid() {
                   {topic.size} {topic.size === 1 ? 'doc' : 'docs'}
                 </span>
               </div>
-              <ul className="flex flex-wrap gap-1 mb-3">
-                {topic.keywords.slice(0, 5).map((kw) => (
-                  <li
-                    key={kw}
-                    className="text-xs px-2 py-0.5 rounded-sm border border-ink-700/15 dark:border-parchment-50/15 text-ink-700/80 dark:text-parchment-100/80"
-                  >
-                    {kw}
-                  </li>
-                ))}
-              </ul>
               <Sparkline points={drift} periods={periods} />
             </Link>
           </li>
@@ -309,7 +196,7 @@ function TopicsGrid() {
   );
 }
 
-function TopicDetail({ id }: { id: number }) {
+function TopicDetail({ id }: { id: string }) {
   const detailQuery = useQuery({
     queryKey: ['topic', id],
     queryFn: () => fetchTopic(id, 25),
@@ -337,8 +224,7 @@ function TopicDetail({ id }: { id: number }) {
         <div>
           <h1 className="text-2xl font-semibold sm:text-3xl">{topic.label}</h1>
           <p className="text-ink-700/80 dark:text-parchment-100/80 mt-1">
-            {topic.size} {topic.size === 1 ? 'document' : 'documents'} &middot; model{' '}
-            <code className="text-xs">{topic.modelVersion}</code>
+            {topic.size} {topic.size === 1 ? 'document' : 'documents'}
           </p>
         </div>
         <Link to="/topics" className="btn">
@@ -346,36 +232,27 @@ function TopicDetail({ id }: { id: number }) {
         </Link>
       </header>
 
-      <div className="grid gap-8 md:grid-cols-2">
-        <section>
-          <h2 className="uppercase tracking-wide text-xs text-ink-700/70 dark:text-parchment-100/70 mb-3">
-            Top keywords
-          </h2>
-          <KeywordChart keywords={topic.keywords} />
-        </section>
-
-        <section>
-          <h2 className="uppercase tracking-wide text-xs text-ink-700/70 dark:text-parchment-100/70 mb-3">
-            Share over time
-          </h2>
-          <DriftChart points={driftPoints} periods={periods} />
-        </section>
-      </div>
-
-      <section className="mt-10">
+      <section className="mb-8">
         <h2 className="uppercase tracking-wide text-xs text-ink-700/70 dark:text-parchment-100/70 mb-3">
-          Member documents (top {members.length} by probability)
+          Share over time
+        </h2>
+        <DriftChart points={driftPoints} periods={periods} />
+      </section>
+
+      <section>
+        <h2 className="uppercase tracking-wide text-xs text-ink-700/70 dark:text-parchment-100/70 mb-3">
+          Documents (most recent {members.length})
         </h2>
         {members.length === 0 ? (
           <p className="text-ink-700/70 dark:text-parchment-100/70">
-            No documents are assigned to this topic.
+            No documents are tagged with this topic.
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
             {members.map((m) => (
               <li key={m.documentId} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span className="w-16 text-xs tabular-nums text-ink-700/70 dark:text-parchment-100/70">
-                  {(m.probability * 100).toFixed(0)}%
+                <span className="w-24 shrink-0 text-xs tabular-nums text-ink-700/70 dark:text-parchment-100/70">
+                  {m.date}
                 </span>
                 <Link
                   to={`/documents/${encodeURIComponent(m.documentId)}`}
@@ -383,7 +260,6 @@ function TopicDetail({ id }: { id: number }) {
                 >
                   {m.title}
                 </Link>
-                <span className="text-ink-700/70 dark:text-parchment-100/70 text-sm">{m.date}</span>
               </li>
             ))}
           </ul>
@@ -401,17 +277,17 @@ export function TopicsPage() {
         <header className="mb-6">
           <h1 className="text-2xl font-semibold sm:text-3xl">Topics</h1>
           <p className="text-ink-700 dark:text-parchment-100 mt-1">
-            Themes discovered across the corpus, ordered by size. Each card shows the top keywords
-            and the topic&rsquo;s share of documents over time. Click a card for details.
+            Topics aggregated from document tags (Library of Congress subject headings and
+            collections), ordered by document count. Click a card for details.
           </p>
         </header>
         <TopicsGrid />
       </div>
     );
   }
-  const numericId = Number.parseInt(id, 10);
-  if (!Number.isFinite(numericId) || numericId < 0) {
+  const tag = decodeURIComponent(id);
+  if (!tag) {
     return <p className="text-red-600 dark:text-red-400">Invalid topic id: {id}</p>;
   }
-  return <TopicDetail id={numericId} />;
+  return <TopicDetail id={tag} />;
 }
