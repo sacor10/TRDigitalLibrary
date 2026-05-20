@@ -29,6 +29,7 @@ import {
   DocumentSentimentSchema,
   SentimentTimelineResponseSchema,
   SentimentExtremesResponseSchema,
+  SentimentRangeResponseSchema,
 } from '@tr/shared';
 import { z } from 'zod';
 
@@ -53,6 +54,7 @@ export function buildOpenApiDocument(): object {
   registry.register('DocumentSentiment', DocumentSentimentSchema);
   registry.register('SentimentTimelineResponse', SentimentTimelineResponseSchema);
   registry.register('SentimentExtremesResponse', SentimentExtremesResponseSchema);
+  registry.register('SentimentRangeResponse', SentimentRangeResponseSchema);
   registry.register('Annotation', AnnotationSchema);
   registry.register('AnnotationCreateInput', AnnotationCreateInputSchema);
   registry.register('AnnotationPatch', AnnotationPatchSchema);
@@ -437,6 +439,19 @@ export function buildOpenApiDocument(): object {
       400: {
         description: 'Invalid date.',
         content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/sentiment/range',
+    summary:
+      'Min and max document dates that have a sentiment record, plus a count. The client uses this to seed the SentimentPage filter so the default chart is non-empty.',
+    responses: {
+      200: {
+        description: 'Inclusive bounds; minDate/maxDate are null when count is 0.',
+        content: { 'application/json': { schema: SentimentRangeResponseSchema } },
       },
     },
   });

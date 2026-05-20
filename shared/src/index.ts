@@ -43,6 +43,7 @@ export {
   SentimentTimelineResponseSchema,
   SentimentExtremeItemSchema,
   SentimentExtremesResponseSchema,
+  SentimentRangeResponseSchema,
 } from './schemas/sentiment.js';
 
 export {
@@ -107,6 +108,7 @@ export type {
   SentimentTimelineResponse,
   SentimentExtremeItem,
   SentimentExtremesResponse,
+  SentimentRangeResponse,
 } from './schemas/sentiment.js';
 
 export type {

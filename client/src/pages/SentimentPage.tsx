@@ -1,10 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import type { SentimentBin, SentimentExtremeItem, SentimentTimelinePoint } from '@tr/shared';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 
-import { fetchSentimentExtremes, fetchSentimentTimeline } from '../api/client';
+import {
+  fetchSentimentExtremes,
+  fetchSentimentRange,
+  fetchSentimentTimeline,
+} from '../api/client';
 
 const CHART_W = 720;
 const CHART_H = 260;
@@ -165,7 +169,14 @@ export function SentimentPage() {
   const [from, setFrom] = useState<string>(DEFAULT_FROM);
   const [to, setTo] = useState<string>(DEFAULT_TO);
   const [bin, setBin] = useState<SentimentBin>('month');
+  // Once the user touches a filter, never auto-seed again. Lets us land on a
+  // populated chart by default without trapping the user inside it.
+  const userTouchedDates = useRef(false);
 
+  const rangeQuery = useQuery({
+    queryKey: ['sentiment-range'],
+    queryFn: () => fetchSentimentRange(),
+  });
   const timelineQuery = useQuery({
     queryKey: ['sentiment-timeline', from, to, bin],
     queryFn: () => fetchSentimentTimeline({ from, to, bin }),
@@ -174,6 +185,14 @@ export function SentimentPage() {
     queryKey: ['sentiment-extremes', from, to],
     queryFn: () => fetchSentimentExtremes({ from, to, limit: 5 }),
   });
+
+  useEffect(() => {
+    if (userTouchedDates.current) return;
+    const r = rangeQuery.data;
+    if (!r || r.count === 0 || !r.minDate || !r.maxDate) return;
+    setFrom(r.minDate);
+    setTo(r.maxDate);
+  }, [rangeQuery.data]);
 
   const isLoading = timelineQuery.isLoading || extremesQuery.isLoading;
   const error = timelineQuery.error ?? extremesQuery.error;
@@ -201,7 +220,10 @@ export function SentimentPage() {
           <input
             type="date"
             value={from}
-            onChange={(e) => setFrom(e.target.value)}
+            onChange={(e) => {
+              userTouchedDates.current = true;
+              setFrom(e.target.value);
+            }}
             className="input mt-1 text-sm normal-case tracking-normal"
           />
         </label>
@@ -210,7 +232,10 @@ export function SentimentPage() {
           <input
             type="date"
             value={to}
-            onChange={(e) => setTo(e.target.value)}
+            onChange={(e) => {
+              userTouchedDates.current = true;
+              setTo(e.target.value);
+            }}
             className="input mt-1 text-sm normal-case tracking-normal"
           />
         </label>
@@ -218,7 +243,10 @@ export function SentimentPage() {
           Bin
           <select
             value={bin}
-            onChange={(e) => setBin(e.target.value as SentimentBin)}
+            onChange={(e) => {
+              userTouchedDates.current = true;
+              setBin(e.target.value as SentimentBin);
+            }}
             className="input mt-1 text-sm normal-case tracking-normal"
           >
             <option value="month">Month</option>
@@ -229,6 +257,7 @@ export function SentimentPage() {
           type="button"
           className="btn"
           onClick={() => {
+            userTouchedDates.current = true;
             setFrom(DEFAULT_FROM);
             setTo(DEFAULT_TO);
             setBin('month');
@@ -253,13 +282,7 @@ export function SentimentPage() {
             </h2>
             {points.length === 0 ? (
               <div className="rounded-md border border-ink-700/10 dark:border-parchment-50/10 bg-parchment-50/40 dark:bg-ink-800/40 p-6 text-sm">
-                <p>
-                  No sentiment data for this range. Run{' '}
-                  <code className="px-1 py-0.5 rounded bg-parchment-200/60 dark:bg-ink-700">
-                    npm run sentiment
-                  </code>{' '}
-                  to compute scores, or widen the date filter.
-                </p>
+                <p>No sentiment data in this range. Try widening the date filter.</p>
                 <p className="mt-2 text-ink-700/70 dark:text-parchment-100/70">
                   The 8-document POC corpus covers 1899&ndash;1910, so the 1912 default range is
                   empty until the full Morison corpus is loaded.

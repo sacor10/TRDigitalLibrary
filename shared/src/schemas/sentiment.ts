@@ -59,3 +59,11 @@ export const SentimentExtremesResponseSchema = z.object({
 });
 
 export type SentimentExtremesResponse = z.infer<typeof SentimentExtremesResponseSchema>;
+
+export const SentimentRangeResponseSchema = z.object({
+  minDate: isoDate.nullable(),
+  maxDate: isoDate.nullable(),
+  count: z.number().int().nonnegative(),
+});
+
+export type SentimentRangeResponse = z.infer<typeof SentimentRangeResponseSchema>;
