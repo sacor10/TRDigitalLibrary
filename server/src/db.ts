@@ -182,26 +182,6 @@ export async function openLibraryDb(
 
   const client = await createLibsqlClient(url, authToken);
   await runMigrations(client);
-
-  // Fire-and-forget topic auto-compute. The dynamic `import()` uses a variable
-  // specifier so esbuild and `@vercel/nft` cannot statically resolve it; the
-  // entire `topics/ensure.js -> compute.js -> embed.js -> @huggingface/transformers`
-  // chain therefore stays out of the Netlify function bundle. Netlify production
-  // sets TR_TOPICS_AUTO_COMPUTE=0 (the Python sidecar populates topics at build
-  // time), so this branch never executes there. Local dev keeps the gate on and
-  // resolves the module through Node's normal resolution at runtime. Failures
-  // (e.g. offline model download) are caught and logged; the HTTP listener
-  // is never blocked by this pass.
-  if (process.env.TR_TOPICS_AUTO_COMPUTE !== '0') {
-    const ensureSpec = './topics/ensure.js';
-    void import(ensureSpec)
-      .then(({ ensureTopicsComputed }) => ensureTopicsComputed(client))
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error('[topics] failed to schedule auto-compute:', message);
-      });
-  }
-
   return client;
 }
 

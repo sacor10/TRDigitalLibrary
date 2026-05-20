@@ -262,7 +262,7 @@ Legend: **S** = small (≤1 day) · **M** = medium (1–3 days) · **L** = large
 - [ ] **Migrate search to Meilisearch** — M — self-hosted free, or Meilisearch Cloud ($30+/mo). Acceptance: same `/api/search` contract, typo tolerance, faceted filters return in <100ms at p99 over the full corpus.
 - [ ] **Semantic search via embeddings** — L — OpenAI `text-embedding-3-small` (~$0.02/1M tokens) or local `bge-small-en` + pgvector. Acceptance: `/api/search?semantic=1` returns conceptually-related results not lexically matched.
 - [x] **Network graph of correspondents** — L — implemented with Cytoscape.js plus a normalized TRC metadata ingest. `npm run ingest-trc -- --limit 50` crawls Theodore Roosevelt Center letter/telegram result pages politely, stores metadata-only creator/recipient edges in `correspondents`, `correspondence_items`, and `correspondence_participants` (migration `011_correspondence_network.sql`), and resumes via `ingest_progress`. Server endpoints `GET /api/correspondents/graph` and `GET /api/correspondents/:personId/items` return aggregate TR ego-network counts plus paginated source records; `/network` adds search/date/direction/min-count/top-N filters, a radial TR hub graph, and TRC source links.
-- [x] **Topic modeling (BERTopic)** — L — implemented as a Python sidecar (`python/topic_model.py`, invoked via `npm run topic-model` or auto-run by the build orchestrator when ingest reports new/updated rows) that reads the configured library DB via `libsql_client` (Turso in prod, `file:./data/library.db` in dev), embeds transcribed documents with `sentence-transformers/all-MiniLM-L6-v2`, fits BERTopic (UMAP → HDBSCAN → c-TF-IDF), reduces to ≤60 topics, and writes a single transactional snapshot into the `topics`, `document_topics`, and `topic_drift` tables defined in migration `006_topics.sql`. The server exposes three read-only endpoints — `GET /api/topics`, `GET /api/topics/:id` (top-25 member documents joined to `documents`), and `GET /api/topics/drift?bin=year` — registered in OpenAPI via `shared/src/schemas/topic.ts`. The client renders a new `/topics` page with a theme grid (label, top-5 keyword chips, doc count, share-over-time sparkline) and a `/topics/:id` detail view (top-15 keyword bar chart, full-period drift line chart, top-25 member docs linking back to `/documents/:id`); all charts are hand-rolled SVG, consistent with the timeline. The 30–60 theme target assumes the full ~150k Morison corpus; on the 8-document POC corpus the pipeline produces ≤1 topic and the page shows an empty-state hint. Design: `docs/topic-modeling.md`.
+- [x] **Tag-based topics** — S — implemented entirely in SQL against the `documents.tags` JSON column (populated by the LoC ingest from `subject`, `subject_headings`, `partof`, and `original_format`). The server exposes three read-only endpoints — `GET /api/topics` (aggregate count per tag via `json_each`), `GET /api/topics/:id` (URL-encoded tag value → its member documents in reverse-chronological order), and `GET /api/topics/drift?bin=year` (per-tag share by year) — registered in OpenAPI via `shared/src/schemas/topic.ts`. The client renders a `/topics` page with a card grid (label, doc count, share-over-time sparkline) and a `/topics/:id` detail view (full-period drift chart + member docs). No precomputation, no Python sidecar; topics stay in sync with the documents table by construction.
 - [x] **Sentiment analysis** — M — implemented as a Python sidecar (`python/sentiment.py`, invoked via `npm run sentiment` or auto-run by the build orchestrator when ingest reports new/updated rows) that reads the configured library DB via `libsql_client` (Turso in prod, `file:./data/library.db` in dev) and scores each transcribed document with VADER (`vaderSentiment`, sentence-level length-weighted compound, written in a single transaction to the `document_sentiment` table from migration `007_sentiment.sql`). Per-document records carry `polarity` (compound `[-1, 1]`), `pos`/`neu`/`neg`, a derived `label` (positive/neutral/negative at VADER's standard `±0.05` thresholds), and the `model_version` (`<git_sha>:vader==<version>`). Three read-only endpoints in `server/src/routes/sentiment.ts` — `GET /api/sentiment/timeline?bin=month|year&from&to` (mean polarity grouped by month or year over an optional date range), `GET /api/sentiment/extremes?from&to&limit` (most positive / most negative documents in range), and `GET /api/sentiment/documents/:id` — are registered in OpenAPI via `shared/src/schemas/sentiment.ts`. The client renders a new `/sentiment` page with a hand-rolled SVG mood chart (zero-baseline, `[-1, +1]` y-domain) defaulting to "TR's mood across the 1912 campaign" (`1912-01-01` → `1912-12-31`, monthly bins) plus most-positive / most-negative document lists; document detail pages show a polarity badge. The 1912 demo will be empty until the full ~150k Morison corpus is loaded — the page surfaces an explicit empty-state hint in that case, mirroring topic modeling.
 
 ### Pillar 3 — Scholarly Apparatus
@@ -337,7 +337,6 @@ static host (Cloudflare Pages, Netlify, S3+CloudFront).
 | `TURSO_DATABASE_URL`           | `file:data/annotations.db` (dev)     | libSQL/Turso URL holding `users` / `sessions` / `annotations`. Defaults to a local file in dev.                     |
 | `TURSO_AUTH_TOKEN`             | unset                                | Bearer token for the annotations Turso DB (production only; not needed for the local file URL).                     |
 | `PIP_CACHE_DIR`                | `/opt/build/cache/pip` (Netlify)     | Set in `netlify.toml` so `pip install` reuses wheels across builds.                                                 |
-| `HF_HOME` / `TRANSFORMERS_CACHE` / `SENTENCE_TRANSFORMERS_HOME` | `/opt/build/cache/huggingface…` (Netlify) | Pin HuggingFace caches to a Netlify-cached path so the ~500 MB sentence-transformers download survives rebuilds.   |
 
 ### Build-time ingest + analysis
 
@@ -352,17 +351,16 @@ The Netlify build runs `npm run ingest` (a thin wrapper around
    when the document is already present (LoC) or its TEI hash is unchanged
    (TEI), and finishes in seconds when there is nothing new.
 3. Inspects the machine-readable `SUMMARY {...}` line each ingest emits and,
-   only when `written + updated > 0`, runs the Python sidecars:
-   `pip install -r python/requirements.txt`, then `python python/sentiment.py`,
-   then `python python/topic_model.py`. A no-op rebuild therefore skips the
-   ~5–15 minute analysis pass entirely. Any Python failure exits non-zero and
-   fails the build loudly — the same contract as the ingest steps.
+   only when `written + updated > 0`, runs the Python sentiment sidecar:
+   `pip install -r python/requirements.txt`, then `python python/sentiment.py`.
+   A no-op rebuild skips the analysis pass entirely. Any Python failure exits
+   non-zero and fails the build loudly — the same contract as the ingest steps.
 
 Helpful escape hatches when running the orchestrator locally:
 
-- `SKIP_ANALYSIS=1` — never run sentiment / topic-model.
+- `SKIP_ANALYSIS=1` — never run sentiment.
 - `SKIP_PIP_INSTALL=1` — assume Python deps are already installed.
-- `FORCE_ANALYSIS=1` — run sentiment + topic-model even if the ingest was a no-op.
+- `FORCE_ANALYSIS=1` — run sentiment even if the ingest was a no-op.
 
 #### First-time seed (Turso)
 
@@ -379,8 +377,7 @@ npm run upload-library-to-turso
 # 3. Set the same two env vars (plus TURSO_AUTH_TOKEN / GOOGLE_CLIENT_ID /
 #    SESSION_SECRET / etc.) in the Netlify site env, then trigger a build.
 #    The first deploy will see written + updated > 0 from the LoC adapter and
-#    will run sentiment + topic-model; the next deploy with no source change
-#    will be a fast no-op.
+#    will run sentiment; the next deploy with no source change will be a fast no-op.
 ```
 
 #### Verifying the no-op build path locally
@@ -388,12 +385,12 @@ npm run upload-library-to-turso
 ```bash
 # 1. Cold build that ingests + runs analysis.
 TURSO_LIBRARY_DATABASE_URL="file:./data/library.db" npm run ingest
-# → SUMMARY shows written > 0; orchestrator runs sentiment + topic-model.
+# → SUMMARY shows written > 0; orchestrator runs sentiment.
 
 # 2. Immediate rebuild — no source changes.
 TURSO_LIBRARY_DATABASE_URL="file:./data/library.db" npm run ingest
 # → ingest-loc / ingest-tei: SUMMARY {"written":0,"updated":0,"skipped":N,...}
-# → orchestrator: "[build-ingest] No new corpus rows. Skipping topic-model + sentiment."
+# → orchestrator: "[build-ingest] No new corpus rows. Skipping sentiment."
 # → wall clock < a few seconds, no Python invoked.
 ```
 

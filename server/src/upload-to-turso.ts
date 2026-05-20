@@ -138,21 +138,6 @@ const TABLES: TableSpec[] = [
     conflict: 'ON CONFLICT(document_id, field) DO NOTHING',
   },
   {
-    name: 'topics',
-    columns: ['id', 'label', 'keywords', 'size', 'computed_at', 'model_version'],
-    conflict: 'ON CONFLICT(id) DO NOTHING',
-  },
-  {
-    name: 'document_topics',
-    columns: ['document_id', 'topic_id', 'probability'],
-    conflict: 'ON CONFLICT(document_id, topic_id) DO NOTHING',
-  },
-  {
-    name: 'topic_drift',
-    columns: ['topic_id', 'period', 'document_count', 'share'],
-    conflict: 'ON CONFLICT(topic_id, period) DO NOTHING',
-  },
-  {
     name: 'document_sentiment',
     columns: [
       'document_id',

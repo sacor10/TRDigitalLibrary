@@ -31,23 +31,6 @@ describe('TR Digital Library API', () => {
         transcription: `Stub content for ${doc.title}. unique-token-alpenglow ${doc.id}.`,
       });
     }
-    await db.execute({
-      sql: 'INSERT INTO topics (id, label, keywords, size, computed_at, model_version) VALUES (?, ?, ?, ?, ?, ?)',
-      args: [
-        7,
-        'civic ethics',
-        JSON.stringify(['civic', 'ethics', 'arena']),
-        2,
-        '2026-05-09T12:00:00Z',
-        'test',
-      ],
-    });
-    for (const documentId of ['man-in-the-arena', 'new-nationalism']) {
-      await db.execute({
-        sql: 'INSERT INTO document_topics (document_id, topic_id, probability) VALUES (?, ?, ?)',
-        args: [documentId, 7, 0.9],
-      });
-    }
     app = createApp(db);
   });
 
@@ -138,8 +121,8 @@ describe('TR Digital Library API', () => {
       }
     });
 
-    it('filters by topic id', async () => {
-      const res = await request(app).get('/api/documents?topicId=7&limit=100');
+    it('filters by tag', async () => {
+      const res = await request(app).get('/api/documents?tag=1910&limit=100');
       expect(res.status).toBe(200);
       const ids = res.body.items.map((d: Document) => d.id);
       expect(ids).toEqual(['man-in-the-arena', 'new-nationalism']);
@@ -281,8 +264,8 @@ describe('TR Digital Library API', () => {
       }
     });
 
-    it('combines query with topic filter', async () => {
-      const res = await request(app).get('/api/search?q=alpenglow&topicId=7&limit=100');
+    it('combines query with tag filter', async () => {
+      const res = await request(app).get('/api/search?q=alpenglow&tag=1910&limit=100');
       expect(res.status).toBe(200);
       const ids = res.body.results.map((r: { document: Document }) => r.document.id).sort();
       expect(ids).toEqual(['man-in-the-arena', 'new-nationalism']);

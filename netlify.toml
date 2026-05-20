@@ -5,8 +5,8 @@
   #     against the configured Turso DB (idempotent — a no-op rebuild
   #     finishes in seconds).
   #   - If any new/updated rows were written, also run python/sentiment.py
-  #     and python/topic_model.py to keep the precomputed analytics tables
-  #     in sync. A no-op ingest skips the Python pass entirely (fast path).
+  #     to keep the precomputed sentiment table in sync. A no-op ingest
+  #     skips the Python pass entirely (fast path).
   #   - If TURSO_LIBRARY_DATABASE_URL is not set, log a warning and exit 0
   #     so PR previews / forks without the Turso secrets do not fail the
   #     build.
@@ -18,50 +18,21 @@
 
 [build.environment]
   NODE_VERSION = "20"
-  # Python sidecars (sentiment + topic-model) only run when ingest reports
-  # new/updated rows. The first cold build pulls ~500 MB of HuggingFace
-  # weights for sentence-transformers/all-MiniLM-L6-v2 and a similar amount
-  # of pip wheels (torch, scikit-learn, bertopic). Pinning the cache dirs
-  # under /opt/build/cache (Netlify's persistent build-cache mount) lets the
-  # netlify-plugin-cache plugin below restore them on the next build, so
-  # subsequent builds that DO trigger analysis finish in a few minutes
-  # instead of 15+.
   PIP_CACHE_DIR = "/opt/build/cache/pip"
-  HF_HOME = "/opt/build/cache/huggingface"
-  TRANSFORMERS_CACHE = "/opt/build/cache/huggingface/transformers"
-  SENTENCE_TRANSFORMERS_HOME = "/opt/build/cache/huggingface/sentence-transformers"
-  # The canonical topic compute is the Python sidecar (python/topic_model.py)
-  # that runs at build time and writes to Turso. Disable the JS fallback
-  # auto-compute in the serverless function: with it off, the dynamic import
-  # in server/src/db.ts never tries to resolve @huggingface/transformers at
-  # runtime, which is required because we intentionally exclude that package
-  # from the function bundle (see [functions].external_node_modules below
-  # and server/src/topics/embed.ts).
-  TR_TOPICS_AUTO_COMPUTE = "0"
 
-# Persist the pip + HuggingFace caches between builds. Netlify's automatic
-# cache only covers a small allow-list of paths (npm, yarn, etc.); for
-# arbitrary paths we use netlify-plugin-cache, declared as a devDependency
-# at the repo root and resolved from local node_modules at build time.
+# Persist the pip cache between builds. Netlify's automatic cache only
+# covers a small allow-list of paths (npm, yarn, etc.); for arbitrary paths
+# we use netlify-plugin-cache, declared as a devDependency at the repo root
+# and resolved from local node_modules at build time.
 [[plugins]]
   package = "netlify-plugin-cache"
   [plugins.inputs]
     paths = [
       "/opt/build/cache/pip",
-      "/opt/build/cache/huggingface",
     ]
 
 [functions]
   node_bundler = "esbuild"
-  # `@huggingface/transformers` is intentionally NOT listed in
-  # external_node_modules: doing so would tell ZISI to ship the package as
-  # a runtime node_module (~150 MB on disk) and blow the function size
-  # limit. Instead, server/src/topics/embed.ts uses a variable-indirected
-  # `await import('@huggingface/transformers')` that esbuild and
-  # @vercel/nft both refuse to statically resolve, so the package is
-  # excluded from the bundle entirely. TR_TOPICS_AUTO_COMPUTE=0 (set
-  # above) keeps that code path from executing at runtime, which is what
-  # we want because the package is not in the zip.
 
 [functions."api"]
   # Library data lives in Turso (TURSO_LIBRARY_DATABASE_URL); we no longer

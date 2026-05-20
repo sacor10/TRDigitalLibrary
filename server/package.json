@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.0",
-    "@huggingface/transformers": "^4.2.0",
     "@libsql/client": "^0.17.3",
     "@tr/shared": "*",
     "cheerio": "^1.2.0",

@@ -61,12 +61,9 @@ describe('TimelinePage filters', () => {
     fetchTopicsMock.mockResolvedValue({
       items: [
         {
-          id: 2,
-          label: 'progressive, party, primary',
-          keywords: ['progressive', 'party', 'primary'],
+          id: 'progressive',
+          label: 'progressive',
           size: 3,
-          computedAt: '2026-05-09T12:00:00Z',
-          modelVersion: 'test',
         },
       ],
       total: 1,
@@ -138,12 +135,12 @@ describe('TimelinePage filters', () => {
 
     renderPage();
 
-    expect(await screen.findByRole('option', { name: /progressive, party, primary/i })).toBeTruthy();
+    expect(await screen.findByRole('option', { name: /progressive/i })).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText(/search transcriptions and titles/i), {
       target: { value: 'party' },
     });
-    fireEvent.change(screen.getByLabelText(/^topic$/i), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText(/^topic$/i), { target: { value: 'progressive' } });
     fireEvent.change(screen.getByLabelText(/^type$/i), { target: { value: 'speech' } });
     fireEvent.change(screen.getByLabelText(/^recipient$/i), { target: { value: 'Lodge' } });
     fireEvent.change(screen.getByLabelText(/^from$/i), { target: { value: '1910-01-01' } });
@@ -152,7 +149,7 @@ describe('TimelinePage filters', () => {
     await waitFor(() => {
       expect(searchDocumentsMock).toHaveBeenLastCalledWith({
         q: 'party',
-        topicId: 2,
+        tag: 'progressive',
         type: 'speech',
         recipient: 'Lodge',
         dateFrom: '1910-01-01',
