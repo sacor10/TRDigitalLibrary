@@ -14,10 +14,12 @@
  *
  *   - If TURSO_LIBRARY_DATABASE_URL is unset, log a warning and exit 0
  *     so PR previews / forks without Turso secrets do not break.
- *   - Run `npm run ingest-loc -w server -- --limit ${INGEST_CHUNK_SIZE}`,
- *     `npm run ingest-trc -w server -- --limit ${INGEST_CHUNK_SIZE}`, and
+ *   - Run `npm run ingest-loc -w server -- --limit ${INGEST_CHUNK_SIZE}` and
  *     (if a tei/ folder exists at the repo root)
- *     `npm run ingest-tei -w server -- tei`.
+ *     `npm run ingest-tei -w server -- tei`, then verify sentiment coverage.
+ *     TRC metadata ingest runs only after sentiment is already healthy; when
+ *     sentiment runs, TRC is deferred to the next build to stay under Netlify's
+ *     build timeout.
  *   - Each ingest is expected to print a single line of the shape
  *         SUMMARY {"source":"loc","scanned":N,"written":W,...}
  *     We surface this to the build log. Only LoC + TEI are counted toward
@@ -210,12 +212,6 @@ corpusSummaries.push(
   ),
 );
 
-await run(
-  'npm',
-  ['run', 'ingest-trc', '-w', 'server', '--', '--chunk-size', String(chunkSize)],
-  'ingest-trc',
-);
-
 const teiFolder = join(repoRoot, 'tei');
 if (existsSync(teiFolder)) {
   corpusSummaries.push(
@@ -270,15 +266,29 @@ const analysisDecision = decideSentimentAnalysis({
 });
 
 console.log(`[build-ingest] ${analysisDecision.message}`);
-if (!analysisDecision.shouldRun) {
-  process.exit(0);
+if (analysisDecision.shouldRun) {
+  runStreaming(
+    process.execPath,
+    [join(repoRoot, 'scripts', 'ensure-sentiment.mjs')],
+    'sentiment',
+    {
+      ...process.env,
+      SENTIMENT_BOOTSTRAP_ALLOW_REMOTE: '1',
+      SENTIMENT_BOOTSTRAP_FORCE:
+        analysisDecision.reason === 'corpus-changed' || analysisDecision.reason === 'forced'
+          ? '1'
+          : '',
+    },
+  );
+  console.log(
+    '[build-ingest] Sentiment ran this build; deferring TRC metadata ingest to keep the build under Netlify time limits.',
+  );
+} else {
+  await run(
+    'npm',
+    ['run', 'ingest-trc', '-w', 'server', '--', '--chunk-size', String(chunkSize)],
+    'ingest-trc',
+  );
 }
-
-runStreaming(
-  process.execPath,
-  [join(repoRoot, 'scripts', 'ensure-sentiment.mjs')],
-  'sentiment',
-  { ...process.env, SENTIMENT_BOOTSTRAP_ALLOW_REMOTE: '1' },
-);
 
 console.log('\n[build-ingest] Done. Ingest + analysis complete.');

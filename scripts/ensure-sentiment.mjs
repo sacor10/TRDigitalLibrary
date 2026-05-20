@@ -9,7 +9,7 @@
  * score. Mirrors the algorithm in `python/sentiment.py`:
  *   - sentence split with the same fallback regex
  *   - character-length-weighted aggregation of per-sentence compound/pos/neu/neg
- *   - DELETE-then-INSERT in a single libsql write batch
+ *   - chunked UPSERTs so remote build backfills can make resumable progress
  *
  * Exit codes:
  *   0 — success, including silent skips
@@ -29,6 +29,7 @@ const MIGRATIONS_DIR = join(REPO_ROOT, 'server', 'src', 'migrations');
 
 const POSITIVE_THRESHOLD = 0.05;
 const NEGATIVE_THRESHOLD = -0.05;
+const DEFAULT_BATCH_SIZE = 50;
 
 // Same fallback splitter as python/sentiment.py:43. Lookbehind is supported by
 // every Node version this project targets.
@@ -104,6 +105,17 @@ function modelVersion() {
   return `${gitSha()}:vader-sentiment@${version}`;
 }
 
+function resolveBatchSize() {
+  const raw = process.env.SENTIMENT_BOOTSTRAP_BATCH_SIZE;
+  if (raw == null || raw === '') return DEFAULT_BATCH_SIZE;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    log(`invalid SENTIMENT_BOOTSTRAP_BATCH_SIZE="${raw}"; using ${DEFAULT_BATCH_SIZE}`);
+    return DEFAULT_BATCH_SIZE;
+  }
+  return n;
+}
+
 async function runMigrations(client) {
   // Same shape as server/src/db.ts:runMigrations (single CREATE, batched probe,
   // per-file executeMultiple). Embedded here so the script can run from .mjs
@@ -142,6 +154,7 @@ async function runMigrations(client) {
 async function main() {
   const configuredUrl = process.env.TURSO_LIBRARY_DATABASE_URL;
   const allowRemote = process.env.SENTIMENT_BOOTSTRAP_ALLOW_REMOTE === '1';
+  const force = process.env.SENTIMENT_BOOTSTRAP_FORCE === '1';
   if (configuredUrl && !allowRemote) {
     log("Turso configured; bootstrap is the build orchestrator's responsibility - skipping");
     return 0;
@@ -176,14 +189,25 @@ async function main() {
 
     const sentCountResult = await client.execute('SELECT COUNT(*) AS n FROM document_sentiment');
     const sentCount = Number(sentCountResult.rows[0]?.n ?? 0);
-    if (sentCount === docCount) {
+    if (!force && sentCount === docCount) {
       log(`up to date — ${docCount} document(s) already scored`);
       return 0;
     }
 
-    const corpus = await client.execute(
-      'SELECT id, transcription FROM documents WHERE length(trim(transcription)) > 0 ORDER BY date ASC',
-    );
+    const corpusSql =
+      force || sentCount > docCount
+        ? 'SELECT id, transcription FROM documents WHERE length(trim(transcription)) > 0 ORDER BY date ASC'
+        : `SELECT d.id, d.transcription
+             FROM documents d
+             LEFT JOIN document_sentiment s ON s.document_id = d.id
+            WHERE length(trim(d.transcription)) > 0
+              AND s.document_id IS NULL
+            ORDER BY d.date ASC`;
+    const corpus = await client.execute(corpusSql);
+    if (corpus.rows.length === 0) {
+      log(`no missing documents to score; ${sentCount}/${docCount} row(s) present`);
+      return 0;
+    }
 
     const { SentimentIntensityAnalyzer } = require('vader-sentiment');
     log(`scoring ${corpus.rows.length} document(s) with VADER`);
@@ -191,22 +215,37 @@ async function main() {
     const version = modelVersion();
     const computedAt = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
-    const stmts = [{ sql: 'DELETE FROM document_sentiment', args: [] }];
+    const insertSql = `INSERT INTO document_sentiment
+          (document_id, polarity, pos, neu, neg, label, sentence_count, computed_at, model_version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(document_id) DO UPDATE SET
+          polarity = excluded.polarity,
+          pos = excluded.pos,
+          neu = excluded.neu,
+          neg = excluded.neg,
+          label = excluded.label,
+          sentence_count = excluded.sentence_count,
+          computed_at = excluded.computed_at,
+          model_version = excluded.model_version`;
+    const stmts = [];
     for (const row of corpus.rows) {
       const id = String(row.id);
       const text = String(row.transcription);
       const s = scoreDocument(SentimentIntensityAnalyzer, text);
       const label = labelFor(s.polarity);
       stmts.push({
-        sql: `INSERT INTO document_sentiment
-                (document_id, polarity, pos, neu, neg, label, sentence_count, computed_at, model_version)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        sql: insertSql,
         args: [id, s.polarity, s.pos, s.neu, s.neg, label, s.sentenceCount, computedAt, version],
       });
     }
-    await client.batch(stmts, 'write');
-
-    const written = stmts.length - 1;
+    const batchSize = resolveBatchSize();
+    let written = 0;
+    for (let i = 0; i < stmts.length; i += batchSize) {
+      const chunk = stmts.slice(i, i + batchSize);
+      await client.batch(chunk, 'write');
+      written += chunk.length;
+      log(`wrote ${written}/${stmts.length} sentiment row(s)`);
+    }
     log(`scored ${corpus.rows.length} document(s), wrote ${written} rows`);
     return 0;
   } finally {
