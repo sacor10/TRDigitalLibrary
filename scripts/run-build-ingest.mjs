@@ -6,8 +6,9 @@
  * captures their machine-readable SUMMARY lines, and — only when the
  * corpus actually changed — invokes the Python sentiment sidecar so the
  * precomputed `document_sentiment` table stays in sync with the documents
- * table. (Topics are aggregated on the fly from documents.tags; no sidecar
- * needed.)
+ * table. It also backfills sentiment when a no-op ingest finds missing or
+ * stale sentiment rows. (Topics are aggregated on the fly from documents.tags;
+ * no sidecar needed.)
  *
  * Behaviour:
  *
@@ -33,9 +34,9 @@
  *   - A non-zero exit from any ingest fails the build LOUDLY (the plan's
  *     explicit requirement).
  *   - "No new corpus content" — written + updated = 0 across LoC + TEI — is
- *     a successful build AND short-circuits the Python sentiment pass.
- *     This is the no-op fast path: a rebuild with nothing to do finishes
- *     in seconds, not minutes.
+ *     a successful build, but the script still verifies sentiment coverage
+ *     before taking the fast path. If documents exist without matching
+ *     `document_sentiment` rows, the sidecar runs as a backfill.
  *   - Otherwise: install Python deps once (pip is cached across builds
  *     via PIP_CACHE_DIR) and run `python python/sentiment.py`. The
  *     sentiment failure fails the build loudly.
@@ -62,6 +63,8 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+
+import { decideSentimentAnalysis } from './sentiment-analysis-decision.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
@@ -182,6 +185,33 @@ function pickPython() {
   return null;
 }
 
+async function createLibraryClient() {
+  const authToken = process.env.TURSO_LIBRARY_AUTH_TOKEN;
+  const config = authToken ? { url: TURSO_URL, authToken } : { url: TURSO_URL };
+  if (/^(?:libsql|https?):/i.test(TURSO_URL)) {
+    const { createClient } = await import('@libsql/client/http');
+    return createClient(config);
+  }
+  const { createClient } = await import('@libsql/client');
+  return createClient(config);
+}
+
+async function getSentimentCoverage() {
+  const client = await createLibraryClient();
+  try {
+    const transcribedResult = await client.execute(
+      'SELECT COUNT(*) AS n FROM documents WHERE length(trim(transcription)) > 0',
+    );
+    const sentimentResult = await client.execute('SELECT COUNT(*) AS n FROM document_sentiment');
+    return {
+      transcribedCount: Number(transcribedResult.rows[0]?.n ?? 0),
+      sentimentCount: Number(sentimentResult.rows[0]?.n ?? 0),
+    };
+  } finally {
+    client.close();
+  }
+}
+
 const chunkSize = resolveChunkSize();
 const concurrencyDisplay = process.env.INGEST_CONCURRENCY ?? 'default(8)';
 console.log(
@@ -239,22 +269,28 @@ console.log(
 const skipAnalysis = process.env.SKIP_ANALYSIS === '1';
 const forceAnalysis = process.env.FORCE_ANALYSIS === '1';
 
-if (skipAnalysis) {
-  console.log('[build-ingest] SKIP_ANALYSIS=1; not running sentiment.');
-  process.exit(0);
-}
+const coverage = skipAnalysis
+  ? { transcribedCount: 0, sentimentCount: 0 }
+  : await getSentimentCoverage();
 
-if (totalChanged === 0 && !forceAnalysis) {
+if (!skipAnalysis) {
   console.log(
-    '[build-ingest] No new corpus rows. Skipping sentiment ' +
-      '(set FORCE_ANALYSIS=1 to override).',
+    `[build-ingest] Sentiment coverage: ${coverage.sentimentCount}/` +
+      `${coverage.transcribedCount} transcribed document(s).`,
   );
-  process.exit(0);
 }
 
-console.log(
-  `\n[build-ingest] ${totalChanged} corpus row(s) changed; running sentiment.`,
-);
+const analysisDecision = decideSentimentAnalysis({
+  skipAnalysis,
+  forceAnalysis,
+  totalChanged,
+  ...coverage,
+});
+
+console.log(`[build-ingest] ${analysisDecision.message}`);
+if (!analysisDecision.shouldRun) {
+  process.exit(0);
+}
 
 const python = pickPython();
 if (!python) {

@@ -4,9 +4,10 @@
   #   - If TURSO_LIBRARY_DATABASE_URL is set, run ingest-loc + ingest-tei
   #     against the configured Turso DB (idempotent — a no-op rebuild
   #     finishes in seconds).
-  #   - If any new/updated rows were written, also run python/sentiment.py
-  #     to keep the precomputed sentiment table in sync. A no-op ingest
-  #     skips the Python pass entirely (fast path).
+  #   - If any new/updated rows were written, or if existing documents are
+  #     missing sentiment rows, run python/sentiment.py to keep the
+  #     precomputed sentiment table in sync. A no-op ingest with complete
+  #     sentiment coverage skips the Python pass (fast path).
   #   - If TURSO_LIBRARY_DATABASE_URL is not set, log a warning and exit 0
   #     so PR previews / forks without the Turso secrets do not fail the
   #     build.

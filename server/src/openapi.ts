@@ -452,7 +452,7 @@ export function buildOpenApiDocument(): object {
         content: { 'application/json': { schema: DocumentSentimentSchema } },
       },
       404: {
-        description: 'No sentiment record (run `npm run sentiment`).',
+        description: 'No sentiment record is available for this document yet.',
         content: { 'application/json': { schema: ErrorResponseSchema } },
       },
     },

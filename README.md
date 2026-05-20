@@ -350,10 +350,12 @@ The Netlify build runs `npm run ingest` (a thin wrapper around
    Turso DB. Both ingests are idempotent: each one short-circuits per-record
    when the document is already present (LoC) or its TEI hash is unchanged
    (TEI), and finishes in seconds when there is nothing new.
-3. Inspects the machine-readable `SUMMARY {...}` line each ingest emits and,
-   only when `written + updated > 0`, runs the Python sentiment sidecar:
-   `pip install -r python/requirements.txt`, then `python python/sentiment.py`.
-   A no-op rebuild skips the analysis pass entirely. Any Python failure exits
+3. Inspects the machine-readable `SUMMARY {...}` line each ingest emits, then
+   checks sentiment coverage. It runs the Python sentiment sidecar when
+   `written + updated > 0`, `FORCE_ANALYSIS=1`, or the number of sentiment rows
+   does not match the number of transcribed documents. It installs
+   `python/requirements.txt`, then runs `python python/sentiment.py`. A no-op
+   rebuild with complete sentiment coverage skips the analysis pass. Any Python failure exits
    non-zero and fails the build loudly — the same contract as the ingest steps.
 
 Helpful escape hatches when running the orchestrator locally:
