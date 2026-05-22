@@ -68,6 +68,8 @@ import { decideSentimentAnalysis } from './sentiment-analysis-decision.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
+const buildStart = Date.now();
+const TRC_BUDGET_CUTOFF_MS = 8 * 60 * 1000;
 
 const TURSO_URL = process.env.TURSO_LIBRARY_DATABASE_URL;
 if (!TURSO_URL) {
@@ -245,7 +247,9 @@ console.log(
         : ''),
 );
 
+const topicRepairStart = Date.now();
 runStreaming('npm', ['run', 'repair-topic-tags'], 'repair-topic-tags');
+const topicRepairMs = Date.now() - topicRepairStart;
 
 const skipAnalysis = process.env.SKIP_ANALYSIS === '1';
 const forceAnalysis = process.env.FORCE_ANALYSIS === '1';
@@ -287,11 +291,18 @@ if (analysisDecision.shouldRun) {
     '[build-ingest] Sentiment ran this build; deferring TRC metadata ingest to keep the build under Netlify time limits.',
   );
 } else {
-  await run(
-    'npm',
-    ['run', 'ingest-trc', '-w', 'server', '--', '--chunk-size', String(chunkSize)],
-    'ingest-trc',
-  );
+  const elapsed = Date.now() - buildStart;
+  if (topicRepairMs > 60_000 || elapsed > TRC_BUDGET_CUTOFF_MS) {
+    console.log(
+      '[build-ingest] Deferring TRC metadata ingest to keep the deploy under the Netlify time limit.',
+    );
+  } else {
+    await run(
+      'npm',
+      ['run', 'ingest-trc', '-w', 'server', '--', '--chunk-size', String(chunkSize)],
+      'ingest-trc',
+    );
+  }
 }
 
 console.log('\n[build-ingest] Done. Ingest + analysis complete.');

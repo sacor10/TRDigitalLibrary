@@ -157,6 +157,38 @@ function corpusWideTagsFromDocuments(docs: Array<{ tags: string[] }>): Set<strin
   return out;
 }
 
+async function needsRepair(db: LibsqlClient): Promise<boolean> {
+  const summary = await db.execute(`
+    WITH tagged_documents AS (
+      SELECT COUNT(DISTINCT d.id) AS total
+        FROM documents d, json_each(d.tags) je
+    ),
+    tag_counts AS (
+      SELECT je.value AS tag,
+             COUNT(DISTINCT d.id) AS size
+        FROM documents d, json_each(d.tags) je
+       GROUP BY je.value
+    )
+    SELECT
+      (SELECT COUNT(*) FROM documents) AS document_count,
+      (SELECT COUNT(*) FROM documents WHERE tags = '[]') AS empty_tags,
+      (SELECT COUNT(*)
+         FROM tag_counts
+        WHERE lower(tag) IN ('count', 'title', 'url', 'manuscript/mixed material')) AS junk_tags,
+      (SELECT COUNT(*)
+         FROM tag_counts, tagged_documents
+        WHERE tagged_documents.total > 0
+          AND size >= tagged_documents.total * ?) AS corpus_wide_tags
+  `, [GLOBAL_TOPIC_THRESHOLD]);
+  const row = summary.rows[0];
+  if (!row || asNumber(row.document_count) === 0) return false;
+  return (
+    asNumber(row.empty_tags) > 0 ||
+    asNumber(row.junk_tags) > 0 ||
+    asNumber(row.corpus_wide_tags) > 0
+  );
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -179,6 +211,11 @@ Calculates and repairs per-document topic tags:
   const dryRun = Boolean(values['dry-run']);
   const db = await openLibraryDb();
   try {
+    if (!dryRun && !(await needsRepair(db))) {
+      console.log('[repair-topic-tags] up to date; skipping topic recalculation.');
+      return;
+    }
+
     const rows = await db.execute('SELECT id, title, transcription, tags FROM documents ORDER BY id');
     const candidates = rows.rows.map((row) => ({
       id: asString(row.id),
@@ -191,6 +228,7 @@ Calculates and repairs per-document topic tags:
 
     let changedDocs = 0;
     let writtenAssignments = 0;
+    const updates: Array<{ sql: string; args: [string, string] }> = [];
     for (const row of rows.rows) {
       const current = unique(parseTags(row.tags));
       const candidate = candidates.find((doc) => doc.id === asString(row.id));
@@ -199,11 +237,14 @@ Calculates and repairs per-document topic tags:
       changedDocs += 1;
       writtenAssignments += next.length;
       if (!dryRun) {
-        await db.execute({
+        updates.push({
           sql: 'UPDATE documents SET tags = ? WHERE id = ?',
           args: [JSON.stringify(next), asString(row.id)],
         });
       }
+    }
+    if (updates.length > 0) {
+      await db.batch(updates, 'write');
     }
 
     console.log(
