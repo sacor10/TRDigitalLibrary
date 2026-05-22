@@ -37,7 +37,8 @@
  *     explicit requirement).
  *   - "No new corpus content" — written + updated = 0 across LoC + TEI — is
  *     a successful build, but the script still verifies sentiment coverage
- *     before taking the fast path. If documents exist without matching
+ *     before taking the fast path. Topic tags are repaired/calculated after
+ *     corpus ingest so `/topics` never depends on a manual data step. If documents exist without matching
  *     `document_sentiment` rows, the sidecar runs as a backfill.
  *   - Otherwise: run `node scripts/ensure-sentiment.mjs` with remote Turso
  *     writes explicitly enabled. Sentiment failure fails the build loudly.
@@ -243,6 +244,8 @@ console.log(
         ? ` [loc: resume page=${locNextPage} on next build]`
         : ''),
 );
+
+runStreaming('npm', ['run', 'repair-topic-tags'], 'repair-topic-tags');
 
 const skipAnalysis = process.env.SKIP_ANALYSIS === '1';
 const forceAnalysis = process.env.FORCE_ANALYSIS === '1';

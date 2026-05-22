@@ -95,14 +95,12 @@ the metadata into the existing `documents` table, and lets the current SQLite
 FTS5 triggers update search indexes automatically. V1 stores one row per LoC
 source item; page-level text can be added later through `document_sections`.
 
-If `/topics` shows no topics in local dev, check whether `data/library.db`
-contains older fixture rows or rows ingested before tag metadata was added. Run
-`npm run ingest-loc -- --limit 25 --reset` to replace that local file with LoC
-rows whose tags can be aggregated into topics, then run
-`npm run repair-topic-tags` to remove collection-wide LoC headings that would
-otherwise make every topic appear to contain the whole corpus. `--force`
-re-fetches existing LoC items but does not overwrite rows written by the
-skip-if-exists path, so use `--reset` when repairing a stale local corpus.
+Topic tags are repaired and calculated automatically during local `npm run dev`,
+local `npm run build`, and Netlify build-time ingest. The repair removes
+collection-wide LoC headings that would otherwise make every topic appear to
+contain the whole corpus, then derives per-document topic tags from titles and
+transcriptions. `npm run repair-topic-tags` is available for diagnostics, but it
+is not a required manual setup step.
 
 ### Ingesting TEI documents
 
@@ -271,7 +269,7 @@ Legend: **S** = small (≤1 day) · **M** = medium (1–3 days) · **L** = large
 - [ ] **Migrate search to Meilisearch** — M — self-hosted free, or Meilisearch Cloud ($30+/mo). Acceptance: same `/api/search` contract, typo tolerance, faceted filters return in <100ms at p99 over the full corpus.
 - [ ] **Semantic search via embeddings** — L — OpenAI `text-embedding-3-small` (~$0.02/1M tokens) or local `bge-small-en` + pgvector. Acceptance: `/api/search?semantic=1` returns conceptually-related results not lexically matched.
 - [x] **Network graph of correspondents** — L — implemented with Cytoscape.js plus a normalized TRC metadata ingest. `npm run ingest-trc -- --limit 50` crawls Theodore Roosevelt Center letter/telegram result pages politely, stores metadata-only creator/recipient edges in `correspondents`, `correspondence_items`, and `correspondence_participants` (migration `011_correspondence_network.sql`), and resumes via `ingest_progress`. Server endpoints `GET /api/correspondents/graph` and `GET /api/correspondents/:personId/items` return aggregate TR ego-network counts plus paginated source records; `/network` adds search/date/direction/min-count/top-N filters, a radial TR hub graph, and TRC source links.
-- [x] **Tag-based topics** — S — implemented entirely in SQL against the `documents.tags` JSON column (populated by the LoC ingest from `subject`, `subject_headings`, `partof`, and `original_format`). The server exposes three read-only endpoints — `GET /api/topics` (aggregate count per tag via `json_each`), `GET /api/topics/:id` (URL-encoded tag value → its member documents in reverse-chronological order), and `GET /api/topics/drift?bin=year` (per-tag share by year) — registered in OpenAPI via `shared/src/schemas/topic.ts`. The client renders a `/topics` page with a card grid (label, doc count, share-over-time sparkline) and a `/topics/:id` detail view (full-period drift chart + member docs). No precomputation, no Python sidecar; topics stay in sync with the documents table by construction.
+- [x] **Tag-based topics** — S — implemented in SQL against the `documents.tags` JSON column. LoC collection-wide headings are filtered out and per-document content topics are calculated automatically by `npm run repair-topic-tags`, which is wired into local dev/build and the Netlify ingest orchestrator. The server exposes three read-only endpoints — `GET /api/topics` (aggregate count per tag via `json_each`), `GET /api/topics/:id` (URL-encoded tag value → its member documents in reverse-chronological order), and `GET /api/topics/drift?bin=year` (per-tag share by year) — registered in OpenAPI via `shared/src/schemas/topic.ts`. The client renders a `/topics` page with a card grid (label, doc count, share-over-time sparkline) and a `/topics/:id` detail view (full-period drift chart + member docs).
 - [x] **Sentiment analysis** — M — implemented as an idempotent JS bootstrap (`scripts/ensure-sentiment.mjs`, invoked automatically by local dev/build and by the Netlify ingest orchestrator when coverage is missing or stale) that reads the configured library DB via `@libsql/client` (Turso in prod, `file:./data/library.db` in dev) and scores each transcribed document with VADER (`vader-sentiment`, sentence-level length-weighted compound, written in a single transaction to the `document_sentiment` table from migration `007_sentiment.sql`). Per-document records carry `polarity` (compound `[-1, 1]`), `pos`/`neu`/`neg`, a derived `label` (positive/neutral/negative at VADER's standard `±0.05` thresholds), and the `model_version` (`<git_sha>:vader-sentiment@<version>`). Three read-only endpoints in `server/src/routes/sentiment.ts` — `GET /api/sentiment/timeline?bin=month|year&from&to` (mean polarity grouped by month or year over an optional date range), `GET /api/sentiment/extremes?from&to&limit` (most positive / most negative documents in range), and `GET /api/sentiment/documents/:id` — are registered in OpenAPI via `shared/src/schemas/sentiment.ts`. The client renders a `/sentiment` page with a hand-rolled SVG mood chart plus most-positive / most-negative document lists; document detail pages show a polarity badge.
 
 ### Pillar 3 — Scholarly Apparatus
