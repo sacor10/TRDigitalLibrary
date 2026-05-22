@@ -44,8 +44,23 @@ interface Segment {
   annotationIds: string[];
 }
 
+const LONG_TRANSCRIPTION_CHAR_LIMIT = 3000;
+const TRANSCRIPTION_PREVIEW_WORD_LIMIT = 500;
+
 function errorMessage(err: unknown): string | null {
   return err instanceof Error ? err.message : null;
+}
+
+function firstWords(text: string, count: number): string {
+  if (count <= 0) return '';
+  let seen = 0;
+  for (const match of text.matchAll(/\S+/g)) {
+    seen += 1;
+    if (seen === count) {
+      return text.slice(0, (match.index ?? 0) + match[0].length);
+    }
+  }
+  return text;
 }
 
 function buildSegments(
@@ -83,6 +98,7 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
   const { user } = useAuth();
   const rootRef = useRef<HTMLElement | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
   const location = useLocation();
 
   const annotationsQuery = useQuery({
@@ -96,6 +112,24 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
     return document.transcription.split(/\n{2,}/).join('');
   }, [document.transcription]);
 
+  const previewTranscription = useMemo(
+    () => firstWords(document.transcription, TRANSCRIPTION_PREVIEW_WORD_LIMIT),
+    [document.transcription],
+  );
+  const isLongTranscription =
+    document.transcription.length > LONG_TRANSCRIPTION_CHAR_LIMIT &&
+    previewTranscription.length < document.transcription.length;
+  const displayedTranscription =
+    isLongTranscription && !isExpanded ? previewTranscription : document.transcription;
+  const displayedText = useMemo(() => {
+    if (!displayedTranscription) return '';
+    return displayedTranscription.split(/\n{2,}/).join('');
+  }, [displayedTranscription]);
+
+  useEffect(() => {
+    setIsExpanded(false);
+  }, [document.id, document.transcription]);
+
   const located: LocatedAnnotation[] = useMemo(() => {
     const items = annotationsQuery.data?.items ?? [];
     return items.map((a) => ({
@@ -103,6 +137,12 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
       range: locateAnnotationRange(a.target.selector, fullText),
     }));
   }, [annotationsQuery.data, fullText]);
+
+  const visibleLocated = useMemo(
+    () =>
+      located.filter((a) => isExpanded || a.range === null || a.range.end <= displayedText.length),
+    [displayedText.length, isExpanded, located],
+  );
 
   const jumpToAnnotation = useCallback((id: string): void => {
     requestAnimationFrame(() => {
@@ -117,10 +157,10 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
 
   const validRanges = useMemo(
     () =>
-      located
+      visibleLocated
         .filter((a): a is LocatedAnnotation & { range: AnnotationRange } => a.range !== null)
         .map((a) => ({ id: a.id, range: a.range })),
-    [located],
+    [visibleLocated],
   );
 
   const createMut = useMutation({
@@ -181,7 +221,9 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
     jumpToAnnotation(id);
   }, [jumpToAnnotation, location.hash, annotationsQuery.data]);
 
-  const activeAnnotation = activeId ? (located.find((a) => a.id === activeId) ?? null) : null;
+  const activeAnnotation = activeId
+    ? (visibleLocated.find((a) => a.id === activeId) ?? null)
+    : null;
   const handleSelectAnnotation = useCallback((id: string) => {
     setActiveId((current) => (current === id ? null : id));
   }, []);
@@ -209,7 +251,7 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
     return (
       <div className="space-y-4">
         <AnnotationsSidePanel
-          annotations={located}
+          annotations={visibleLocated}
           activeId={activeId}
           onSelect={handleSelectAnnotation}
         />
@@ -234,8 +276,8 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
     handleJumpAnnotation,
     handlePatchAnnotation,
     handleSelectAnnotation,
-    located,
     patchMut.error,
+    visibleLocated,
   ]);
 
   useEffect(() => {
@@ -271,7 +313,7 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
     );
   }
 
-  const paragraphs = document.transcription.split(/\n{2,}/);
+  const paragraphs = displayedTranscription.split(/\n{2,}/);
   let cursor = 0;
   const renderedParagraphs = paragraphs.map((p, i) => {
     const paragraphStart = cursor;
@@ -315,6 +357,15 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
       >
         {renderedParagraphs}
       </article>
+      {isLongTranscription && !isExpanded && (
+        <button
+          type="button"
+          className="btn btn-primary mt-6"
+          onClick={() => setIsExpanded(true)}
+        >
+          Show more
+        </button>
+      )}
       {user && (
         <p id="annotation-help" className="mt-4 text-xs text-ink-700/60 dark:text-parchment-50/60">
           Select any passage to highlight or attach a note.
