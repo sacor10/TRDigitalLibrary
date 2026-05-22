@@ -207,6 +207,10 @@ function unique(values: string[]): string[] {
   return [...new Set(values.map((v) => v.trim()).filter(Boolean))];
 }
 
+function normalizeTag(value: string): string {
+  return value.replace(/\.+$/g, '').replace(/\s+/g, ' ').trim();
+}
+
 function stripHtml(value: string): string {
   return value
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
@@ -418,9 +422,7 @@ function extractTags(item: JsonObject): string[] {
     ...stringsAt(item, 'subject'),
     ...stringsAt(item, 'subject_headings'),
     ...stringsAt(nested, 'subjects'),
-    ...stringsAt(item, 'partof'),
-    ...stringsAt(item, 'original_format'),
-  ]).slice(0, 40);
+  ].map(normalizeTag)).slice(0, 40);
 }
 
 function extractProvenance(item: JsonObject): string {

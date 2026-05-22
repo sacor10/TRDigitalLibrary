@@ -22,6 +22,7 @@
     "ingest-loc": "npm run ingest-loc -w server --",
     "ingest-trc": "npm run ingest-trc -w server --",
     "ingest-tei": "npm run ingest-tei -w server --",
+    "repair-topic-tags": "npm run repair-topic-tags -w server --",
     "upload-library-to-turso": "npm run upload-library-to-turso -w server --",
     "sentiment": "node scripts/run-sentiment.mjs",
     "prelint": "node scripts/ensure-install.mjs",

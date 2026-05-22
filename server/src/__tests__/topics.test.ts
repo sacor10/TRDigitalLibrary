@@ -128,7 +128,7 @@ describe('Topics API', () => {
       expect(parsed.items[parsed.items.length - 1]!.size).toBe(1); // family
     });
 
-    it('falls back to global tags when every tag is corpus-wide', async () => {
+    it('hides corpus-wide tags instead of treating them as topics', async () => {
       const globalOnlyDb = await openInMemoryDatabase();
       try {
         await upsertDocument(
@@ -153,15 +153,14 @@ describe('Topics API', () => {
         const res = await request(globalOnlyApp).get('/api/topics');
         expect(res.status).toBe(200);
         const parsed = TopicsResponseSchema.parse(res.body);
-        expect(parsed.items).toEqual([{ id: 'same-topic', label: 'same-topic', size: 2 }]);
+        expect(parsed.items).toEqual([]);
 
         const detail = await request(globalOnlyApp).get('/api/topics/same-topic');
-        expect(detail.status).toBe(200);
-        expect(TopicDetailResponseSchema.parse(detail.body).topic.size).toBe(2);
+        expect(detail.status).toBe(404);
 
         const drift = await request(globalOnlyApp).get('/api/topics/drift');
         expect(drift.status).toBe(200);
-        expect(TopicDriftResponseSchema.parse(drift.body).points).toHaveLength(2);
+        expect(TopicDriftResponseSchema.parse(drift.body).points).toHaveLength(0);
       } finally {
         globalOnlyDb.close();
       }

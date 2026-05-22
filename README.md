@@ -98,9 +98,11 @@ source item; page-level text can be added later through `document_sections`.
 If `/topics` shows no topics in local dev, check whether `data/library.db`
 contains older fixture rows or rows ingested before tag metadata was added. Run
 `npm run ingest-loc -- --limit 25 --reset` to replace that local file with LoC
-rows whose tags can be aggregated into topics. `--force` re-fetches existing LoC
-items but does not overwrite rows written by the skip-if-exists path, so use
-`--reset` when repairing a stale local corpus.
+rows whose tags can be aggregated into topics, then run
+`npm run repair-topic-tags` to remove collection-wide LoC headings that would
+otherwise make every topic appear to contain the whole corpus. `--force`
+re-fetches existing LoC items but does not overwrite rows written by the
+skip-if-exists path, so use `--reset` when repairing a stale local corpus.
 
 ### Ingesting TEI documents
 

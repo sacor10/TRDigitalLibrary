@@ -30,22 +30,6 @@ const TAG_COUNTS_CTE = `
   )
 `;
 
-const VISIBLE_TOPICS_CTE = `
-  visible_topics AS (
-    SELECT tag, size
-      FROM tag_counts, tagged_documents
-     WHERE size < tagged_documents.total * ?
-    UNION ALL
-    SELECT tag, size
-      FROM tag_counts
-     WHERE NOT EXISTS (
-       SELECT 1
-         FROM tag_counts, tagged_documents
-        WHERE size < tagged_documents.total * ?
-     )
-  )
-`;
-
 function asString(v: unknown): string {
   return v == null ? '' : String(v);
 }
@@ -60,12 +44,12 @@ export function createTopicsRouter(db: LibsqlClient): Router {
   router.get('/', async (_req, res) => {
     const result = await db.execute({
       sql: `WITH ${TAGGED_DOCUMENTS_CTE},
-                 ${TAG_COUNTS_CTE},
-                 ${VISIBLE_TOPICS_CTE}
+                 ${TAG_COUNTS_CTE}
        SELECT tag, size
-         FROM visible_topics
+         FROM tag_counts, tagged_documents
+        WHERE size < tagged_documents.total * ?
         ORDER BY size DESC, tag ASC`,
-      args: [GLOBAL_TOPIC_THRESHOLD, GLOBAL_TOPIC_THRESHOLD],
+      args: [GLOBAL_TOPIC_THRESHOLD],
     });
     const items: Topic[] = result.rows.map((row) => {
       const tag = asString(row.tag);
@@ -86,7 +70,11 @@ export function createTopicsRouter(db: LibsqlClient): Router {
     const perTagResult = await db.execute({
       sql: `WITH ${TAGGED_DOCUMENTS_CTE},
                  ${TAG_COUNTS_CTE},
-                 ${VISIBLE_TOPICS_CTE}
+                 visible_topics AS (
+                   SELECT tag
+                     FROM tag_counts, tagged_documents
+                    WHERE size < tagged_documents.total * ?
+                 )
        SELECT je.value AS tag,
               substr(d.date, 1, 4) AS period,
               COUNT(DISTINCT d.id) AS document_count
@@ -95,7 +83,7 @@ export function createTopicsRouter(db: LibsqlClient): Router {
         WHERE d.date <> ''
         GROUP BY tag, period
         ORDER BY period ASC, tag ASC`,
-      args: [GLOBAL_TOPIC_THRESHOLD, GLOBAL_TOPIC_THRESHOLD],
+      args: [GLOBAL_TOPIC_THRESHOLD],
     });
 
     // Denominator for share: count each tagged document once per year, even
@@ -142,13 +130,12 @@ export function createTopicsRouter(db: LibsqlClient): Router {
 
     const topicResult = await db.execute({
       sql: `WITH ${TAGGED_DOCUMENTS_CTE},
-                 ${TAG_COUNTS_CTE},
-                 ${VISIBLE_TOPICS_CTE}
+                 ${TAG_COUNTS_CTE}
        SELECT size
-         FROM visible_topics
+         FROM tag_counts, tagged_documents
         WHERE tag = ?
-        LIMIT 1`,
-      args: [GLOBAL_TOPIC_THRESHOLD, GLOBAL_TOPIC_THRESHOLD, tag],
+          AND size < tagged_documents.total * ?`,
+      args: [tag, GLOBAL_TOPIC_THRESHOLD],
     });
     const size = asNumber(topicResult.rows[0]?.size);
     if (size === 0) {

@@ -10,6 +10,7 @@
     "ingest-loc": "tsx src/ingest-loc.ts",
     "ingest-trc": "tsx src/ingest-trc.ts",
     "ingest-tei": "tsx src/ingest-tei.ts",
+    "repair-topic-tags": "tsx src/repair-topic-tags.ts",
     "upload-library-to-turso": "tsx src/upload-to-turso.ts",
     "validate-tei": "tsx scripts/validate-tei.ts",
     "validate-epub": "tsx scripts/validate-epub.ts",

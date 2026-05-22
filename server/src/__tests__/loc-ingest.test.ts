@@ -166,6 +166,11 @@ describe('LoC ingestion', () => {
     expect(doc.sourceUrl).toBe(LOC_ITEM_URL);
     expect(doc.transcriptionUrl).toBe(LOC_TEXT_URL);
     expect(doc.tags).toContain('manuscripts');
+    expect(doc.tags).not.toContain('Conservationists.');
+    expect(doc.tags).not.toContain('count');
+    expect(doc.tags).not.toContain('title');
+    expect(doc.tags).not.toContain('url');
+    expect(doc.tags).not.toContain('manuscript/mixed material');
     expect(() => DocumentSchema.parse(doc)).not.toThrow();
   });
 
