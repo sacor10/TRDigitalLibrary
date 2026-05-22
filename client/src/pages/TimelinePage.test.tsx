@@ -87,6 +87,7 @@ describe('TimelinePage filters', () => {
         sort: 'date',
         order: 'asc',
         limit: 100,
+        offset: 0,
       });
     });
 
@@ -99,6 +100,7 @@ describe('TimelinePage filters', () => {
         sort: 'date',
         order: 'asc',
         limit: 100,
+        offset: 0,
       });
     });
 
@@ -111,6 +113,7 @@ describe('TimelinePage filters', () => {
         sort: 'date',
         order: 'asc',
         limit: 100,
+        offset: 0,
       });
     });
 
@@ -123,6 +126,7 @@ describe('TimelinePage filters', () => {
         sort: 'date',
         order: 'asc',
         limit: 100,
+        offset: 0,
       });
     });
   });
@@ -160,6 +164,32 @@ describe('TimelinePage filters', () => {
     });
     await waitFor(() => {
       expect(screen.getByText(/1 matching document/i)).toBeTruthy();
+    });
+  });
+
+  it('appends additional timeline pages with Load more', async () => {
+    const first = Array.from({ length: 100 }, (_, i) => makeDoc(`d-${i}`, '1910-01-01'));
+    const second = Array.from({ length: 20 }, (_, i) => makeDoc(`d-more-${i}`, '1910-02-01'));
+    fetchDocumentsMock
+      .mockResolvedValueOnce({ items: first, total: 120 })
+      .mockResolvedValueOnce({ items: second, total: 120 });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText(/120 matching documents; showing the first 100/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+
+    await waitFor(() => {
+      expect(fetchDocumentsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ limit: 100, offset: 100 }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/120 matching documents/i)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
     });
   });
 });

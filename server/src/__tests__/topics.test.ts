@@ -93,6 +93,9 @@ describe('Topics API', () => {
       const parsed = TopicDetailResponseSchema.parse(res.body);
       expect(parsed.topic.id).toBe('conservation');
       expect(parsed.topic.size).toBe(4);
+      expect(parsed.total).toBe(4);
+      expect(parsed.limit).toBe(25);
+      expect(parsed.offset).toBe(0);
       expect(parsed.members.length).toBe(4);
       const dates = parsed.members.map((m) => m.date);
       expect(dates).toEqual([...dates].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)));
@@ -105,7 +108,26 @@ describe('Topics API', () => {
     it('caps member count to the requested limit', async () => {
       const res = await request(app).get('/api/topics/conservation?limit=2');
       expect(res.status).toBe(200);
-      expect(res.body.members).toHaveLength(2);
+      const parsed = TopicDetailResponseSchema.parse(res.body);
+      expect(parsed.members).toHaveLength(2);
+      expect(parsed.total).toBe(4);
+      expect(parsed.limit).toBe(2);
+      expect(parsed.offset).toBe(0);
+    });
+
+    it('returns member pages from the requested offset', async () => {
+      const first = await request(app).get('/api/topics/conservation?limit=2&offset=0');
+      const second = await request(app).get('/api/topics/conservation?limit=2&offset=2');
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      const firstParsed = TopicDetailResponseSchema.parse(first.body);
+      const secondParsed = TopicDetailResponseSchema.parse(second.body);
+      expect(firstParsed.members).toHaveLength(2);
+      expect(secondParsed.members).toHaveLength(2);
+      expect(secondParsed.offset).toBe(2);
+      expect(secondParsed.members.map((m) => m.documentId)).not.toEqual(
+        firstParsed.members.map((m) => m.documentId),
+      );
     });
 
     it('returns 404 for an unknown tag', async () => {

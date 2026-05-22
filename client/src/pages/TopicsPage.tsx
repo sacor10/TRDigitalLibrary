@@ -1,14 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
-import type { TopicDriftPoint } from '@tr/shared';
-import { useMemo } from 'react';
+import type { TopicDriftPoint, TopicMember } from '@tr/shared';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { fetchTopic, fetchTopicDrift, fetchTopics } from '../api/client';
+import { LoadMore } from '../components/LoadMore';
 
 const SPARK_W = 96;
 const SPARK_H = 34;
 const CHART_W = 760;
 const CHART_H = 300;
+const TOPIC_PAGE_SIZE = 25;
 
 interface TopicTrendPoint {
   period: string;
@@ -424,9 +426,13 @@ function TopicsGrid() {
 }
 
 function TopicDetail({ id }: { id: string }) {
+  const [offset, setOffset] = useState(0);
+  const [members, setMembers] = useState<TopicMember[]>([]);
+  const [total, setTotal] = useState(0);
+  const appliedMembersRef = useRef('');
   const detailQuery = useQuery({
-    queryKey: ['topic', id],
-    queryFn: () => fetchTopic(id, 25),
+    queryKey: ['topic', id, offset],
+    queryFn: () => fetchTopic(id, { limit: TOPIC_PAGE_SIZE, offset }),
   });
   const driftQuery = useQuery({ queryKey: ['topics-drift'], queryFn: fetchTopicDrift });
 
@@ -434,6 +440,27 @@ function TopicDetail({ id }: { id: string }) {
     () => (driftQuery.data ? uniqueSortedPeriods(driftQuery.data.points) : []),
     [driftQuery.data],
   );
+
+  useEffect(() => {
+    setOffset(0);
+    setMembers([]);
+    setTotal(0);
+    appliedMembersRef.current = '';
+  }, [id]);
+
+  useEffect(() => {
+    const data = detailQuery.data;
+    if (!data) return;
+    const fingerprint = `${id}|${data.offset}|${data.total}|${data.members.length}`;
+    if (appliedMembersRef.current === fingerprint) return;
+    appliedMembersRef.current = fingerprint;
+    setTotal(data.total);
+    if (data.offset === 0) {
+      setMembers(data.members);
+    } else {
+      setMembers((current) => [...current, ...data.members]);
+    }
+  }, [detailQuery.data, id]);
 
   if (detailQuery.isLoading || driftQuery.isLoading) return <p>Loading&hellip;</p>;
   if (detailQuery.error) {
@@ -446,7 +473,7 @@ function TopicDetail({ id }: { id: string }) {
     return <p className="text-red-600 dark:text-red-400">{status}</p>;
   }
   if (!detailQuery.data) return null;
-  const { topic, members } = detailQuery.data;
+  const { topic } = detailQuery.data;
   const driftPoints = driftQuery.data
     ? trendPointsForTopic(driftQuery.data.points, topic.id, periods)
     : [];
@@ -457,7 +484,7 @@ function TopicDetail({ id }: { id: string }) {
         <div>
           <h1 className="text-2xl font-semibold sm:text-3xl">{topic.label}</h1>
           <p className="mt-1 text-ink-700/80 dark:text-parchment-100/80">
-            {topic.size} {topic.size === 1 ? 'document' : 'documents'}
+            {total} {total === 1 ? 'document' : 'documents'}
           </p>
         </div>
         <Link to="/topics" className="btn">
@@ -474,8 +501,11 @@ function TopicDetail({ id }: { id: string }) {
 
       <section>
         <h2 className="mb-3 text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
-          Documents (most recent {members.length})
+          Documents
         </h2>
+        <p className="mb-3 text-sm text-ink-700/80 dark:text-parchment-100/70">
+          Showing {members.length} of {total}
+        </p>
         {members.length === 0 ? (
           <p className="text-ink-700/70 dark:text-parchment-100/70">
             No documents are tagged with this topic.
@@ -497,6 +527,17 @@ function TopicDetail({ id }: { id: string }) {
             ))}
           </ul>
         )}
+        <LoadMore
+          itemsLength={members.length}
+          total={total}
+          pageSize={TOPIC_PAGE_SIZE}
+          onPageSizeChange={() => undefined}
+          onLoadMore={() => {
+            if (members.length < total && !detailQuery.isFetching) setOffset(members.length);
+          }}
+          isFetching={detailQuery.isFetching}
+          showPageSize={false}
+        />
       </section>
     </article>
   );

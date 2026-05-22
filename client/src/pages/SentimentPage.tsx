@@ -12,6 +12,7 @@ import {
 
 const CHART_W = 720;
 const CHART_H = 260;
+const EXTREMES_PAGE_SIZE = 5;
 
 interface SelectedSentimentPeriod {
   period: string;
@@ -247,6 +248,13 @@ export function SentimentPage() {
   const [to, setTo] = useState<string | null>(null);
   const [bin, setBin] = useState<SentimentBin>('month');
   const [selectedPeriod, setSelectedPeriod] = useState<SelectedSentimentPeriod | null>(null);
+  const [positiveOffset, setPositiveOffset] = useState(0);
+  const [negativeOffset, setNegativeOffset] = useState(0);
+  const [positiveItems, setPositiveItems] = useState<SentimentExtremeItem[]>([]);
+  const [negativeItems, setNegativeItems] = useState<SentimentExtremeItem[]>([]);
+  const [positiveTotal, setPositiveTotal] = useState(0);
+  const [negativeTotal, setNegativeTotal] = useState(0);
+  const appliedExtremesRef = useRef('');
   // Once the user touches a filter, never auto-seed again. Lets us land on a
   // populated chart by default without trapping the user inside it.
   const userTouchedDates = useRef(false);
@@ -270,8 +278,21 @@ export function SentimentPage() {
   const extremesFrom = selectedPeriod?.from ?? from;
   const extremesTo = selectedPeriod?.to ?? to;
   const extremesQuery = useQuery({
-    queryKey: ['sentiment-extremes', extremesFrom, extremesTo],
-    queryFn: () => fetchSentimentExtremes({ from: extremesFrom!, to: extremesTo!, limit: 5 }),
+    queryKey: [
+      'sentiment-extremes',
+      extremesFrom,
+      extremesTo,
+      positiveOffset,
+      negativeOffset,
+    ],
+    queryFn: () =>
+      fetchSentimentExtremes({
+        from: extremesFrom!,
+        to: extremesTo!,
+        limit: EXTREMES_PAGE_SIZE,
+        positiveOffset,
+        negativeOffset,
+      }),
     enabled: datesReady,
   });
 
@@ -285,7 +306,6 @@ export function SentimentPage() {
   const isLoading = rangeQuery.isLoading || (datesReady && timelineQuery.isLoading);
   const error = rangeQuery.error ?? timelineQuery.error ?? extremesQuery.error;
   const points = timelineQuery.data?.points ?? [];
-  const extremes = extremesQuery.data;
   const togglePeriod = (period: string) => {
     if (!from || !to) return;
     setSelectedPeriod((current) =>
@@ -294,6 +314,36 @@ export function SentimentPage() {
         : periodToDateRange(period, bin, from, to),
     );
   };
+
+  useEffect(() => {
+    setPositiveOffset(0);
+    setNegativeOffset(0);
+    setPositiveItems([]);
+    setNegativeItems([]);
+    setPositiveTotal(0);
+    setNegativeTotal(0);
+    appliedExtremesRef.current = '';
+  }, [extremesFrom, extremesTo]);
+
+  useEffect(() => {
+    const data = extremesQuery.data;
+    if (!data) return;
+    const fingerprint = `${extremesFrom}|${extremesTo}|${data.positiveOffset}|${data.negativeOffset}|${data.positiveTotal}|${data.negativeTotal}|${data.mostPositive.length}|${data.mostNegative.length}`;
+    if (appliedExtremesRef.current === fingerprint) return;
+    appliedExtremesRef.current = fingerprint;
+    setPositiveTotal(data.positiveTotal);
+    setNegativeTotal(data.negativeTotal);
+    if (data.positiveOffset === 0) {
+      setPositiveItems(data.mostPositive);
+    } else if (data.positiveOffset === positiveItems.length) {
+      setPositiveItems((current) => [...current, ...data.mostPositive]);
+    }
+    if (data.negativeOffset === 0) {
+      setNegativeItems(data.mostNegative);
+    } else if (data.negativeOffset === negativeItems.length) {
+      setNegativeItems((current) => [...current, ...data.mostNegative]);
+    }
+  }, [extremesFrom, extremesQuery.data, extremesTo, negativeItems.length, positiveItems.length]);
 
   return (
     <div>
@@ -421,18 +471,42 @@ export function SentimentPage() {
             </div>
           )}
 
-          {extremes && (extremes.mostPositive.length > 0 || extremes.mostNegative.length > 0) && (
+          {(positiveItems.length > 0 || negativeItems.length > 0) && (
             <div className="grid gap-8 md:grid-cols-2">
-              <ExtremeList
-                title="Most positive"
-                items={extremes.mostPositive}
-                emptyHint="No positive documents in this range."
-              />
-              <ExtremeList
-                title="Most negative"
-                items={extremes.mostNegative}
-                emptyHint="No negative documents in this range."
-              />
+              <div>
+                <ExtremeList
+                  title="Most positive"
+                  items={positiveItems}
+                  emptyHint="No positive documents in this range."
+                />
+                {positiveItems.length < positiveTotal && (
+                  <button
+                    type="button"
+                    className="btn mt-4"
+                    disabled={extremesQuery.isFetching}
+                    onClick={() => setPositiveOffset(positiveItems.length)}
+                  >
+                    {extremesQuery.isFetching ? 'Loading...' : 'Load more positive'}
+                  </button>
+                )}
+              </div>
+              <div>
+                <ExtremeList
+                  title="Most negative"
+                  items={negativeItems}
+                  emptyHint="No negative documents in this range."
+                />
+                {negativeItems.length < negativeTotal && (
+                  <button
+                    type="button"
+                    className="btn mt-4"
+                    disabled={extremesQuery.isFetching}
+                    onClick={() => setNegativeOffset(negativeItems.length)}
+                  >
+                    {extremesQuery.isFetching ? 'Loading...' : 'Load more negative'}
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </>

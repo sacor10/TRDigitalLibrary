@@ -150,8 +150,11 @@ export async function fetchTopics(): Promise<TopicsResponse> {
   return getJson('/api/topics', (raw) => TopicsResponseSchema.parse(raw));
 }
 
-export async function fetchTopic(id: string, limit?: number): Promise<TopicDetailResponse> {
-  const qs = buildQuery({ limit });
+export async function fetchTopic(
+  id: string,
+  query: { limit?: number; offset?: number } = {},
+): Promise<TopicDetailResponse> {
+  const qs = buildQuery({ limit: query.limit, offset: query.offset });
   return getJson(`/api/topics/${encodeURIComponent(id)}${qs}`, (raw) =>
     TopicDetailResponseSchema.parse(raw),
   );
@@ -180,8 +183,16 @@ export async function fetchSentimentExtremes(query: {
   from?: string;
   to?: string;
   limit?: number;
+  positiveOffset?: number;
+  negativeOffset?: number;
 }): Promise<SentimentExtremesResponse> {
-  const qs = buildQuery({ from: query.from, to: query.to, limit: query.limit });
+  const qs = buildQuery({
+    from: query.from,
+    to: query.to,
+    limit: query.limit,
+    positiveOffset: query.positiveOffset,
+    negativeOffset: query.negativeOffset,
+  });
   return getJson(`/api/sentiment/extremes${qs}`, (raw) =>
     SentimentExtremesResponseSchema.parse(raw),
   );

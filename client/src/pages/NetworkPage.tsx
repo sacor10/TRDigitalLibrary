@@ -2,8 +2,9 @@ import { useQuery } from '@tanstack/react-query';
 import type {
   CorrespondentDirection,
   CorrespondentGraphQuery,
+  CorrespondentItem,
 } from '@tr/shared';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { fetchCorrespondentGraph, fetchCorrespondentItems } from '../api/client';
@@ -44,6 +45,9 @@ function sourceRecordPath(documentId: string): string {
 export function NetworkPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [itemOffset, setItemOffset] = useState(0);
+  const [items, setItems] = useState<CorrespondentItem[]>([]);
+  const [itemsTotal, setItemsTotal] = useState(0);
+  const appliedItemsRef = useRef('');
   const [filters, setFilters] = useState<FilterState>({
     q: '',
     dateFrom: '',
@@ -72,6 +76,9 @@ export function NetworkPage() {
 
   useEffect(() => {
     setItemOffset(0);
+    setItems([]);
+    setItemsTotal(0);
+    appliedItemsRef.current = '';
   }, [selectedId, query]);
 
   const itemsQuery = useQuery({
@@ -86,6 +93,20 @@ export function NetworkPage() {
         offset: itemOffset,
       }),
   });
+
+  useEffect(() => {
+    const page = itemsQuery.data;
+    if (!page) return;
+    const fingerprint = `${selectedId}|${JSON.stringify(query)}|${page.offset}|${page.total}|${page.items.length}`;
+    if (appliedItemsRef.current === fingerprint) return;
+    appliedItemsRef.current = fingerprint;
+    setItemsTotal(page.total);
+    if (page.offset === 0) {
+      setItems(page.items);
+    } else {
+      setItems((current) => [...current, ...page.items]);
+    }
+  }, [itemsQuery.data, query, selectedId]);
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
@@ -263,15 +284,15 @@ export function NetworkPage() {
                             : 'Failed to load source records.'}
                         </p>
                       )}
-                      {itemsQuery.data && itemsQuery.data.items.length === 0 && (
+                      {itemsQuery.data && items.length === 0 && (
                         <p className="text-ink-700/70 dark:text-parchment-100/70">
                           No records match the active filters.
                         </p>
                       )}
-                      {itemsQuery.data && itemsQuery.data.items.length > 0 && (
+                      {itemsQuery.data && items.length > 0 && (
                         <>
                           <ul className="flex flex-col gap-3">
-                            {itemsQuery.data.items.map((item) => (
+                            {items.map((item) => (
                               <li key={item.id}>
                                 {item.documentId ? (
                                   <Link
@@ -304,27 +325,19 @@ export function NetworkPage() {
                           </ul>
 
                           <div className="mt-4 flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              className="btn"
-                              disabled={itemOffset === 0}
-                              onClick={() => setItemOffset((v) => Math.max(0, v - ITEM_PAGE_SIZE))}
-                            >
-                              Previous
-                            </button>
                             <span className="text-xs text-ink-700/70 dark:text-parchment-100/70">
-                              {itemOffset + 1}-
-                              {Math.min(itemOffset + ITEM_PAGE_SIZE, itemsQuery.data.total)} of{' '}
-                              {itemsQuery.data.total}
+                              Showing {items.length} of {itemsTotal}
                             </span>
-                            <button
-                              type="button"
-                              className="btn"
-                              disabled={itemOffset + ITEM_PAGE_SIZE >= itemsQuery.data.total}
-                              onClick={() => setItemOffset((v) => v + ITEM_PAGE_SIZE)}
-                            >
-                              Next
-                            </button>
+                            {items.length < itemsTotal && (
+                              <button
+                                type="button"
+                                className="btn"
+                                disabled={itemsQuery.isFetching}
+                                onClick={() => setItemOffset(items.length)}
+                              >
+                                {itemsQuery.isFetching ? 'Loading...' : 'Load more'}
+                              </button>
+                            )}
                           </div>
                         </>
                       )}

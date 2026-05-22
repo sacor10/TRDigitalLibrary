@@ -29,6 +29,16 @@ function renderPage() {
   );
 }
 
+function makeExtreme(id: string, polarity: number) {
+  return {
+    documentId: id,
+    title: `Document ${id}`,
+    date: '1912-06-18',
+    polarity,
+    label: polarity >= 0 ? 'positive' : 'negative',
+  };
+}
+
 describe('SentimentPage graph node filtering', () => {
   beforeEach(() => {
     fetchSentimentExtremesMock.mockReset();
@@ -52,6 +62,11 @@ describe('SentimentPage graph node filtering', () => {
     fetchSentimentExtremesMock.mockResolvedValue({
       from: '1912-01-15',
       to: '1912-12-10',
+      positiveTotal: 1,
+      negativeTotal: 0,
+      limit: 5,
+      positiveOffset: 0,
+      negativeOffset: 0,
       mostPositive: [
         {
           documentId: 'doc-1912-jun',
@@ -79,6 +94,8 @@ describe('SentimentPage graph node filtering', () => {
         from: '1912-01-15',
         to: '1912-12-10',
         limit: 5,
+        positiveOffset: 0,
+        negativeOffset: 0,
       });
     });
 
@@ -89,6 +106,8 @@ describe('SentimentPage graph node filtering', () => {
         from: '1912-06-01',
         to: '1912-06-30',
         limit: 5,
+        positiveOffset: 0,
+        negativeOffset: 0,
       });
     });
     expect(screen.getByText(/showing documents for 1912-06/i)).toBeTruthy();
@@ -100,6 +119,8 @@ describe('SentimentPage graph node filtering', () => {
         from: '1912-01-15',
         to: '1912-12-10',
         limit: 5,
+        positiveOffset: 0,
+        negativeOffset: 0,
       });
     });
   });
@@ -115,6 +136,8 @@ describe('SentimentPage graph node filtering', () => {
         from: '1912-01-15',
         to: '1912-01-31',
         limit: 5,
+        positiveOffset: 0,
+        negativeOffset: 0,
       });
     });
 
@@ -125,8 +148,67 @@ describe('SentimentPage graph node filtering', () => {
         from: '1912-02-01',
         to: '1912-12-10',
         limit: 5,
+        positiveOffset: 0,
+        negativeOffset: 0,
       });
     });
     expect(screen.queryByText(/showing documents for 1912-01/i)).toBeNull();
+  });
+
+  it('loads more positive and negative extremes independently', async () => {
+    fetchSentimentExtremesMock
+      .mockResolvedValueOnce({
+        from: '1912-01-15',
+        to: '1912-12-10',
+        positiveTotal: 6,
+        negativeTotal: 6,
+        limit: 5,
+        positiveOffset: 0,
+        negativeOffset: 0,
+        mostPositive: Array.from({ length: 5 }, (_, i) => makeExtreme(`pos-${i}`, 0.7 - i / 10)),
+        mostNegative: Array.from({ length: 5 }, (_, i) => makeExtreme(`neg-${i}`, -0.7 + i / 10)),
+      })
+      .mockResolvedValueOnce({
+        from: '1912-01-15',
+        to: '1912-12-10',
+        positiveTotal: 6,
+        negativeTotal: 6,
+        limit: 5,
+        positiveOffset: 5,
+        negativeOffset: 0,
+        mostPositive: [makeExtreme('pos-5', 0.1)],
+        mostNegative: Array.from({ length: 5 }, (_, i) => makeExtreme(`neg-${i}`, -0.7 + i / 10)),
+      })
+      .mockResolvedValueOnce({
+        from: '1912-01-15',
+        to: '1912-12-10',
+        positiveTotal: 6,
+        negativeTotal: 6,
+        limit: 5,
+        positiveOffset: 5,
+        negativeOffset: 5,
+        mostPositive: [makeExtreme('pos-5', 0.1)],
+        mostNegative: [makeExtreme('neg-5', -0.1)],
+      });
+
+    renderPage();
+
+    await screen.findByRole('button', { name: /load more positive/i });
+    fireEvent.click(screen.getByRole('button', { name: /load more positive/i }));
+
+    await waitFor(() => {
+      expect(fetchSentimentExtremesMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ positiveOffset: 5, negativeOffset: 0 }),
+      );
+    });
+    expect(await screen.findByText('Document pos-5')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /load more negative/i }));
+    await waitFor(() => {
+      expect(fetchSentimentExtremesMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ positiveOffset: 5, negativeOffset: 5 }),
+      );
+    });
+    expect(await screen.findByText('Document neg-5')).toBeTruthy();
   });
 });

@@ -1,14 +1,16 @@
 import { useQuery } from '@tanstack/react-query';
 import { DocumentTypeSchema, type Document, type DocumentType } from '@tr/shared';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchDocuments, fetchTopics, searchDocuments } from '../api/client';
+import { LoadMore } from '../components/LoadMore';
 import { Timeline } from '../components/Timeline';
 
 const TYPES: DocumentType[] = DocumentTypeSchema.options;
 
 const DEFAULT_DATE_FROM = '1897-01-01';
 const DEFAULT_DATE_TO = '1919-12-31';
+const TIMELINE_PAGE_SIZE = 100;
 
 interface TimelineDocuments {
   items: Document[];
@@ -24,6 +26,10 @@ export function TimelinePage() {
   const [tag, setTag] = useState('');
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [view, setView] = useState<{ from: string; to: string } | null>(null);
+  const [timelineOffset, setTimelineOffset] = useState(0);
+  const [timelineItems, setTimelineItems] = useState<Document[]>([]);
+  const [timelineTotal, setTimelineTotal] = useState(0);
+  const appliedPageRef = useRef('');
 
   const filters = useMemo(
     () => ({
@@ -37,18 +43,24 @@ export function TimelinePage() {
   );
 
   const timelineQuery = useQuery<TimelineDocuments>({
-    queryKey: ['documents', 'timeline', dateFrom, dateTo, keyword, type, recipient, tag],
+    queryKey: ['documents', 'timeline', dateFrom, dateTo, keyword, type, recipient, tag, timelineOffset],
     queryFn: async () => {
       const q = keyword.trim();
       if (q) {
-        const result = await searchDocuments({ q, ...filters, limit: 100, offset: 0 });
+        const result = await searchDocuments({
+          q,
+          ...filters,
+          limit: TIMELINE_PAGE_SIZE,
+          offset: timelineOffset,
+        });
         return { items: result.results.map((r) => r.document), total: result.total };
       }
       return fetchDocuments({
         ...filters,
         sort: 'date',
         order: 'asc',
-        limit: 100,
+        limit: TIMELINE_PAGE_SIZE,
+        offset: timelineOffset,
       });
     },
   });
@@ -58,6 +70,7 @@ export function TimelinePage() {
   const data = timelineQuery.data;
   const isLoading = timelineQuery.isLoading;
   const error = timelineQuery.error;
+  const hasMore = timelineItems.length < timelineTotal;
 
   const clearSelection = (): void => {
     setSelectedDocumentId(null);
@@ -73,6 +86,26 @@ export function TimelinePage() {
     setTag('');
     clearSelection();
   };
+
+  useEffect(() => {
+    setTimelineOffset(0);
+    setTimelineItems([]);
+    setTimelineTotal(0);
+    appliedPageRef.current = '';
+  }, [dateFrom, dateTo, keyword, type, recipient, tag]);
+
+  useEffect(() => {
+    if (!data) return;
+    const fingerprint = `${dateFrom}|${dateTo}|${keyword}|${type}|${recipient}|${tag}|${timelineOffset}|${data.total}|${data.items.length}`;
+    if (appliedPageRef.current === fingerprint) return;
+    appliedPageRef.current = fingerprint;
+    setTimelineTotal(data.total);
+    if (timelineOffset === 0) {
+      setTimelineItems(data.items);
+    } else {
+      setTimelineItems((current) => [...current, ...data.items]);
+    }
+  }, [data, dateFrom, dateTo, keyword, recipient, tag, timelineOffset, type]);
 
   return (
     <div>
@@ -206,24 +239,37 @@ export function TimelinePage() {
       )}
       {data && (
         <p className="mb-3 text-sm text-ink-700/80 dark:text-parchment-100/70">
-          {data.total} matching document{data.total === 1 ? '' : 's'}
-          {data.total > data.items.length ? `; showing the first ${data.items.length}` : ''}
+          {timelineTotal} matching document{timelineTotal === 1 ? '' : 's'}
+          {timelineTotal > timelineItems.length ? `; showing the first ${timelineItems.length}` : ''}
         </p>
       )}
       {data && (
-        <Timeline
-          documents={data.items}
-          dateFrom={view?.from}
-          dateTo={view?.to}
-          selectedDocumentId={selectedDocumentId}
-          onDateRangeChange={(range) => {
-            setView({ from: range.dateFrom, to: range.dateTo });
-            setSelectedDocumentId(range.selectedDocumentId);
-          }}
-          onViewRangeChange={(range) => {
-            setView({ from: range.dateFrom, to: range.dateTo });
-          }}
-        />
+        <>
+          <Timeline
+            documents={timelineItems}
+            dateFrom={view?.from}
+            dateTo={view?.to}
+            selectedDocumentId={selectedDocumentId}
+            onDateRangeChange={(range) => {
+              setView({ from: range.dateFrom, to: range.dateTo });
+              setSelectedDocumentId(range.selectedDocumentId);
+            }}
+            onViewRangeChange={(range) => {
+              setView({ from: range.dateFrom, to: range.dateTo });
+            }}
+          />
+          <LoadMore
+            itemsLength={timelineItems.length}
+            total={timelineTotal}
+            pageSize={TIMELINE_PAGE_SIZE}
+            onPageSizeChange={() => undefined}
+            onLoadMore={() => {
+              if (hasMore && !timelineQuery.isFetching) setTimelineOffset(timelineItems.length);
+            }}
+            isFetching={timelineQuery.isFetching}
+            showPageSize={false}
+          />
+        </>
       )}
     </div>
   );

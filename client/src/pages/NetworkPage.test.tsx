@@ -102,6 +102,15 @@ const itemsResponse: CorrespondentItemsResponse = {
   ],
 };
 
+function makeItem(id: string): CorrespondentItemsResponse['items'][number] {
+  return {
+    ...itemsResponse.items[0]!,
+    id,
+    documentId: `loc-${id}`,
+    title: `Letter ${id}`,
+  };
+}
+
 function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -173,5 +182,37 @@ describe('NetworkPage', () => {
     expect(
       screen.queryByRole('link', { name: 'Letter from Frank T. Winslow to Theodore Roosevelt' }),
     ).toBeNull();
+  });
+
+  it('appends selected correspondent records with Load more', async () => {
+    fetchItemsMock
+      .mockResolvedValueOnce({
+        total: 26,
+        limit: 25,
+        offset: 0,
+        items: Array.from({ length: 25 }, (_, i) => makeItem(`page-1-${i}`)),
+      })
+      .mockResolvedValueOnce({
+        total: 26,
+        limit: 25,
+        offset: 25,
+        items: [makeItem('page-2-0')],
+      });
+
+    renderPage();
+    await screen.findByText('2 source items');
+    fireEvent.click(screen.getByRole('button', { name: 'Winslow, F T' }));
+
+    await screen.findByText('Showing 25 of 26');
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+
+    await waitFor(() => {
+      expect(fetchItemsMock).toHaveBeenLastCalledWith(
+        'winslow-f-t',
+        expect.objectContaining({ limit: 25, offset: 25 }),
+      );
+    });
+    expect(await screen.findByText('Showing 26 of 26')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
   });
 });

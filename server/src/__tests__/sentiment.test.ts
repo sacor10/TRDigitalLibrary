@@ -167,6 +167,26 @@ describe('Sentiment API', () => {
       const parsed = SentimentExtremesResponseSchema.parse(res.body);
       expect(parsed.mostPositive.map((d) => d.documentId)).toEqual(['doc-1912-jun', 'doc-1912-jan']);
       expect(parsed.mostNegative.map((d) => d.documentId)).toEqual(['doc-1912-oct', 'doc-1912-aug']);
+      expect(parsed.positiveTotal).toBe(4);
+      expect(parsed.negativeTotal).toBe(4);
+      expect(parsed.limit).toBe(2);
+      expect(parsed.positiveOffset).toBe(0);
+      expect(parsed.negativeOffset).toBe(0);
+    });
+
+    it('honors independent positive and negative offsets', async () => {
+      const res = await request(app).get(
+        '/api/sentiment/extremes?from=1912-01-01&to=1912-12-31&limit=1&positiveOffset=1&negativeOffset=1',
+      );
+      expect(res.status).toBe(200);
+      const parsed = SentimentExtremesResponseSchema.parse(res.body);
+      expect(parsed.mostPositive.map((d) => d.documentId)).toEqual(['doc-1912-jan']);
+      expect(parsed.mostNegative.map((d) => d.documentId)).toEqual(['doc-1912-aug']);
+      expect(parsed.positiveTotal).toBe(4);
+      expect(parsed.negativeTotal).toBe(4);
+      expect(parsed.limit).toBe(1);
+      expect(parsed.positiveOffset).toBe(1);
+      expect(parsed.negativeOffset).toBe(1);
     });
   });
 

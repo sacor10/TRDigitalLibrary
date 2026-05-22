@@ -39,6 +39,9 @@ export type TopicsResponse = z.infer<typeof TopicsResponseSchema>;
 export const TopicDetailResponseSchema = z.object({
   topic: TopicSchema,
   members: z.array(TopicMemberSchema),
+  total: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
 });
 
 export type TopicDetailResponse = z.infer<typeof TopicDetailResponseSchema>;

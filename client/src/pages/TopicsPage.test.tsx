@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -34,6 +34,9 @@ function renderPage(initialPath = '/topics') {
 function mockTopicDetail(id = 'Governors--New York (State)') {
   fetchTopicMock.mockResolvedValue({
     topic: { id, label: id, size: 12 },
+    total: 12,
+    limit: 25,
+    offset: 0,
     members: [
       {
         documentId: 'doc-1',
@@ -42,6 +45,14 @@ function mockTopicDetail(id = 'Governors--New York (State)') {
       },
     ],
   });
+}
+
+function makeMember(i: number) {
+  return {
+    documentId: `doc-${i}`,
+    title: `Topic document ${i}`,
+    date: '1903-01-01',
+  };
 }
 
 describe('TopicsPage', () => {
@@ -160,5 +171,41 @@ describe('TopicsPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/No topics yet/i)).toBeTruthy();
     });
+  });
+
+  it('appends topic members with Load more', async () => {
+    fetchTopicMock
+      .mockResolvedValueOnce({
+        topic: { id: 'progressive', label: 'progressive', size: 26 },
+        total: 26,
+        limit: 25,
+        offset: 0,
+        members: Array.from({ length: 25 }, (_, i) => makeMember(i)),
+      })
+      .mockResolvedValueOnce({
+        topic: { id: 'progressive', label: 'progressive', size: 26 },
+        total: 26,
+        limit: 25,
+        offset: 25,
+        members: [makeMember(25)],
+      });
+    fetchTopicDriftMock.mockResolvedValue({
+      points: [{ topicId: 'progressive', period: '1900', documentCount: 26, share: 1 }],
+    });
+
+    renderPage('/topics/progressive');
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Showing 25 of 26/i).length).toBeGreaterThan(0);
+    });
+    fireEvent.click(screen.getByRole('button', { name: /load more/i }));
+
+    await waitFor(() => {
+      expect(fetchTopicMock).toHaveBeenLastCalledWith('progressive', { limit: 25, offset: 25 });
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText(/Showing 26 of 26/i).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
   });
 });

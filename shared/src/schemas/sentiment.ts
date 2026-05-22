@@ -56,6 +56,11 @@ export const SentimentExtremesResponseSchema = z.object({
   to: isoDate.optional(),
   mostPositive: z.array(SentimentExtremeItemSchema),
   mostNegative: z.array(SentimentExtremeItemSchema),
+  positiveTotal: z.number().int().nonnegative(),
+  negativeTotal: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  positiveOffset: z.number().int().nonnegative(),
+  negativeOffset: z.number().int().nonnegative(),
 });
 
 export type SentimentExtremesResponse = z.infer<typeof SentimentExtremesResponseSchema>;

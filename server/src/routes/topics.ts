@@ -96,6 +96,9 @@ export function createTopicsRouter(db: LibsqlClient): Router {
     const limitRaw =
       typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : DEFAULT_LIMIT;
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, MAX_LIMIT) : DEFAULT_LIMIT;
+    const offsetRaw =
+      typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : 0;
+    const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
 
     const sizeResult = await db.execute({
       sql: `SELECT COUNT(*) AS size
@@ -110,11 +113,11 @@ export function createTopicsRouter(db: LibsqlClient): Router {
 
     const memberResult = await db.execute({
       sql: `SELECT id AS document_id, title, date
-              FROM documents d
+             FROM documents d
              WHERE EXISTS (SELECT 1 FROM json_each(d.tags) WHERE value = ?)
              ORDER BY date DESC, id ASC
-             LIMIT ?`,
-      args: [tag, limit],
+             LIMIT ? OFFSET ?`,
+      args: [tag, limit, offset],
     });
     const members: TopicMember[] = memberResult.rows.map((m) => ({
       documentId: asString(m.document_id),
@@ -125,6 +128,9 @@ export function createTopicsRouter(db: LibsqlClient): Router {
     const payload: TopicDetailResponse = {
       topic: { id: tag, label: tag, size },
       members,
+      total: size,
+      limit,
+      offset,
     };
     return res.json(payload);
   });

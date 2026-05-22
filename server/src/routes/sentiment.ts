@@ -135,6 +135,18 @@ export function createSentimentRouter(db: LibsqlClient): Router {
     const limitRaw =
       typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : DEFAULT_LIMIT;
     const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, MAX_LIMIT) : DEFAULT_LIMIT;
+    const positiveOffsetRaw =
+      typeof req.query.positiveOffset === 'string'
+        ? Number.parseInt(req.query.positiveOffset, 10)
+        : 0;
+    const negativeOffsetRaw =
+      typeof req.query.negativeOffset === 'string'
+        ? Number.parseInt(req.query.negativeOffset, 10)
+        : 0;
+    const positiveOffset =
+      Number.isFinite(positiveOffsetRaw) && positiveOffsetRaw >= 0 ? positiveOffsetRaw : 0;
+    const negativeOffset =
+      Number.isFinite(negativeOffsetRaw) && negativeOffsetRaw >= 0 ? negativeOffsetRaw : 0;
 
     const params: (string | number)[] = [];
     const where: string[] = [];
@@ -159,12 +171,19 @@ export function createSentimentRouter(db: LibsqlClient): Router {
         ${whereSql}
     `;
     const positiveResult = await db.execute({
-      sql: `${select} ORDER BY s.polarity DESC, s.document_id ASC LIMIT ?`,
-      args: [...params, limit],
+      sql: `${select} ORDER BY s.polarity DESC, s.document_id ASC LIMIT ? OFFSET ?`,
+      args: [...params, limit, positiveOffset],
     });
     const negativeResult = await db.execute({
-      sql: `${select} ORDER BY s.polarity ASC, s.document_id ASC LIMIT ?`,
-      args: [...params, limit],
+      sql: `${select} ORDER BY s.polarity ASC, s.document_id ASC LIMIT ? OFFSET ?`,
+      args: [...params, limit, negativeOffset],
+    });
+    const totalResult = await db.execute({
+      sql: `SELECT COUNT(*) AS total
+              FROM document_sentiment s
+              JOIN documents d ON d.id = s.document_id
+              ${whereSql}`,
+      args: params,
     });
 
     const toRow = (r: Row): ExtremeRow => ({
@@ -189,6 +208,11 @@ export function createSentimentRouter(db: LibsqlClient): Router {
       to,
       mostPositive: positiveRows.map(toItem),
       mostNegative: negativeRows.map(toItem),
+      positiveTotal: asNumber(totalResult.rows[0]?.total),
+      negativeTotal: asNumber(totalResult.rows[0]?.total),
+      limit,
+      positiveOffset,
+      negativeOffset,
     };
     return res.json(payload);
   });

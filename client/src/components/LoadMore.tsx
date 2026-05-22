@@ -7,6 +7,7 @@ export interface LoadMoreProps {
   onPageSizeChange: (n: number) => void;
   onLoadMore: () => void;
   isFetching: boolean;
+  showPageSize?: boolean;
 }
 
 export function LoadMore({
@@ -16,6 +17,7 @@ export function LoadMore({
   onPageSizeChange,
   onLoadMore,
   isFetching,
+  showPageSize = true,
 }: LoadMoreProps) {
   if (total === 0) return null;
   const hasMore = itemsLength < total;
@@ -25,21 +27,23 @@ export function LoadMore({
         Showing {itemsLength} of {total}
       </p>
       <div className="flex items-center gap-3">
-        <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
-          Per page
-          <select
-            className="input"
-            value={pageSize}
-            onChange={(e) => onPageSizeChange(Number(e.target.value))}
-            aria-label="Items per page"
-          >
-            {PAGE_SIZE_OPTIONS.map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-        </label>
+        {showPageSize && (
+          <label className="flex items-center gap-2 text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
+            Per page
+            <select
+              className="input"
+              value={pageSize}
+              onChange={(e) => onPageSizeChange(Number(e.target.value))}
+              aria-label="Items per page"
+            >
+              {PAGE_SIZE_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {hasMore && (
           <button
             type="button"
