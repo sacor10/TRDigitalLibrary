@@ -327,7 +327,7 @@ export function buildOpenApiDocument(): object {
   registry.registerPath({
     method: 'get',
     path: '/api/topics',
-    summary: 'List tag-based topics aggregated from the documents.tags column, ordered by document count.',
+    summary: 'List tag-based topics from indexed document topic assignments, ordered by document count.',
     responses: {
       200: {
         description: 'Topics with id (= tag value), label, and document counts.',

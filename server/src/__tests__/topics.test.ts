@@ -238,6 +238,47 @@ describe('Topics API', () => {
       expect(res.body.topic.id).toBe('Politics and government');
       expect(res.body.topic.size).toBe(1);
     });
+
+    it('keeps indexed topic assignments in sync when tags and dates change', async () => {
+      const syncDb = await openInMemoryDatabase();
+      try {
+        for (const fixture of [
+          { id: 'sync-a', date: '1901-01-01', title: 'Sync A', tags: ['alpha'] },
+          { id: 'sync-b', date: '1901-01-02', title: 'Sync B', tags: ['beta'] },
+          { id: 'sync-c', date: '1901-01-03', title: 'Sync C', tags: ['gamma'] },
+          { id: 'sync-d', date: '1901-01-04', title: 'Sync D', tags: ['delta'] },
+        ]) {
+          await upsertDocument(syncDb, baseDoc(fixture));
+        }
+        const syncApp = createApp(syncDb);
+
+        await syncDb.execute({
+          sql: `UPDATE documents
+                   SET tags = ?,
+                       date = ?
+                 WHERE id = ?`,
+          args: [JSON.stringify(['beta', 'beta', 'gamma']), '1902-02-02', 'sync-a'],
+        });
+
+        const oldTopic = await request(syncApp).get('/api/topics/alpha');
+        expect(oldTopic.status).toBe(404);
+
+        const beta = await request(syncApp).get('/api/topics/beta');
+        expect(beta.status).toBe(200);
+        const parsedBeta = TopicDetailResponseSchema.parse(beta.body);
+        expect(parsedBeta.topic.size).toBe(2);
+        expect(parsedBeta.members[0]?.documentId).toBe('sync-a');
+        expect(parsedBeta.members[0]?.date).toBe('1902-02-02');
+
+        const drift = await request(syncApp).get('/api/topics/drift');
+        const points = TopicDriftResponseSchema.parse(drift.body).points;
+        expect(
+          points.find((p) => p.topicId === 'beta' && p.period === '1902')?.documentCount,
+        ).toBe(1);
+      } finally {
+        syncDb.close();
+      }
+    });
   });
 
   describe('GET /api/topics/drift', () => {

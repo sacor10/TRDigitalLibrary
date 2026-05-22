@@ -16,17 +16,17 @@ const GLOBAL_TOPIC_THRESHOLD = 0.95;
 
 const TAGGED_DOCUMENTS_CTE = `
   tagged_documents AS (
-    SELECT COUNT(DISTINCT d.id) AS total
-      FROM documents d, json_each(d.tags) je
+    SELECT COUNT(DISTINCT document_id) AS total
+      FROM document_topic_assignments
   )
 `;
 
 const TAG_COUNTS_CTE = `
   tag_counts AS (
-    SELECT je.value AS tag,
-           COUNT(DISTINCT d.id) AS size
-      FROM documents d, json_each(d.tags) je
-     GROUP BY je.value
+    SELECT topic AS tag,
+           COUNT(*) AS size
+      FROM document_topic_assignments
+     GROUP BY topic
   )
 `;
 
@@ -75,24 +75,24 @@ export function createTopicsRouter(db: LibsqlClient): Router {
                      FROM tag_counts, tagged_documents
                     WHERE size < tagged_documents.total * ?
                  )
-       SELECT je.value AS tag,
-              substr(d.date, 1, 4) AS period,
-              COUNT(DISTINCT d.id) AS document_count
-         FROM documents d, json_each(d.tags) je
-         JOIN visible_topics vt ON vt.tag = je.value
-        WHERE d.date <> ''
-        GROUP BY tag, period
-        ORDER BY period ASC, tag ASC`,
+       SELECT dta.topic AS tag,
+              dta.period AS period,
+              COUNT(*) AS document_count
+         FROM document_topic_assignments dta
+         JOIN visible_topics vt ON vt.tag = dta.topic
+        WHERE dta.period <> ''
+        GROUP BY dta.topic, dta.period
+        ORDER BY dta.period ASC, dta.topic ASC`,
       args: [GLOBAL_TOPIC_THRESHOLD],
     });
 
     // Denominator for share: count each tagged document once per year, even
-    // when it has multiple visible topics.
+    // when it has multiple topics.
     const totalsResult = await db.execute(
-      `SELECT substr(d.date, 1, 4) AS period,
-              COUNT(DISTINCT d.id) AS total
-         FROM documents d, json_each(d.tags) je
-        WHERE d.date <> ''
+      `SELECT period,
+              COUNT(DISTINCT document_id) AS total
+         FROM document_topic_assignments
+        WHERE period <> ''
         GROUP BY period`,
     );
     const totalsByPeriod = new Map<string, number>();
@@ -145,7 +145,8 @@ export function createTopicsRouter(db: LibsqlClient): Router {
     const memberResult = await db.execute({
       sql: `SELECT id AS document_id, title, date
              FROM documents d
-             WHERE EXISTS (SELECT 1 FROM json_each(d.tags) WHERE value = ?)
+             JOIN document_topic_assignments dta ON dta.document_id = d.id
+            WHERE dta.topic = ?
              ORDER BY date DESC, id ASC
              LIMIT ? OFFSET ?`,
       args: [tag, limit, offset],
