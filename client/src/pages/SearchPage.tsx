@@ -4,7 +4,7 @@ import { DocumentTypeSchema, type DocumentType, type SearchResult } from '@tr/sh
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-import { searchDocuments } from '../api/client';
+import { fetchDocuments, searchDocuments } from '../api/client';
 import { LoadMore } from '../components/LoadMore';
 import { SearchBar } from '../components/SearchBar';
 import { SearchResults } from '../components/SearchResults';
@@ -41,8 +41,11 @@ export function SearchPage() {
     });
   };
 
-  const enabled = q.trim().length > 0;
-  const filters: SearchFilters = { q, type, recipient, dateFrom, dateTo };
+  const trimmedQ = q.trim();
+  const trimmedRecipient = recipient.trim();
+  const enabled =
+    trimmedQ.length > 0 || type !== '' || trimmedRecipient.length > 0 || dateFrom !== '' || dateTo !== '';
+  const filters: SearchFilters = { q: trimmedQ, type, recipient: trimmedRecipient, dateFrom, dateTo };
 
   const {
     items,
@@ -57,16 +60,28 @@ export function SearchPage() {
     baseKey: 'search',
     filters,
     enabled,
-    fetcher: (f, limit, offset) =>
-      searchDocuments({
-        q: f.q,
+    fetcher: (f, limit, offset) => {
+      const commonFilters = {
         ...(f.type ? { type: f.type } : {}),
         ...(f.recipient ? { recipient: f.recipient } : {}),
         ...(f.dateFrom ? { dateFrom: f.dateFrom } : {}),
         ...(f.dateTo ? { dateTo: f.dateTo } : {}),
         limit,
         offset,
-      }).then((res) => ({ items: res.results, total: res.total })),
+      };
+
+      if (f.q) {
+        return searchDocuments({
+          q: f.q,
+          ...commonFilters,
+        }).then((res) => ({ items: res.results, total: res.total }));
+      }
+
+      return fetchDocuments(commonFilters).then((res) => ({
+        items: res.items.map((document) => ({ document, snippet: '' })),
+        total: res.total,
+      }));
+    },
   });
 
   return (
@@ -136,7 +151,8 @@ export function SearchPage() {
 
       {!enabled && (
         <p className="text-ink-700 dark:text-parchment-100">
-          Type a query to search — try <em>arena</em>, <em>conservation</em>, or <em>strenuous</em>.
+          Type a query or add a filter to search — try <em>arena</em>, <em>conservation</em>, or{' '}
+          <em>strenuous</em>.
         </p>
       )}
       {enabled && isLoading && items.length === 0 && <p>Searching…</p>}

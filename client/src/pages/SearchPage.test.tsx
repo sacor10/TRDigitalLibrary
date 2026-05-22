@@ -6,9 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SearchPage } from './SearchPage';
 
-const { searchDocumentsMock } = vi.hoisted(() => ({ searchDocumentsMock: vi.fn() }));
+const { fetchDocumentsMock, searchDocumentsMock } = vi.hoisted(() => ({
+  fetchDocumentsMock: vi.fn(),
+  searchDocumentsMock: vi.fn(),
+}));
 
 vi.mock('../api/client', () => ({
+  fetchDocuments: fetchDocumentsMock,
   searchDocuments: searchDocumentsMock,
 }));
 
@@ -48,10 +52,12 @@ function renderPage(initialPath = '/search?q=arena') {
 
 describe('SearchPage lazy pagination', () => {
   beforeEach(() => {
+    fetchDocumentsMock.mockReset();
     searchDocumentsMock.mockReset();
   });
 
   afterEach(() => {
+    fetchDocumentsMock.mockReset();
     searchDocumentsMock.mockReset();
   });
 
@@ -119,5 +125,30 @@ describe('SearchPage lazy pagination', () => {
     );
     expect(searchDocumentsMock).toHaveBeenCalledTimes(1);
     expect(searchDocumentsMock.mock.calls[0]![0].q).toBe('arena');
+  });
+
+  it('searches by recipient without requiring a full-text query', async () => {
+    fetchDocumentsMock.mockResolvedValue({
+      items: [{ ...makeDoc('lodge-letter'), recipient: 'Henry Cabot Lodge' }],
+      total: 1,
+    });
+
+    renderPage('/search');
+    expect(fetchDocumentsMock).not.toHaveBeenCalled();
+    expect(searchDocumentsMock).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText(/recipient contains/i), {
+      target: { value: ' Lodge ' },
+    });
+
+    await waitFor(() => {
+      expect(fetchDocumentsMock).toHaveBeenCalledWith({
+        recipient: 'Lodge',
+        limit: 10,
+        offset: 0,
+      });
+    });
+    expect(searchDocumentsMock).not.toHaveBeenCalled();
+    expect(await screen.findByText('Doc lodge-letter')).toBeTruthy();
   });
 });

@@ -118,8 +118,10 @@ describe('BrowsePage lazy pagination', () => {
     renderPage();
 
     const typeSelect = await screen.findByRole('combobox', { name: /type/i });
+    await waitFor(() => {
+      expect(screen.getByText(/only manuscript documents are currently available/i)).toBeTruthy();
+    });
     expect((typeSelect as HTMLSelectElement).disabled).toBe(true);
-    expect(screen.getByText(/only manuscript documents are currently available/i)).toBeTruthy();
   });
 
   it('enables the type filter when multiple types are available and fetches by selected type', async () => {
@@ -138,7 +140,9 @@ describe('BrowsePage lazy pagination', () => {
     renderPage();
 
     const typeSelect = await screen.findByRole('combobox', { name: /type/i });
-    expect((typeSelect as HTMLSelectElement).disabled).toBe(false);
+    await waitFor(() => {
+      expect((typeSelect as HTMLSelectElement).disabled).toBe(false);
+    });
 
     fireEvent.change(typeSelect, { target: { value: 'speech' } });
 
