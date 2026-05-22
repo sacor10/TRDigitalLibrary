@@ -13,11 +13,54 @@ import {
 const CHART_W = 720;
 const CHART_H = 260;
 
+interface SelectedSentimentPeriod {
+  period: string;
+  bin: SentimentBin;
+  from: string;
+  to: string;
+}
+
 function formatPolarity(value: number): string {
   return value >= 0 ? `+${value.toFixed(2)}` : value.toFixed(2);
 }
 
-function MoodChart({ points, bin }: { points: SentimentTimelinePoint[]; bin: SentimentBin }) {
+function lastDayOfMonth(year: number, month: number): string {
+  const day = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function periodToDateRange(
+  period: string,
+  bin: SentimentBin,
+  from: string,
+  to: string,
+): SelectedSentimentPeriod {
+  const [yearRaw, monthRaw] = period.split('-');
+  const year = Number.parseInt(yearRaw ?? '', 10);
+  const month = Number.parseInt(monthRaw ?? '', 10);
+  const periodFrom =
+    bin === 'year' ? `${period}-01-01` : `${yearRaw}-${String(month).padStart(2, '0')}-01`;
+  const periodTo = bin === 'year' ? `${period}-12-31` : lastDayOfMonth(year, month);
+
+  return {
+    period,
+    bin,
+    from: periodFrom < from ? from : periodFrom,
+    to: periodTo > to ? to : periodTo,
+  };
+}
+
+function MoodChart({
+  points,
+  bin,
+  selectedPeriod,
+  onTogglePeriod,
+}: {
+  points: SentimentTimelinePoint[];
+  bin: SentimentBin;
+  selectedPeriod: string | null;
+  onTogglePeriod: (period: string) => void;
+}) {
   if (points.length === 0) {
     return (
       <p className="text-ink-700/70 dark:text-parchment-100/70">
@@ -93,13 +136,50 @@ function MoodChart({ points, bin }: { points: SentimentTimelinePoint[]; bin: Sen
           const x = padding.left + i * stepX;
           const y = yToPx(p.meanPolarity);
           const fill = p.meanPolarity >= 0 ? 'currentColor' : 'rgb(220 38 38)';
+          const selected = selectedPeriod === p.period;
+          const label = `Show documents for ${p.period}: ${formatPolarity(p.meanPolarity)} (${p.documentCount} ${
+            p.documentCount === 1 ? 'doc' : 'docs'
+          })`;
           return (
-            <circle key={p.period} cx={x} cy={y} r={3} fill={fill}>
-              <title>
-                {p.period}: {formatPolarity(p.meanPolarity)} ({p.documentCount}{' '}
-                {p.documentCount === 1 ? 'doc' : 'docs'})
-              </title>
-            </circle>
+            <g
+              key={p.period}
+              role="button"
+              tabIndex={0}
+              aria-label={label}
+              aria-pressed={selected}
+              className="cursor-pointer outline-none"
+              onClick={() => onTogglePeriod(p.period)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                onTogglePeriod(p.period);
+              }}
+            >
+              <circle cx={x} cy={y} r={9} fill="transparent" />
+              {selected && (
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={6}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                />
+              )}
+              <circle
+                cx={x}
+                cy={y}
+                r={selected ? 4 : 3}
+                fill={fill}
+                stroke="currentColor"
+                strokeWidth={selected ? 1 : 0}
+              >
+                <title>
+                  {p.period}: {formatPolarity(p.meanPolarity)} ({p.documentCount}{' '}
+                  {p.documentCount === 1 ? 'doc' : 'docs'})
+                </title>
+              </circle>
+            </g>
           );
         })}
         {points.map((p, i) =>
@@ -166,6 +246,7 @@ export function SentimentPage() {
   const [from, setFrom] = useState<string | null>(null);
   const [to, setTo] = useState<string | null>(null);
   const [bin, setBin] = useState<SentimentBin>('month');
+  const [selectedPeriod, setSelectedPeriod] = useState<SelectedSentimentPeriod | null>(null);
   // Once the user touches a filter, never auto-seed again. Lets us land on a
   // populated chart by default without trapping the user inside it.
   const userTouchedDates = useRef(false);
@@ -186,9 +267,11 @@ export function SentimentPage() {
     queryFn: () => fetchSentimentTimeline({ from: from!, to: to!, bin }),
     enabled: datesReady,
   });
+  const extremesFrom = selectedPeriod?.from ?? from;
+  const extremesTo = selectedPeriod?.to ?? to;
   const extremesQuery = useQuery({
-    queryKey: ['sentiment-extremes', from, to],
-    queryFn: () => fetchSentimentExtremes({ from: from!, to: to!, limit: 5 }),
+    queryKey: ['sentiment-extremes', extremesFrom, extremesTo],
+    queryFn: () => fetchSentimentExtremes({ from: extremesFrom!, to: extremesTo!, limit: 5 }),
     enabled: datesReady,
   });
 
@@ -199,12 +282,18 @@ export function SentimentPage() {
     setTo(corpusMax);
   }, [corpusMin, corpusMax, corpusCount]);
 
-  const isLoading =
-    rangeQuery.isLoading ||
-    (datesReady && (timelineQuery.isLoading || extremesQuery.isLoading));
+  const isLoading = rangeQuery.isLoading || (datesReady && timelineQuery.isLoading);
   const error = rangeQuery.error ?? timelineQuery.error ?? extremesQuery.error;
   const points = timelineQuery.data?.points ?? [];
   const extremes = extremesQuery.data;
+  const togglePeriod = (period: string) => {
+    if (!from || !to) return;
+    setSelectedPeriod((current) =>
+      current?.period === period && current.bin === bin
+        ? null
+        : periodToDateRange(period, bin, from, to),
+    );
+  };
 
   return (
     <div>
@@ -231,6 +320,7 @@ export function SentimentPage() {
             disabled={!datesReady || corpusEmpty}
             onChange={(e) => {
               userTouchedDates.current = true;
+              setSelectedPeriod(null);
               setFrom(e.target.value);
             }}
             className="input mt-1 text-sm normal-case tracking-normal"
@@ -244,6 +334,7 @@ export function SentimentPage() {
             disabled={!datesReady || corpusEmpty}
             onChange={(e) => {
               userTouchedDates.current = true;
+              setSelectedPeriod(null);
               setTo(e.target.value);
             }}
             className="input mt-1 text-sm normal-case tracking-normal"
@@ -256,6 +347,7 @@ export function SentimentPage() {
             disabled={!datesReady || corpusEmpty}
             onChange={(e) => {
               userTouchedDates.current = true;
+              setSelectedPeriod(null);
               setBin(e.target.value as SentimentBin);
             }}
             className="input mt-1 text-sm normal-case tracking-normal"
@@ -270,6 +362,7 @@ export function SentimentPage() {
           disabled={!corpusMin || !corpusMax}
           onClick={() => {
             userTouchedDates.current = false;
+            setSelectedPeriod(null);
             setFrom(corpusMin);
             setTo(corpusMax);
             setBin('month');
@@ -306,9 +399,27 @@ export function SentimentPage() {
                 </p>
               </div>
             ) : (
-              <MoodChart points={points} bin={bin} />
+              <MoodChart
+                points={points}
+                bin={bin}
+                selectedPeriod={selectedPeriod?.period ?? null}
+                onTogglePeriod={togglePeriod}
+              />
             )}
           </section>
+
+          {selectedPeriod && (
+            <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-ink-700/80 dark:text-parchment-100/80">
+              <span>Showing documents for {selectedPeriod.period}</span>
+              <button
+                type="button"
+                className="btn py-1 text-xs"
+                onClick={() => setSelectedPeriod(null)}
+              >
+                Clear selection
+              </button>
+            </div>
+          )}
 
           {extremes && (extremes.mostPositive.length > 0 || extremes.mostNegative.length > 0) && (
             <div className="grid gap-8 md:grid-cols-2">
