@@ -124,6 +124,7 @@ export type DocumentSection = z.infer<typeof DocumentSectionSchema>;
 export const DocumentListResponseSchema = z.object({
   items: z.array(DocumentSchema),
   total: z.number().int().nonnegative(),
+  availableTypes: z.array(DocumentTypeSchema).default([]),
 });
 
 export type DocumentListResponse = z.infer<typeof DocumentListResponseSchema>;

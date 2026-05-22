@@ -12,11 +12,11 @@ vi.mock('../api/client', () => ({
   fetchDocuments: fetchDocumentsMock,
 }));
 
-function makeDoc(id: string): Document {
+function makeDoc(id: string, type: Document['type'] = 'letter'): Document {
   return {
     id,
     title: `Doc ${id}`,
-    type: 'letter',
+    type,
     date: '1900-01-01',
     recipient: null,
     location: null,
@@ -60,9 +60,21 @@ describe('BrowsePage lazy pagination', () => {
       makeDoc(`d${String(i).padStart(2, '0')}`),
     );
     fetchDocumentsMock
-      .mockResolvedValueOnce({ items: allDocs.slice(0, 10), total: 25 })
-      .mockResolvedValueOnce({ items: allDocs.slice(10, 20), total: 25 })
-      .mockResolvedValueOnce({ items: allDocs.slice(20, 25), total: 25 });
+      .mockResolvedValueOnce({
+        items: allDocs.slice(0, 10),
+        total: 25,
+        availableTypes: ['letter', 'speech'],
+      })
+      .mockResolvedValueOnce({
+        items: allDocs.slice(10, 20),
+        total: 25,
+        availableTypes: ['letter', 'speech'],
+      })
+      .mockResolvedValueOnce({
+        items: allDocs.slice(20, 25),
+        total: 25,
+        availableTypes: ['letter', 'speech'],
+      });
 
     const { container } = renderPage();
 
@@ -93,6 +105,47 @@ describe('BrowsePage lazy pagination', () => {
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
+    });
+  });
+
+  it('disables the type filter when only one type is available', async () => {
+    fetchDocumentsMock.mockResolvedValue({
+      items: [makeDoc('manuscript-1', 'manuscript')],
+      total: 1,
+      availableTypes: ['manuscript'],
+    });
+
+    renderPage();
+
+    const typeSelect = await screen.findByRole('combobox', { name: /type/i });
+    expect((typeSelect as HTMLSelectElement).disabled).toBe(true);
+    expect(screen.getByText(/only manuscript documents are currently available/i)).toBeTruthy();
+  });
+
+  it('enables the type filter when multiple types are available and fetches by selected type', async () => {
+    fetchDocumentsMock
+      .mockResolvedValueOnce({
+        items: [makeDoc('letter-1', 'letter')],
+        total: 2,
+        availableTypes: ['letter', 'speech'],
+      })
+      .mockResolvedValueOnce({
+        items: [makeDoc('speech-1', 'speech')],
+        total: 1,
+        availableTypes: ['letter', 'speech'],
+      });
+
+    renderPage();
+
+    const typeSelect = await screen.findByRole('combobox', { name: /type/i });
+    expect((typeSelect as HTMLSelectElement).disabled).toBe(false);
+
+    fireEvent.change(typeSelect, { target: { value: 'speech' } });
+
+    await waitFor(() => {
+      expect(fetchDocumentsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: 'speech', limit: 10, offset: 0 }),
+      );
     });
   });
 });

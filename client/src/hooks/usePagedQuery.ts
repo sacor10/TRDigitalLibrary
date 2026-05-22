@@ -12,7 +12,9 @@ function clampPageSize(raw: string | null): number {
   return Math.min(Math.max(Math.trunc(n), 1), MAX_PAGE_SIZE);
 }
 
-export interface PagedQueryResult<T> {
+type PagedResponse<T> = { items: T[]; total: number };
+
+export interface PagedQueryResult<T, R extends PagedResponse<T> = PagedResponse<T>> {
   items: T[];
   total: number;
   pageSize: number;
@@ -22,21 +24,22 @@ export interface PagedQueryResult<T> {
   isLoading: boolean;
   isFetching: boolean;
   error: unknown;
+  data: R | undefined;
 }
 
-export interface PagedQueryArgs<T, F> {
+export interface PagedQueryArgs<T, F, R extends PagedResponse<T> = PagedResponse<T>> {
   baseKey: string;
   filters: F;
-  fetcher: (filters: F, limit: number, offset: number) => Promise<{ items: T[]; total: number }>;
+  fetcher: (filters: F, limit: number, offset: number) => Promise<R>;
   enabled?: boolean;
 }
 
-export function usePagedQuery<T, F>({
+export function usePagedQuery<T, F, R extends PagedResponse<T> = PagedResponse<T>>({
   baseKey,
   filters,
   fetcher,
   enabled = true,
-}: PagedQueryArgs<T, F>): PagedQueryResult<T> {
+}: PagedQueryArgs<T, F, R>): PagedQueryResult<T, R> {
   const [searchParams, setSearchParams] = useSearchParams();
   const pageSize = clampPageSize(searchParams.get('limit'));
 
@@ -123,5 +126,6 @@ export function usePagedQuery<T, F>({
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     error: query.error,
+    data: query.data,
   };
 }

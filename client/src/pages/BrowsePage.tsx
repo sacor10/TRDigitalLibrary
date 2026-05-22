@@ -1,13 +1,20 @@
 // Lazy-loaded via "Load more" (chosen for accessibility over IntersectionObserver).
-import { DocumentTypeSchema, type Document, type DocumentType } from '@tr/shared';
-import { useState } from 'react';
+import { type Document, type DocumentListResponse, type DocumentType } from '@tr/shared';
+import { useEffect, useState } from 'react';
 
 import { fetchDocuments } from '../api/client';
 import { DocumentList } from '../components/DocumentList';
 import { LoadMore } from '../components/LoadMore';
 import { usePagedQuery } from '../hooks/usePagedQuery';
 
-const TYPES: DocumentType[] = DocumentTypeSchema.options;
+const TYPE_LABEL: Record<DocumentType, string> = {
+  letter: 'Letter',
+  speech: 'Speech',
+  diary: 'Diary',
+  article: 'Memoir / Article',
+  autobiography: 'Autobiography',
+  manuscript: 'Manuscript',
+};
 
 type Sort = 'date' | 'title';
 type Order = 'asc' | 'desc';
@@ -32,7 +39,8 @@ export function BrowsePage() {
     isLoading,
     isFetching,
     error,
-  } = usePagedQuery<Document, BrowseFilters>({
+    data,
+  } = usePagedQuery<Document, BrowseFilters, DocumentListResponse>({
     baseKey: 'documents',
     filters: { type, sort, order },
     fetcher: (filters, limit, offset) =>
@@ -44,6 +52,14 @@ export function BrowsePage() {
         offset,
       }),
   });
+  const availableTypes = data?.availableTypes ?? [];
+  const hasMultipleTypes = availableTypes.length > 1;
+
+  useEffect(() => {
+    if (type && data && !availableTypes.includes(type)) {
+      setType('');
+    }
+  }, [availableTypes, data, type]);
 
   return (
     <div>
@@ -62,15 +78,21 @@ export function BrowsePage() {
           <select
             className="input"
             value={type}
+            disabled={!hasMultipleTypes}
             onChange={(e) => setType((e.target.value as DocumentType | '') || '')}
           >
             <option value="">All</option>
-            {TYPES.map((t) => (
+            {availableTypes.map((t) => (
               <option key={t} value={t}>
-                {t}
+                {TYPE_LABEL[t]}
               </option>
             ))}
           </select>
+          {!hasMultipleTypes && availableTypes.length === 1 && (
+            <span className="text-ink-700/70 dark:text-parchment-100/70">
+              Only {TYPE_LABEL[availableTypes[0]!]} documents are currently available.
+            </span>
+          )}
         </label>
         <label className="flex flex-col gap-1 text-xs">
           <span className="uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">

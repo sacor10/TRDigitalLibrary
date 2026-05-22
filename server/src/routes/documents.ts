@@ -1,5 +1,5 @@
 import type { InValue } from '@libsql/client';
-import { DocumentListQuerySchema, DocumentPatchSchema } from '@tr/shared';
+import { DocumentListQuerySchema, DocumentPatchSchema, DocumentTypeSchema } from '@tr/shared';
 import { Router } from 'express';
 
 import {
@@ -74,6 +74,12 @@ export function createDocumentsRouter(
       });
       const total = asNumber(totalResult.rows[0]?.c);
 
+      const typeResult = await db.execute({
+        sql: 'SELECT DISTINCT type FROM documents ORDER BY type ASC',
+        args: {},
+      });
+      const availableTypes = typeResult.rows.map((row) => DocumentTypeSchema.parse(row.type));
+
       const listResult = await db.execute({
         sql: `SELECT ${DOCUMENT_SUMMARY_COLUMNS} FROM documents ${whereSql} ${orderSql} LIMIT @limit OFFSET @offset`,
         args: { ...params, limit, offset },
@@ -95,7 +101,7 @@ export function createDocumentsRouter(
         return doc;
       });
 
-      return res.json({ items, total });
+      return res.json({ items, total, availableTypes });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[documents] list failed', err);

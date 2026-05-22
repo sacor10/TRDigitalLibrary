@@ -65,11 +65,24 @@ describe('TR Digital Library API', () => {
       const res = await request(app).get('/api/documents');
       expect(res.status).toBe(200);
       expect(res.body.total).toBe(TEST_DOCUMENTS.length);
+      expect(res.body.availableTypes).toEqual(
+        [...new Set(TEST_DOCUMENTS.map((doc) => doc.type))].sort(),
+      );
       expect(res.body.total).toBeGreaterThanOrEqual(10);
       expect(res.body.items).toHaveLength(10);
       for (const item of res.body.items) {
         expect(() => DocumentSchema.parse(item)).not.toThrow();
       }
+    });
+
+    it('returns available types for the full collection independent of pagination', async () => {
+      const res = await request(app).get('/api/documents?type=speech&limit=1');
+      expect(res.status).toBe(200);
+      expect(res.body.items).toHaveLength(1);
+      expect(res.body.items[0].type).toBe('speech');
+      expect(res.body.availableTypes).toEqual(
+        [...new Set(TEST_DOCUMENTS.map((doc) => doc.type))].sort(),
+      );
     });
 
     it('omits heavyweight document fields from list items', async () => {
