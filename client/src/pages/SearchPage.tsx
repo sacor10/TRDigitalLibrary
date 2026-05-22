@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { fetchDocuments, searchDocuments } from '../api/client';
+import { LoadingModal } from '../components/LoadingModal';
 import { LoadMore } from '../components/LoadMore';
 import { SearchBar } from '../components/SearchBar';
 import { SearchResults } from '../components/SearchResults';
@@ -165,7 +166,7 @@ export function SearchPage() {
           <em>strenuous</em>.
         </p>
       )}
-      {enabled && isLoading && items.length === 0 && <p>Searching…</p>}
+      {enabled && isLoading && items.length === 0 && <LoadingModal message="Searching..." />}
       {enabled && error ? (
         <p className="text-red-600 dark:text-red-400">
           {error instanceof Error ? error.message : 'Search failed.'}

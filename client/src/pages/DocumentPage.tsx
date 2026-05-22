@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 
 import { fetchDocument, fetchDocumentSentiment } from '../api/client';
 import { DocumentViewer } from '../components/DocumentViewer';
+import { LoadingModal } from '../components/LoadingModal';
 import { MetadataSidebar } from '../components/MetadataSidebar';
 import { SentimentBadge } from '../components/SentimentBadge';
 
@@ -27,7 +28,7 @@ export function DocumentPage() {
     return <p>Missing document id.</p>;
   }
   if (isLoading) {
-    return <p className="py-12 text-center">Loading document…</p>;
+    return <LoadingModal message="Loading document..." />;
   }
   if (error || !data) {
     return (

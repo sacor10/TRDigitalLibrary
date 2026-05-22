@@ -3,6 +3,7 @@ import OpenSeadragon from 'openseadragon';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { canvasLabel, canvasToInfoJson, extractCanvases, fetchManifest } from '../lib/iiif';
+import { LoadingModal } from './LoadingModal';
 
 interface IIIFFacsimilePaneProps {
   manifestUrl: string;
@@ -48,7 +49,11 @@ export function IIIFFacsimilePane({ manifestUrl, alt }: IIIFFacsimilePaneProps) 
   }, [infoJsonUrl]);
 
   if (isLoading) {
-    return <div className={EMPTY_CLASSES}>Loading IIIF manifest…</div>;
+    return (
+      <div className={EMPTY_CLASSES}>
+        <LoadingModal message="Loading IIIF manifest..." subtle />
+      </div>
+    );
   }
   if (error) {
     return (

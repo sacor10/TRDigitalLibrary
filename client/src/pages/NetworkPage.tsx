@@ -9,6 +9,7 @@ import { Link } from 'react-router-dom';
 
 import { fetchCorrespondentGraph, fetchCorrespondentItems } from '../api/client';
 import { CorrespondentGraph } from '../components/CorrespondentGraph';
+import { LoadingModal } from '../components/LoadingModal';
 
 const ITEM_PAGE_SIZE = 25;
 
@@ -210,7 +211,7 @@ export function NetworkPage() {
         </label>
       </section>
 
-      {isLoading && <p>Loading&hellip;</p>}
+      {isLoading && <LoadingModal message="Loading correspondent network..." />}
       {error && (
         <p className="text-red-600 dark:text-red-400">
           {error instanceof Error ? error.message : 'Failed to load the correspondent graph.'}

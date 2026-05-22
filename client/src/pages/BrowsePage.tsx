@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { fetchDocuments } from '../api/client';
 import { DocumentList } from '../components/DocumentList';
+import { LoadingModal } from '../components/LoadingModal';
 import { LoadMore } from '../components/LoadMore';
 import { usePagedQuery } from '../hooks/usePagedQuery';
 
@@ -66,7 +67,7 @@ export function BrowsePage() {
       <header className="mb-6">
         <h1 className="text-2xl font-semibold sm:text-3xl">Browse the collection</h1>
         <p className="text-ink-700 dark:text-parchment-100 mt-1">
-          {isLoading && items.length === 0 ? 'Loading…' : `${total} documents`}
+          {isLoading && items.length === 0 ? 'Loading...' : `${total} documents`}
         </p>
       </header>
 
@@ -118,7 +119,7 @@ export function BrowsePage() {
         </label>
       </div>
 
-      {isLoading && items.length === 0 && <p>Loading…</p>}
+      {isLoading && items.length === 0 && <LoadingModal message="Loading documents..." />}
       {error ? (
         <p className="text-red-600 dark:text-red-400">
           {error instanceof Error ? error.message : 'Failed to load documents.'}

@@ -9,6 +9,7 @@ import {
   fetchSentimentRange,
   fetchSentimentTimeline,
 } from '../api/client';
+import { LoadingModal } from '../components/LoadingModal';
 
 const CHART_W = 720;
 const CHART_H = 260;
@@ -422,7 +423,7 @@ export function SentimentPage() {
         </button>
       </form>
 
-      {isLoading && <p>Loading&hellip;</p>}
+      {isLoading && <LoadingModal message="Loading sentiment data..." />}
       {error && (
         <p className="text-red-600 dark:text-red-400">
           {error instanceof Error ? error.message : 'Failed to load sentiment.'}

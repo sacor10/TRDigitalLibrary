@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { fetchTopic, fetchTopicDrift, fetchTopics } from '../api/client';
+import { LoadingModal } from '../components/LoadingModal';
 import { LoadMore } from '../components/LoadMore';
 
 const SPARK_W = 96;
@@ -378,7 +379,7 @@ function TopicsGrid() {
     [driftQuery.data],
   );
 
-  if (topicsQuery.isLoading) return <p>Loading&hellip;</p>;
+  if (topicsQuery.isLoading) return <LoadingModal message="Loading topics..." />;
   if (topicsQuery.error) {
     return (
       <p className="text-red-600 dark:text-red-400">
@@ -478,7 +479,7 @@ function TopicDetail({ id }: { id: string }) {
     }
   }, [detailQuery.data, id]);
 
-  if (detailQuery.isLoading) return <p>Loading&hellip;</p>;
+  if (detailQuery.isLoading) return <LoadingModal message="Loading topic..." />;
   if (detailQuery.error) {
     const status =
       detailQuery.error instanceof Error && detailQuery.error.message.includes('404')

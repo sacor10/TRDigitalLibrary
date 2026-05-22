@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Navigate, useParams } from 'react-router-dom';
 
 import { getAnnotation } from '../api/client';
+import { LoadingModal } from '../components/LoadingModal';
 
 export function AnnotationPage() {
   const { id } = useParams<{ id: string }>();
@@ -14,7 +15,7 @@ export function AnnotationPage() {
   });
 
   if (!annotationId) return <p>Missing annotation id.</p>;
-  if (isLoading) return <p className="py-12 text-center">Resolving annotation…</p>;
+  if (isLoading) return <LoadingModal message="Resolving annotation..." />;
   if (error || !data) {
     return (
       <p className="py-12 text-center text-red-600 dark:text-red-400">

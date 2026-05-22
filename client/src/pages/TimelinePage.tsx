@@ -3,6 +3,7 @@ import { DocumentTypeSchema, type Document, type DocumentType } from '@tr/shared
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchDocuments, fetchTopics, searchDocuments } from '../api/client';
+import { LoadingModal } from '../components/LoadingModal';
 import { LoadMore } from '../components/LoadMore';
 import { Timeline } from '../components/Timeline';
 
@@ -231,7 +232,7 @@ export function TimelinePage() {
           {topicsQuery.error instanceof Error ? topicsQuery.error.message : 'Failed to load topics.'}
         </p>
       )}
-      {isLoading && <p>Loading&hellip;</p>}
+      {isLoading && <LoadingModal message="Loading timeline..." />}
       {error && (
         <p className="text-red-600 dark:text-red-400">
           {error instanceof Error ? error.message : 'Failed to load documents.'}
