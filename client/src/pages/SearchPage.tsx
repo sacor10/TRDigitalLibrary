@@ -44,8 +44,18 @@ export function SearchPage() {
   const trimmedQ = q.trim();
   const trimmedRecipient = recipient.trim();
   const enabled =
-    trimmedQ.length > 0 || type !== '' || trimmedRecipient.length > 0 || dateFrom !== '' || dateTo !== '';
-  const filters: SearchFilters = { q: trimmedQ, type, recipient: trimmedRecipient, dateFrom, dateTo };
+    trimmedQ.length > 0 ||
+    type !== '' ||
+    trimmedRecipient.length > 0 ||
+    dateFrom !== '' ||
+    dateTo !== '';
+  const filters: SearchFilters = {
+    q: trimmedQ,
+    type,
+    recipient: trimmedRecipient,
+    dateFrom,
+    dateTo,
+  };
 
   const {
     items,
