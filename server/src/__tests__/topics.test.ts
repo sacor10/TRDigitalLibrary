@@ -127,6 +127,45 @@ describe('Topics API', () => {
       expect(parsed.items[0]!.id).toBe('conservation');
       expect(parsed.items[parsed.items.length - 1]!.size).toBe(1); // family
     });
+
+    it('falls back to global tags when every tag is corpus-wide', async () => {
+      const globalOnlyDb = await openInMemoryDatabase();
+      try {
+        await upsertDocument(
+          globalOnlyDb,
+          baseDoc({
+            id: 'global-a',
+            date: '1901-01-01',
+            title: 'Global A',
+            tags: ['same-topic'],
+          }),
+        );
+        await upsertDocument(
+          globalOnlyDb,
+          baseDoc({
+            id: 'global-b',
+            date: '1902-01-01',
+            title: 'Global B',
+            tags: ['same-topic'],
+          }),
+        );
+        const globalOnlyApp = createApp(globalOnlyDb);
+        const res = await request(globalOnlyApp).get('/api/topics');
+        expect(res.status).toBe(200);
+        const parsed = TopicsResponseSchema.parse(res.body);
+        expect(parsed.items).toEqual([{ id: 'same-topic', label: 'same-topic', size: 2 }]);
+
+        const detail = await request(globalOnlyApp).get('/api/topics/same-topic');
+        expect(detail.status).toBe(200);
+        expect(TopicDetailResponseSchema.parse(detail.body).topic.size).toBe(2);
+
+        const drift = await request(globalOnlyApp).get('/api/topics/drift');
+        expect(drift.status).toBe(200);
+        expect(TopicDriftResponseSchema.parse(drift.body).points).toHaveLength(2);
+      } finally {
+        globalOnlyDb.close();
+      }
+    });
   });
 
   describe('GET /api/topics/:id', () => {

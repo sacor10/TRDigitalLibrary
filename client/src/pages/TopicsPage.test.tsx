@@ -55,6 +55,10 @@ function makeMember(i: number) {
   };
 }
 
+function never<T>(): Promise<T> {
+  return new Promise(() => undefined);
+}
+
 describe('TopicsPage', () => {
   beforeEach(() => {
     fetchTopicDriftMock.mockReset();
@@ -162,9 +166,36 @@ describe('TopicsPage', () => {
     expect(screen.getByText('rising')).toBeTruthy();
   });
 
+  it('renders topic cards while drift data is still loading', async () => {
+    fetchTopicsMock.mockResolvedValue({
+      items: [{ id: 'fast-topic', label: 'Fast topic', size: 7 }],
+      total: 1,
+    });
+    fetchTopicDriftMock.mockReturnValue(never());
+
+    renderPage();
+
+    expect(await screen.findByText('Fast topic')).toBeTruthy();
+    expect(screen.getByText('loading trend')).toBeTruthy();
+  });
+
+  it('keeps topic cards visible when drift loading fails', async () => {
+    fetchTopicsMock.mockResolvedValue({
+      items: [{ id: 'stable-topic', label: 'Stable topic', size: 4 }],
+      total: 1,
+    });
+    fetchTopicDriftMock.mockRejectedValue(new Error('drift failed'));
+
+    renderPage();
+
+    expect(await screen.findByText('Stable topic')).toBeTruthy();
+    expect(await screen.findByText(/Trend data is unavailable/i)).toBeTruthy();
+    expect(screen.getByText('no drift data')).toBeTruthy();
+  });
+
   it('keeps the empty topics state intact', async () => {
     fetchTopicsMock.mockResolvedValue({ items: [], total: 0 });
-    fetchTopicDriftMock.mockResolvedValue({ points: [] });
+    fetchTopicDriftMock.mockReturnValue(never());
 
     renderPage();
 
@@ -207,5 +238,16 @@ describe('TopicsPage', () => {
       expect(screen.getAllByText(/Showing 26 of 26/i).length).toBeGreaterThan(0);
     });
     expect(screen.queryByRole('button', { name: /load more/i })).toBeNull();
+  });
+
+  it('renders topic documents while detail drift data is still loading', async () => {
+    mockTopicDetail('progressive');
+    fetchTopicDriftMock.mockReturnValue(never());
+
+    renderPage('/topics/progressive');
+
+    expect(await screen.findByText('progressive')).toBeTruthy();
+    expect(screen.getByText('A letter from Albany')).toBeTruthy();
+    expect(screen.getByText(/Loading trend/i)).toBeTruthy();
   });
 });

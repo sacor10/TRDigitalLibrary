@@ -104,14 +104,18 @@ function TrendSparkline({
   points,
   maxShare,
   maxCount,
+  isLoading,
 }: {
   points: TopicTrendPoint[];
   maxShare: number;
   maxCount: number;
+  isLoading?: boolean;
 }) {
   if (points.length === 0) {
     return (
-      <span className="text-ink-700/60 dark:text-parchment-100/60 text-xs">no drift data</span>
+      <span className="text-ink-700/60 dark:text-parchment-100/60 text-xs">
+        {isLoading ? 'loading trend' : 'no drift data'}
+      </span>
     );
   }
 
@@ -374,7 +378,7 @@ function TopicsGrid() {
     [driftQuery.data],
   );
 
-  if (topicsQuery.isLoading || driftQuery.isLoading) return <p>Loading&hellip;</p>;
+  if (topicsQuery.isLoading) return <p>Loading&hellip;</p>;
   if (topicsQuery.error) {
     return (
       <p className="text-red-600 dark:text-red-400">
@@ -397,31 +401,43 @@ function TopicsGrid() {
   }
 
   return (
-    <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {topics.map((topic) => {
-        const drift = driftQuery.data
-          ? trendPointsForTopic(driftQuery.data.points, topic.id, periods)
-          : [];
-        return (
-          <li key={topic.id}>
-            <Link
-              to={`/topics/${encodeURIComponent(topic.id)}`}
-              className="block h-full rounded-md border border-ink-700/10 bg-parchment-50/40 p-4 hover:bg-parchment-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 dark:border-parchment-50/10 dark:bg-ink-800/40 dark:hover:bg-ink-700/60"
-            >
-              <div className="mb-3 flex items-baseline justify-between gap-2">
-                <h2 className="truncate font-semibold" title={topic.label}>
-                  {topic.label}
-                </h2>
-                <span className="text-xs text-ink-700/70 dark:text-parchment-100/70">
-                  {topic.size} {topic.size === 1 ? 'doc' : 'docs'}
-                </span>
-              </div>
-              <TrendSparkline points={drift} maxShare={globalMaxShare} maxCount={globalMaxCount} />
-            </Link>
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      {driftQuery.error && (
+        <p className="mb-4 text-sm text-ink-700/70 dark:text-parchment-100/70">
+          Trend data is unavailable right now; topic counts are still shown.
+        </p>
+      )}
+      <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {topics.map((topic) => {
+          const drift = driftQuery.data
+            ? trendPointsForTopic(driftQuery.data.points, topic.id, periods)
+            : [];
+          return (
+            <li key={topic.id}>
+              <Link
+                to={`/topics/${encodeURIComponent(topic.id)}`}
+                className="block h-full rounded-md border border-ink-700/10 bg-parchment-50/40 p-4 hover:bg-parchment-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 dark:border-parchment-50/10 dark:bg-ink-800/40 dark:hover:bg-ink-700/60"
+              >
+                <div className="mb-3 flex items-baseline justify-between gap-2">
+                  <h2 className="truncate font-semibold" title={topic.label}>
+                    {topic.label}
+                  </h2>
+                  <span className="text-xs text-ink-700/70 dark:text-parchment-100/70">
+                    {topic.size} {topic.size === 1 ? 'doc' : 'docs'}
+                  </span>
+                </div>
+                <TrendSparkline
+                  points={drift}
+                  maxShare={globalMaxShare}
+                  maxCount={globalMaxCount}
+                  isLoading={driftQuery.isLoading}
+                />
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }
 
@@ -462,7 +478,7 @@ function TopicDetail({ id }: { id: string }) {
     }
   }, [detailQuery.data, id]);
 
-  if (detailQuery.isLoading || driftQuery.isLoading) return <p>Loading&hellip;</p>;
+  if (detailQuery.isLoading) return <p>Loading&hellip;</p>;
   if (detailQuery.error) {
     const status =
       detailQuery.error instanceof Error && detailQuery.error.message.includes('404')
@@ -496,7 +512,15 @@ function TopicDetail({ id }: { id: string }) {
         <h2 className="mb-3 text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
           Documents and share over time
         </h2>
-        <DriftChart points={driftPoints} />
+        {driftQuery.isLoading ? (
+          <p className="text-ink-700/70 dark:text-parchment-100/70">Loading trend&hellip;</p>
+        ) : driftQuery.error ? (
+          <p className="text-ink-700/70 dark:text-parchment-100/70">
+            Trend data is unavailable right now.
+          </p>
+        ) : (
+          <DriftChart points={driftPoints} />
+        )}
       </section>
 
       <section>

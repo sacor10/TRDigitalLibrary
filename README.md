@@ -95,6 +95,13 @@ the metadata into the existing `documents` table, and lets the current SQLite
 FTS5 triggers update search indexes automatically. V1 stores one row per LoC
 source item; page-level text can be added later through `document_sections`.
 
+If `/topics` shows no topics in local dev, check whether `data/library.db`
+contains older fixture rows or rows ingested before tag metadata was added. Run
+`npm run ingest-loc -- --limit 25 --reset` to replace that local file with LoC
+rows whose tags can be aggregated into topics. `--force` re-fetches existing LoC
+items but does not overwrite rows written by the skip-if-exists path, so use
+`--reset` when repairing a stale local corpus.
+
 ### Ingesting TEI documents
 
 Validate and ingest a folder of TEI/XML documents into the library:
