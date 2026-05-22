@@ -12,6 +12,23 @@ import type { LibsqlClient } from '../db.js';
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 200;
+const GLOBAL_TOPIC_THRESHOLD = 0.95;
+
+const TAGGED_DOCUMENTS_CTE = `
+  tagged_documents AS (
+    SELECT COUNT(DISTINCT d.id) AS total
+      FROM documents d, json_each(d.tags) je
+  )
+`;
+
+const TAG_COUNTS_CTE = `
+  tag_counts AS (
+    SELECT je.value AS tag,
+           COUNT(DISTINCT d.id) AS size
+      FROM documents d, json_each(d.tags) je
+     GROUP BY je.value
+  )
+`;
 
 function asString(v: unknown): string {
   return v == null ? '' : String(v);
@@ -25,12 +42,15 @@ export function createTopicsRouter(db: LibsqlClient): Router {
   const router = Router();
 
   router.get('/', async (_req, res) => {
-    const result = await db.execute(
-      `SELECT je.value AS tag, COUNT(*) AS size
-         FROM documents d, json_each(d.tags) je
-        GROUP BY je.value
+    const result = await db.execute({
+      sql: `WITH ${TAGGED_DOCUMENTS_CTE},
+                 ${TAG_COUNTS_CTE}
+       SELECT tag, size
+         FROM tag_counts, tagged_documents
+        WHERE size < tagged_documents.total * ?
         ORDER BY size DESC, tag ASC`,
-    );
+      args: [GLOBAL_TOPIC_THRESHOLD],
+    });
     const items: Topic[] = result.rows.map((row) => {
       const tag = asString(row.tag);
       return { id: tag, label: tag, size: asNumber(row.size) };
@@ -47,23 +67,30 @@ export function createTopicsRouter(db: LibsqlClient): Router {
       });
     }
 
-    // Tagged docs per (tag, year).
-    const perTagResult = await db.execute(
-      `SELECT je.value AS tag,
+    const perTagResult = await db.execute({
+      sql: `WITH ${TAGGED_DOCUMENTS_CTE},
+                 ${TAG_COUNTS_CTE},
+                 visible_topics AS (
+                   SELECT tag
+                     FROM tag_counts, tagged_documents
+                    WHERE size < tagged_documents.total * ?
+                 )
+       SELECT je.value AS tag,
               substr(d.date, 1, 4) AS period,
-              COUNT(*) AS document_count
+              COUNT(DISTINCT d.id) AS document_count
          FROM documents d, json_each(d.tags) je
+         JOIN visible_topics vt ON vt.tag = je.value
         WHERE d.date <> ''
         GROUP BY tag, period
         ORDER BY period ASC, tag ASC`,
-    );
+      args: [GLOBAL_TOPIC_THRESHOLD],
+    });
 
-    // Total tagged documents per year (denominator for share). A doc with N
-    // tags counts N times — keeps shares comparable to the per-tag count and
-    // ensures shares sum to 1.0 per period.
+    // Denominator for share: count each tagged document once per year, even
+    // when it has multiple visible topics.
     const totalsResult = await db.execute(
       `SELECT substr(d.date, 1, 4) AS period,
-              COUNT(*) AS total
+              COUNT(DISTINCT d.id) AS total
          FROM documents d, json_each(d.tags) je
         WHERE d.date <> ''
         GROUP BY period`,
@@ -95,18 +122,22 @@ export function createTopicsRouter(db: LibsqlClient): Router {
     }
     const limitRaw =
       typeof req.query.limit === 'string' ? Number.parseInt(req.query.limit, 10) : DEFAULT_LIMIT;
-    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, MAX_LIMIT) : DEFAULT_LIMIT;
+    const limit =
+      Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, MAX_LIMIT) : DEFAULT_LIMIT;
     const offsetRaw =
       typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : 0;
     const offset = Number.isFinite(offsetRaw) && offsetRaw >= 0 ? offsetRaw : 0;
 
-    const sizeResult = await db.execute({
-      sql: `SELECT COUNT(*) AS size
-              FROM documents d
-             WHERE EXISTS (SELECT 1 FROM json_each(d.tags) WHERE value = ?)`,
-      args: [tag],
+    const topicResult = await db.execute({
+      sql: `WITH ${TAGGED_DOCUMENTS_CTE},
+                 ${TAG_COUNTS_CTE}
+       SELECT size
+         FROM tag_counts, tagged_documents
+        WHERE tag = ?
+          AND size < tagged_documents.total * ?`,
+      args: [tag, GLOBAL_TOPIC_THRESHOLD],
     });
-    const size = asNumber(sizeResult.rows[0]?.size);
+    const size = asNumber(topicResult.rows[0]?.size);
     if (size === 0) {
       return res.status(404).json({ error: 'Topic not found' });
     }

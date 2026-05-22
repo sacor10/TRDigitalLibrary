@@ -21,15 +21,56 @@ interface FixtureDoc {
 //  - "conservation" tag spans 1899/1901/1912 (drift across periods)
 //  - "progressive" tag is post-1900 only (asserts absence in 1899)
 //  - "family" tag covers a single document (size 1)
+//  - "corpus-global" mimics LoC collection-wide headings and should be hidden
 const DOCS: FixtureDoc[] = [
-  { id: 'doc-1899-a', date: '1899-03-01', title: 'Pre-1900 letter A', tags: ['conservation', 'family'] },
-  { id: 'doc-1899-b', date: '1899-09-12', title: 'Pre-1900 letter B', tags: ['conservation'] },
-  { id: 'doc-1899-c', date: '1899-11-04', title: 'Pre-1900 letter C', tags: ['navy'] },
-  { id: 'doc-1901-a', date: '1901-04-22', title: 'Post-1900 letter A', tags: ['conservation', 'progressive'] },
-  { id: 'doc-1901-b', date: '1901-07-15', title: 'Post-1900 letter B', tags: ['navy'] },
-  { id: 'doc-1912-a', date: '1912-06-18', title: '1912 campaign A', tags: ['conservation', 'progressive'] },
-  { id: 'doc-1912-b', date: '1912-08-30', title: '1912 campaign B', tags: ['navy'] },
-  { id: 'doc-1912-c', date: '1912-10-14', title: '1912 campaign C', tags: ['progressive'] },
+  {
+    id: 'doc-1899-a',
+    date: '1899-03-01',
+    title: 'Pre-1900 letter A',
+    tags: ['corpus-global', 'conservation', 'conservation', 'family'],
+  },
+  {
+    id: 'doc-1899-b',
+    date: '1899-09-12',
+    title: 'Pre-1900 letter B',
+    tags: ['corpus-global', 'conservation'],
+  },
+  {
+    id: 'doc-1899-c',
+    date: '1899-11-04',
+    title: 'Pre-1900 letter C',
+    tags: ['corpus-global', 'navy'],
+  },
+  {
+    id: 'doc-1901-a',
+    date: '1901-04-22',
+    title: 'Post-1900 letter A',
+    tags: ['corpus-global', 'conservation', 'progressive'],
+  },
+  {
+    id: 'doc-1901-b',
+    date: '1901-07-15',
+    title: 'Post-1900 letter B',
+    tags: ['corpus-global', 'navy'],
+  },
+  {
+    id: 'doc-1912-a',
+    date: '1912-06-18',
+    title: '1912 campaign A',
+    tags: ['corpus-global', 'conservation', 'progressive'],
+  },
+  {
+    id: 'doc-1912-b',
+    date: '1912-08-30',
+    title: '1912 campaign B',
+    tags: ['corpus-global', 'navy'],
+  },
+  {
+    id: 'doc-1912-c',
+    date: '1912-10-14',
+    title: '1912 campaign C',
+    tags: ['corpus-global', 'progressive'],
+  },
 ];
 
 function baseDoc(fixture: FixtureDoc): Document {
@@ -76,11 +117,13 @@ describe('Topics API', () => {
       const res = await request(app).get('/api/topics');
       expect(res.status).toBe(200);
       const parsed = TopicsResponseSchema.parse(res.body);
-      // 4 distinct tags: conservation, navy, progressive, family
+      // 4 visible tags: conservation, navy, progressive, family. The
+      // corpus-global tag applies to every document and is hidden.
       expect(parsed.total).toBe(4);
       const sizes = parsed.items.map((t) => t.size);
       expect(sizes).toEqual([...sizes].sort((a, b) => b - a));
-      expect(parsed.items[0]!.size).toBe(4); // conservation
+      expect(parsed.items.map((t) => t.id)).not.toContain('corpus-global');
+      expect(parsed.items[0]!.size).toBe(4); // conservation, counted by distinct document
       expect(parsed.items[0]!.id).toBe('conservation');
       expect(parsed.items[parsed.items.length - 1]!.size).toBe(1); // family
     });
@@ -135,14 +178,22 @@ describe('Topics API', () => {
       expect(res.status).toBe(404);
     });
 
+    it('returns 404 for a suppressed corpus-global tag', async () => {
+      const res = await request(app).get('/api/topics/corpus-global');
+      expect(res.status).toBe(404);
+    });
+
     it('decodes URL-encoded tag values', async () => {
       // Add a doc with a tag containing a space + comma (LoC subject-heading style).
-      await upsertDocument(db, baseDoc({
-        id: 'doc-encoded',
-        date: '1905-01-01',
-        title: 'Encoded tag fixture',
-        tags: ['Politics and government'],
-      }));
+      await upsertDocument(
+        db,
+        baseDoc({
+          id: 'doc-encoded',
+          date: '1905-01-01',
+          title: 'Encoded tag fixture',
+          tags: ['corpus-global', 'Politics and government'],
+        }),
+      );
       const encoded = encodeURIComponent('Politics and government');
       const res = await request(app).get(`/api/topics/${encoded}`);
       expect(res.status).toBe(200);
@@ -152,17 +203,16 @@ describe('Topics API', () => {
   });
 
   describe('GET /api/topics/drift', () => {
-    it('returns drift points whose per-period shares sum to ~1', async () => {
+    it('excludes corpus-global topics and uses distinct yearly documents as share denominator', async () => {
       const res = await request(app).get('/api/topics/drift');
       expect(res.status).toBe(200);
       const parsed = TopicDriftResponseSchema.parse(res.body);
-      const sumByPeriod = new Map<string, number>();
-      for (const point of parsed.points) {
-        sumByPeriod.set(point.period, (sumByPeriod.get(point.period) ?? 0) + point.share);
-      }
-      for (const [, total] of sumByPeriod) {
-        expect(total).toBeCloseTo(1, 5);
-      }
+      expect(parsed.points.map((p) => p.topicId)).not.toContain('corpus-global');
+      const conservation1899 = parsed.points.find(
+        (p) => p.topicId === 'conservation' && p.period === '1899',
+      );
+      expect(conservation1899?.documentCount).toBe(2);
+      expect(conservation1899?.share).toBeCloseTo(2 / 3, 5);
     });
 
     it('reports zero presence for the progressive tag in 1899', async () => {
