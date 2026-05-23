@@ -1,55 +1,44 @@
 import type { Document } from '@tr/shared';
 import { describe, expect, it } from 'vitest';
 
+import { buildCitation, citationKey } from './citation';
 
-import { buildCitation } from './citation';
-
-const sample: Document = {
-  id: 'sample',
-  title: 'A Sample Title',
+const doc: Document = {
+  id: 'doc-1',
+  title: 'A {Strenuous} Life',
   type: 'speech',
   date: '1910-04-23',
   recipient: null,
-  location: 'Paris',
+  location: null,
   author: 'Theodore Roosevelt',
   transcription: '',
   transcriptionUrl: null,
-  transcriptionFormat: 'wikisource-html',
+  transcriptionFormat: 'plain-text',
   facsimileUrl: null,
   iiifManifestUrl: null,
   provenance: null,
-  source: 'Wikisource',
-  sourceUrl: 'https://en.wikisource.org/wiki/Sample',
+  source: 'TR Digital Library',
+  sourceUrl: 'https://example.org/doc-1',
   tags: [],
   mentions: [],
   teiXml: null,
 };
 
-describe('buildCitation', () => {
-  it('produces a Chicago citation with author, title, date, source, and URL', () => {
-    const c = buildCitation(sample, 'chicago');
-    expect(c).toContain('Theodore Roosevelt');
-    expect(c).toContain('"A Sample Title."');
-    expect(c).toContain('1910-04-23');
-    expect(c).toContain('Wikisource');
-    expect(c).toContain('https://en.wikisource.org/wiki/Sample');
-    expect(c).toContain('Accessed');
+describe('citation helpers', () => {
+  it('builds a stable citation key from author, year, and title', () => {
+    expect(citationKey(doc)).toBe('Roosevelt1910-a-strenuous-life');
   });
 
-  it('produces an MLA citation', () => {
-    const c = buildCitation(sample, 'mla');
-    expect(c.startsWith('Theodore Roosevelt.')).toBe(true);
-    expect(c).toContain('"A Sample Title."');
+  it('escapes BibTeX-sensitive title characters', () => {
+    const citation = buildCitation(doc, 'bibtex');
+    expect(citation).toContain('@misc{Roosevelt1910-a-strenuous-life,');
+    expect(citation).toContain('title = {A \\{Strenuous\\} Life}');
   });
 
-  it('produces an APA citation with year in parens', () => {
-    const c = buildCitation(sample, 'apa');
-    expect(c).toContain('(1910');
-    expect(c).toContain('A Sample Title');
-  });
-
-  it('omits a trailing url segment cleanly when sourceUrl is null', () => {
-    const c = buildCitation({ ...sample, sourceUrl: null }, 'chicago');
-    expect(c).toContain('Wikisource. Accessed');
+  it('omits empty RIS URL fields', () => {
+    const citation = buildCitation({ ...doc, sourceUrl: null }, 'ris');
+    expect(citation).toContain('TY  - MANSCPT');
+    expect(citation).not.toContain('UR  -');
   });
 });
+

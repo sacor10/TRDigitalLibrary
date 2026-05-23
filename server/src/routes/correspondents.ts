@@ -12,6 +12,7 @@ import { Router } from 'express';
 import type { Request, Response } from 'express';
 
 import type { LibsqlClient } from '../db.js';
+import { setPublicCache } from '../http-cache.js';
 
 const TR_NODE_ID = 'theodore-roosevelt';
 const TR_NODE_LABEL = 'Theodore Roosevelt';
@@ -299,6 +300,7 @@ async function handleGraph(db: LibsqlClient, req: Request, res: Response) {
     totalCorrespondents: asNumber(totalRow?.total_correspondents) + (edges.length > 0 ? 1 : 0),
     generatedAt: new Date().toISOString(),
   };
+  setPublicCache(res);
   res.json(payload);
 }
 
@@ -456,6 +458,7 @@ async function handleItems(db: LibsqlClient, req: Request, res: Response) {
     limit: query.limit,
     offset: query.offset,
   };
+  setPublicCache(res);
   res.json(payload);
 }
 

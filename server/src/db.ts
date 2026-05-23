@@ -628,12 +628,15 @@ export async function patchDocumentFields(
 
   await client.batch(stmts, 'write');
 
-  const updated = await client.execute({
-    sql: 'SELECT * FROM documents WHERE id = ?',
-    args: [documentId],
-  });
-  if (updated.rows.length === 0) return null;
-  return rowToDocumentWithProvenance(client, rowToDocumentRow(updated.rows[0]!));
+  const updatedDoc: Document = { ...current };
+  for (const [field, nextValue] of entries) {
+    (updatedDoc as Record<ProvenanceField, unknown>)[field] = nextValue;
+  }
+  const fieldProvenance = await getFieldProvenance(client, documentId);
+  if (Object.keys(fieldProvenance).length > 0) {
+    updatedDoc.fieldProvenance = fieldProvenance;
+  }
+  return updatedDoc;
 }
 
 interface SectionRow {

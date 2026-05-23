@@ -5,8 +5,8 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { fetchDocuments, searchDocuments } from '../api/client';
-import { LoadingModal } from '../components/LoadingModal';
 import { LoadMore } from '../components/LoadMore';
+import { LoadingModal } from '../components/LoadingModal';
 import { SearchBar } from '../components/SearchBar';
 import { SearchResults } from '../components/SearchResults';
 import { usePagedQuery } from '../hooks/usePagedQuery';
@@ -19,27 +19,50 @@ interface SearchFilters {
   recipient: string;
   dateFrom: string;
   dateTo: string;
+  tag: string;
+}
+
+interface SearchPageResponse {
+  items: SearchResult[];
+  total: number;
+  facets?: {
+    types: Array<{ value: DocumentType; count: number }>;
+    tags: Array<{ value: string; count: number }>;
+  };
 }
 
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQ = searchParams.get('q') ?? '';
   const initialType = (searchParams.get('type') as DocumentType | null) ?? '';
+  const initialRecipient = searchParams.get('recipient') ?? '';
+  const initialDateFrom = searchParams.get('dateFrom') ?? '';
+  const initialDateTo = searchParams.get('dateTo') ?? '';
+  const initialTag = searchParams.get('tag') ?? '';
 
   const [q, setQ] = useState(initialQ);
   const [type, setType] = useState<DocumentType | ''>(initialType);
-  const [recipient, setRecipient] = useState('');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [recipient, setRecipient] = useState(initialRecipient);
+  const [dateFrom, setDateFrom] = useState(initialDateFrom);
+  const [dateTo, setDateTo] = useState(initialDateTo);
+  const [tag, setTag] = useState(initialTag);
+
+  const setUrlParam = (name: string, value: string): void => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set(name, value);
+        else next.delete(name);
+        next.delete('offset');
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   const handleQueryChange = (value: string): void => {
     setQ(value);
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (value) next.set('q', value);
-      else next.delete('q');
-      return next;
-    });
+    setUrlParam('q', value);
   };
 
   const trimmedQ = q.trim();
@@ -49,13 +72,15 @@ export function SearchPage() {
     type !== '' ||
     trimmedRecipient.length > 0 ||
     dateFrom !== '' ||
-    dateTo !== '';
+    dateTo !== '' ||
+    tag !== '';
   const filters: SearchFilters = {
     q: trimmedQ,
     type,
     recipient: trimmedRecipient,
     dateFrom,
     dateTo,
+    tag,
   };
 
   const {
@@ -67,7 +92,8 @@ export function SearchPage() {
     isLoading,
     isFetching,
     error,
-  } = usePagedQuery<SearchResult, SearchFilters>({
+    data,
+  } = usePagedQuery<SearchResult, SearchFilters, SearchPageResponse>({
     baseKey: 'search',
     filters,
     enabled,
@@ -77,6 +103,7 @@ export function SearchPage() {
         ...(f.recipient ? { recipient: f.recipient } : {}),
         ...(f.dateFrom ? { dateFrom: f.dateFrom } : {}),
         ...(f.dateTo ? { dateTo: f.dateTo } : {}),
+        ...(f.tag ? { tag: f.tag } : {}),
         limit,
         offset,
       };
@@ -85,15 +112,18 @@ export function SearchPage() {
         return searchDocuments({
           q: f.q,
           ...commonFilters,
-        }).then((res) => ({ items: res.results, total: res.total }));
+        }).then((res) => ({ items: res.results, total: res.total, facets: res.facets }));
       }
 
       return fetchDocuments(commonFilters).then((res) => ({
         items: res.items.map((document) => ({ document, snippet: '' })),
         total: res.total,
+        facets: res.facets,
       }));
     },
   });
+  const facets = data?.facets;
+  const tagFacets = facets?.tags ?? [];
 
   return (
     <div>
@@ -113,12 +143,19 @@ export function SearchPage() {
           <select
             className="input"
             value={type}
-            onChange={(e) => setType((e.target.value as DocumentType | '') || '')}
+            onChange={(e) => {
+              const next = (e.target.value as DocumentType | '') || '';
+              setType(next);
+              setUrlParam('type', next);
+            }}
           >
             <option value="">All types</option>
             {TYPES.map((t) => (
               <option key={t} value={t}>
                 {t}
+                {facets?.types.find((facet) => facet.value === t)
+                  ? ` (${facets.types.find((facet) => facet.value === t)?.count})`
+                  : ''}
               </option>
             ))}
           </select>
@@ -130,7 +167,10 @@ export function SearchPage() {
           <input
             className="input"
             value={recipient}
-            onChange={(e) => setRecipient(e.target.value)}
+            onChange={(e) => {
+              setRecipient(e.target.value);
+              setUrlParam('recipient', e.target.value.trim());
+            }}
             placeholder="e.g. Kermit, Lodge, Congress"
           />
         </label>
@@ -143,7 +183,10 @@ export function SearchPage() {
               type="date"
               className="input"
               value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                setUrlParam('dateFrom', e.target.value);
+              }}
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -154,11 +197,50 @@ export function SearchPage() {
               type="date"
               className="input"
               value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                setUrlParam('dateTo', e.target.value);
+              }}
             />
           </label>
         </div>
       </div>
+
+      {tagFacets.length > 0 && (
+        <fieldset className="mb-6">
+          <legend className="mb-2 text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
+            Topics
+          </legend>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={`chip ${tag === '' ? 'bg-accent-500 text-white' : ''}`}
+              aria-pressed={tag === ''}
+              onClick={() => {
+                setTag('');
+                setUrlParam('tag', '');
+              }}
+            >
+              All
+            </button>
+            {tagFacets.slice(0, 12).map((facet) => (
+              <button
+                key={facet.value}
+                type="button"
+                className={`chip ${tag === facet.value ? 'bg-accent-500 text-white' : ''}`}
+                aria-pressed={tag === facet.value}
+                onClick={() => {
+                  const next = tag === facet.value ? '' : facet.value;
+                  setTag(next);
+                  setUrlParam('tag', next);
+                }}
+              >
+                {facet.value} ({facet.count})
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
 
       {!enabled && (
         <p className="text-ink-700 dark:text-parchment-100">

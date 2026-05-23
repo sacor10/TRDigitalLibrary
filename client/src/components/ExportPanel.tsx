@@ -1,6 +1,7 @@
 import type { Document } from '@tr/shared';
 
 import { documentExportUrl, type ExportFormat } from '../api/client';
+import { citationDownloadHref, citationKey } from '../lib/citation';
 
 interface ExportPanelProps {
   document: Document;
@@ -11,6 +12,11 @@ const FORMATS: { id: ExportFormat; label: string; description: string }[] = [
   { id: 'epub', label: 'EPUB', description: 'For e-readers (Apple Books, Kindle, Calibre).' },
   { id: 'tei', label: 'TEI XML', description: 'P5-shaped scholarly source.' },
 ];
+
+const CITATION_FORMATS = [
+  { id: 'bibtex', ext: 'bib', label: 'BibTeX', description: 'Citation manager entry.' },
+  { id: 'ris', ext: 'ris', label: 'RIS', description: 'Zotero, EndNote, and Mendeley.' },
+] as const;
 
 export function ExportPanel({ document }: ExportPanelProps) {
   return (
@@ -29,6 +35,21 @@ export function ExportPanel({ document }: ExportPanelProps) {
               href={documentExportUrl(document.id, f.id)}
               download
               aria-label={`Download ${document.title} as ${f.label}`}
+            >
+              <span>{f.label}</span>
+              <span className="text-xs text-ink-700/60 dark:text-parchment-100/60">
+                {f.description}
+              </span>
+            </a>
+          </li>
+        ))}
+        {CITATION_FORMATS.map((f) => (
+          <li key={f.id}>
+            <a
+              className="btn w-full flex-col items-start text-left sm:flex-row sm:items-center sm:justify-between"
+              href={citationDownloadHref(document, f.id)}
+              download={`${citationKey(document)}.${f.ext}`}
+              aria-label={`Download ${document.title} citation as ${f.label}`}
             >
               <span>{f.label}</span>
               <span className="text-xs text-ink-700/60 dark:text-parchment-100/60">

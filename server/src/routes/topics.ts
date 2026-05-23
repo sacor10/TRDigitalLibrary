@@ -9,6 +9,7 @@ import type {
 import { Router } from 'express';
 
 import type { LibsqlClient } from '../db.js';
+import { setPublicCache } from '../http-cache.js';
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 200;
@@ -56,6 +57,7 @@ export function createTopicsRouter(db: LibsqlClient): Router {
       return { id: tag, label: tag, size: asNumber(row.size) };
     });
     const payload: TopicsResponse = { items, total: items.length };
+    setPublicCache(res, 600);
     return res.json(payload);
   });
 
@@ -112,6 +114,7 @@ export function createTopicsRouter(db: LibsqlClient): Router {
       };
     });
     const payload: TopicDriftResponse = { points };
+    setPublicCache(res, 600);
     return res.json(payload);
   });
 
@@ -164,6 +167,7 @@ export function createTopicsRouter(db: LibsqlClient): Router {
       limit,
       offset,
     };
+    setPublicCache(res, 600);
     return res.json(payload);
   });
 

@@ -12,6 +12,7 @@ import type {
 import { Router } from 'express';
 
 import type { LibsqlClient } from '../db.js';
+import { setPublicCache } from '../http-cache.js';
 
 interface SentimentRow {
   document_id: string;
@@ -120,6 +121,7 @@ export function createSentimentRouter(db: LibsqlClient): Router {
       documentCount: r.document_count,
     }));
     const payload: SentimentTimelineResponse = { bin, from, to, points };
+    setPublicCache(res);
     return res.json(payload);
   });
 
@@ -214,6 +216,7 @@ export function createSentimentRouter(db: LibsqlClient): Router {
       positiveOffset,
       negativeOffset,
     };
+    setPublicCache(res);
     return res.json(payload);
   });
 
@@ -235,6 +238,7 @@ export function createSentimentRouter(db: LibsqlClient): Router {
       maxDate: count > 0 && row?.max_date != null ? String(row.max_date) : null,
       count,
     };
+    setPublicCache(res, 600);
     return res.json(payload);
   });
 
@@ -261,6 +265,7 @@ export function createSentimentRouter(db: LibsqlClient): Router {
       computed_at: asString(r.computed_at),
       model_version: asString(r.model_version),
     };
+    setPublicCache(res, 600);
     return res.json(rowToSentiment(row));
   });
 

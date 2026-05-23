@@ -27,6 +27,12 @@ export interface PagedQueryResult<T, R extends PagedResponse<T> = PagedResponse<
   data: R | undefined;
 }
 
+function clampOffset(raw: string | null): number {
+  const n = raw === null ? NaN : Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.trunc(n);
+}
+
 export interface PagedQueryArgs<T, F, R extends PagedResponse<T> = PagedResponse<T>> {
   baseKey: string;
   filters: F;
@@ -43,7 +49,8 @@ export function usePagedQuery<T, F, R extends PagedResponse<T> = PagedResponse<T
   const [searchParams, setSearchParams] = useSearchParams();
   const pageSize = clampPageSize(searchParams.get('limit'));
 
-  const [offset, setOffset] = useState(0);
+  const [offset, setOffset] = useState(() => clampOffset(searchParams.get('offset')));
+  const baseOffsetRef = useRef(offset);
   const [items, setItems] = useState<T[]>([]);
   const [total, setTotal] = useState(0);
 
@@ -52,6 +59,7 @@ export function usePagedQuery<T, F, R extends PagedResponse<T> = PagedResponse<T
   useEffect(() => {
     if (prevResetKey.current === resetKey) return;
     prevResetKey.current = resetKey;
+    baseOffsetRef.current = 0;
     setOffset(0);
     setItems([]);
     setTotal(0);
@@ -79,18 +87,18 @@ export function usePagedQuery<T, F, R extends PagedResponse<T> = PagedResponse<T
     if (appliedRef.current === fingerprint) return;
     appliedRef.current = fingerprint;
     setTotal(data.total);
-    if (offset === 0) {
+    if (offset === baseOffsetRef.current) {
       setItems(data.items);
     } else {
       setItems((prev) => [...prev, ...data.items]);
     }
   }, [query.data, offset, resetKey]);
 
-  const hasMore = total > 0 && items.length < total;
+  const hasMore = total > 0 && baseOffsetRef.current + items.length < total;
 
   const loadMore = useCallback(() => {
     if (!hasMore || query.isFetching) return;
-    const next = items.length;
+    const next = baseOffsetRef.current + items.length;
     setOffset(next);
     setSearchParams((prev) => {
       const sp = new URLSearchParams(prev);

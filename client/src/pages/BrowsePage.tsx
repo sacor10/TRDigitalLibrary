@@ -1,11 +1,11 @@
 // Lazy-loaded via "Load more" (chosen for accessibility over IntersectionObserver).
 import { type Document, type DocumentListResponse, type DocumentType } from '@tr/shared';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { fetchDocuments } from '../api/client';
 import { DocumentList } from '../components/DocumentList';
-import { LoadingModal } from '../components/LoadingModal';
 import { LoadMore } from '../components/LoadMore';
+import { LoadingModal } from '../components/LoadingModal';
 import { usePagedQuery } from '../hooks/usePagedQuery';
 
 const TYPE_LABEL: Record<DocumentType, string> = {
@@ -22,12 +22,14 @@ type Order = 'asc' | 'desc';
 
 interface BrowseFilters {
   type: DocumentType | '';
+  tag: string;
   sort: Sort;
   order: Order;
 }
 
 export function BrowsePage() {
   const [type, setType] = useState<DocumentType | ''>('');
+  const [tag, setTag] = useState('');
   const [sort, setSort] = useState<Sort>('date');
   const [order, setOrder] = useState<Order>('asc');
 
@@ -43,17 +45,20 @@ export function BrowsePage() {
     data,
   } = usePagedQuery<Document, BrowseFilters, DocumentListResponse>({
     baseKey: 'documents',
-    filters: { type, sort, order },
+    filters: { type, tag, sort, order },
     fetcher: (filters, limit, offset) =>
       fetchDocuments({
         ...(filters.type ? { type: filters.type } : {}),
+        ...(filters.tag ? { tag: filters.tag } : {}),
         sort: filters.sort,
         order: filters.order,
         limit,
         offset,
       }),
   });
-  const availableTypes = data?.availableTypes ?? [];
+  const availableTypes = useMemo(() => data?.availableTypes ?? [], [data?.availableTypes]);
+  const facets = data?.facets;
+  const tagFacets = facets?.tags ?? [];
   const hasMultipleTypes = availableTypes.length > 1;
 
   useEffect(() => {
@@ -86,6 +91,9 @@ export function BrowsePage() {
             {availableTypes.map((t) => (
               <option key={t} value={t}>
                 {TYPE_LABEL[t]}
+                {facets?.types.find((facet) => facet.value === t)
+                  ? ` (${facets.types.find((facet) => facet.value === t)?.count})`
+                  : ''}
               </option>
             ))}
           </select>
@@ -118,6 +126,35 @@ export function BrowsePage() {
           </select>
         </label>
       </div>
+
+      {tagFacets.length > 0 && (
+        <fieldset className="mb-6">
+          <legend className="mb-2 text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
+            Topics
+          </legend>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={`chip ${tag === '' ? 'bg-accent-500 text-white' : ''}`}
+              aria-pressed={tag === ''}
+              onClick={() => setTag('')}
+            >
+              All
+            </button>
+            {tagFacets.slice(0, 12).map((facet) => (
+              <button
+                key={facet.value}
+                type="button"
+                className={`chip ${tag === facet.value ? 'bg-accent-500 text-white' : ''}`}
+                aria-pressed={tag === facet.value}
+                onClick={() => setTag((current) => (current === facet.value ? '' : facet.value))}
+              >
+                {facet.value} ({facet.count})
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
 
       {isLoading && items.length === 0 && <LoadingModal message="Loading documents..." />}
       {error ? (

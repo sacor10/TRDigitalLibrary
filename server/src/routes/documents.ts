@@ -13,20 +13,17 @@ import {
   type ProvenanceContext,
 } from '../db.js';
 import { FORMAT_BY_EXT, generateExport } from '../export/index.js';
+import { setPublicCache } from '../http-cache.js';
 
-const DOCUMENT_SUMMARY_COLUMNS = `
-  id, title, type, date, recipient, location, author,
-  transcription_url, transcription_format, facsimile_url,
-  iiif_manifest_url, provenance, source, source_url, tags,
-  mentions, tei_source_hash
-`;
+import {
+  DOCUMENT_DETAIL_COLUMNS,
+  DOCUMENT_SUMMARY_COLUMNS,
+  asNumber,
+  getDocumentFacets,
+} from './document-query.js';
 
 export interface CreateDocumentsRouterOptions {
   readonly?: boolean | undefined;
-}
-
-function asNumber(v: unknown): number {
-  return typeof v === 'bigint' ? Number(v) : Number(v ?? 0);
 }
 
 export function createDocumentsRouter(
@@ -43,29 +40,39 @@ export function createDocumentsRouter(
     const { type, dateFrom, dateTo, recipient, tag, sort, order, limit, offset } = parsed.data;
 
     const where: string[] = [];
+    const typeFacetWhere: string[] = [];
+    const tagFacetWhere: string[] = [];
     const params: Record<string, InValue> = {};
+    const addFilter = (sql: string, except: 'type' | 'tag' | null = null): void => {
+      where.push(sql);
+      if (except !== 'type') typeFacetWhere.push(sql);
+      if (except !== 'tag') tagFacetWhere.push(sql);
+    };
     if (type) {
-      where.push('type = @type');
+      addFilter('documents.type = @type', 'type');
       params.type = type;
     }
     if (dateFrom) {
-      where.push('date >= @dateFrom');
+      addFilter('documents.date >= @dateFrom');
       params.dateFrom = dateFrom;
     }
     if (dateTo) {
-      where.push('date <= @dateTo');
+      addFilter('documents.date <= @dateTo');
       params.dateTo = dateTo;
     }
     if (recipient) {
-      where.push('recipient LIKE @recipient');
+      addFilter('documents.recipient LIKE @recipient');
       params.recipient = `%${recipient}%`;
     }
     if (tag !== undefined) {
-      where.push('EXISTS (SELECT 1 FROM json_each(documents.tags) WHERE value = @tag)');
+      addFilter(
+        'EXISTS (SELECT 1 FROM document_topic_assignments dta_filter WHERE dta_filter.document_id = documents.id AND dta_filter.topic = @tag)',
+        'tag',
+      );
       params.tag = tag;
     }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    const orderSql = `ORDER BY ${sort} ${order.toUpperCase()}`;
+    const orderSql = `ORDER BY documents.${sort} ${order.toUpperCase()}`;
 
     try {
       const totalResult = await db.execute({
@@ -74,11 +81,11 @@ export function createDocumentsRouter(
       });
       const total = asNumber(totalResult.rows[0]?.c);
 
-      const typeResult = await db.execute({
-        sql: 'SELECT DISTINCT type FROM documents ORDER BY type ASC',
-        args: {},
+      const facets = await getDocumentFacets(db, where, params, {
+        typeWhere: typeFacetWhere,
+        tagWhere: tagFacetWhere,
       });
-      const availableTypes = typeResult.rows.map((row) => DocumentTypeSchema.parse(row.type));
+      const availableTypes = facets.types.map((row) => DocumentTypeSchema.parse(row.value));
 
       const listResult = await db.execute({
         sql: `SELECT ${DOCUMENT_SUMMARY_COLUMNS} FROM documents ${whereSql} ${orderSql} LIMIT @limit OFFSET @offset`,
@@ -101,7 +108,8 @@ export function createDocumentsRouter(
         return doc;
       });
 
-      return res.json({ items, total, availableTypes });
+      setPublicCache(res);
+      return res.json({ items, total, availableTypes, facets });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('[documents] list failed', err);
@@ -132,7 +140,7 @@ export function createDocumentsRouter(
         'Content-Disposition',
         `attachment; filename="${artifact.filename}"`,
       );
-      res.setHeader('Cache-Control', 'public, max-age=300');
+      setPublicCache(res);
       return res.status(200).send(artifact.body);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Export failed';
@@ -143,15 +151,19 @@ export function createDocumentsRouter(
 
   router.get('/:id', async (req, res) => {
     const id = req.params.id;
+    const includeTeiXml = req.query.include === 'teiXml';
     try {
       const result = await db.execute({
-        sql: 'SELECT * FROM documents WHERE id = ?',
+        sql: `SELECT ${DOCUMENT_DETAIL_COLUMNS}, ${includeTeiXml ? 'tei_xml' : 'NULL AS tei_xml'}
+                FROM documents
+               WHERE id = ?`,
         args: [id],
       });
       if (result.rows.length === 0) {
         return res.status(404).json({ error: 'Document not found' });
       }
       const docRow = rowToDocumentRow(result.rows[0]!);
+      setPublicCache(res);
       return res.json(await rowToDocumentWithProvenance(db, docRow));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

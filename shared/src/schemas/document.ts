@@ -125,6 +125,22 @@ export const DocumentListResponseSchema = z.object({
   items: z.array(DocumentSchema),
   total: z.number().int().nonnegative(),
   availableTypes: z.array(DocumentTypeSchema).default([]),
+  facets: z
+    .object({
+      types: z.array(
+        z.object({
+          value: DocumentTypeSchema,
+          count: z.number().int().nonnegative(),
+        }),
+      ),
+      tags: z.array(
+        z.object({
+          value: z.string().min(1),
+          count: z.number().int().nonnegative(),
+        }),
+      ),
+    })
+    .default({ types: [], tags: [] }),
 });
 
 export type DocumentListResponse = z.infer<typeof DocumentListResponseSchema>;
@@ -166,6 +182,22 @@ export type SearchResult = z.infer<typeof SearchResultSchema>;
 export const SearchResponseSchema = z.object({
   results: z.array(SearchResultSchema),
   total: z.number().int().nonnegative(),
+  facets: z
+    .object({
+      types: z.array(
+        z.object({
+          value: DocumentTypeSchema,
+          count: z.number().int().nonnegative(),
+        }),
+      ),
+      tags: z.array(
+        z.object({
+          value: z.string().min(1),
+          count: z.number().int().nonnegative(),
+        }),
+      ),
+    })
+    .default({ types: [], tags: [] }),
 });
 
 export type SearchResponse = z.infer<typeof SearchResponseSchema>;

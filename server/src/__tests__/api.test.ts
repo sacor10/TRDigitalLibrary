@@ -188,9 +188,9 @@ describe('TR Digital Library API', () => {
       const res = await request(countingApp).get('/api/documents?sort=date&order=asc');
       expect(res.status).toBe(200);
       expect(res.body.items.length).toBeGreaterThan(0);
-      // 1 COUNT + 1 SELECT + 1 batched provenance fetch. Small headroom for
-      // future bookkeeping; anything close to N+1 trips this.
-      expect(executeCount).toBeLessThanOrEqual(4);
+      // 1 COUNT + 2 facet aggregates + 1 SELECT + 1 batched provenance fetch.
+      // Anything close to N+1 still trips this.
+      expect(executeCount).toBeLessThanOrEqual(5);
     });
   });
 
@@ -316,7 +316,7 @@ describe('TR Digital Library API', () => {
       expect(res.status).toBe(200);
 
       const ftsCalls = executeCalls.filter((c) => c.sql.includes('documents_fts'));
-      expect(ftsCalls).toHaveLength(2);
+      expect(ftsCalls).toHaveLength(4);
 
       const rankingCall = ftsCalls.find((c) => c.sql.includes('COUNT(*) OVER'));
       expect(rankingCall, 'ranking query should carry COUNT(*) OVER ()').toBeDefined();
@@ -333,6 +333,12 @@ describe('TR Digital Library API', () => {
       const hydrateArgs = hydrateCall!.args as unknown[];
       expect(hydrateArgs[0]).toBe('"alpenglow"');
       expect(hydrateArgs.length).toBeGreaterThan(1);
+
+      const facetCalls = ftsCalls.filter((c) => c !== rankingCall && c !== hydrateCall);
+      expect(facetCalls).toHaveLength(2);
+      for (const facetCall of facetCalls) {
+        expect(facetCall.sql).not.toContain('snippet(');
+      }
 
       // Belt-and-braces: no separate COUNT(*) query survives.
       const standaloneCount = executeCalls.find((c) =>

@@ -8,6 +8,8 @@ const STYLES: { id: CitationStyle; label: string }[] = [
   { id: 'chicago', label: 'Chicago' },
   { id: 'mla', label: 'MLA' },
   { id: 'apa', label: 'APA' },
+  { id: 'bibtex', label: 'BibTeX' },
+  { id: 'ris', label: 'RIS' },
 ];
 
 interface CitationGeneratorProps {

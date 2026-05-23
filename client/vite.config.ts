@@ -5,6 +5,16 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          facsimile: ['openseadragon', 'react-zoom-pan-pinch'],
+          network: ['cytoscape', 'react-cytoscapejs'],
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       '@tr/shared': path.resolve(__dirname, '../shared/src/index.ts'),

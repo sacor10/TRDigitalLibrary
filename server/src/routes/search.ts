@@ -1,47 +1,78 @@
+import type { InValue } from '@libsql/client';
 import { SearchQuerySchema } from '@tr/shared';
 import { Router } from 'express';
 
-
 import { rowToDocument, rowToDocumentRow, type LibsqlClient } from '../db.js';
+import { setPublicCache } from '../http-cache.js';
 
-const DOCUMENT_SUMMARY_COLUMNS = `
-  documents.id,
-  documents.title,
-  documents.type,
-  documents.date,
-  documents.recipient,
-  documents.location,
-  documents.author,
-  documents.transcription_url,
-  documents.transcription_format,
-  documents.facsimile_url,
-  documents.iiif_manifest_url,
-  documents.provenance,
-  documents.source,
-  documents.source_url,
-  documents.tags,
-  documents.mentions,
-  documents.tei_source_hash
-`;
+import { DOCUMENT_SUMMARY_COLUMNS, asNumber, asString } from './document-query.js';
 
-function buildFtsQuery(raw: string): string {
-  const tokens = raw
+const FTS_FIELD_MAP: Record<string, string> = {
+  title: 'title',
+  recipient: 'recipient',
+  tag: 'tags',
+  tags: 'tags',
+};
+
+function quoteFtsToken(raw: string): string {
+  return `"${raw.replace(/"/g, '""')}"`;
+}
+
+function terms(raw: string): string[] {
+  return raw
     .split(/\s+/)
     .map((t) => t.replace(/[^\p{L}\p{N}-]/gu, ''))
     .filter((t) => t.length > 0)
-    .map((t) => `"${t}"`);
-  if (tokens.length === 0) {
-    return '""';
+    .map(quoteFtsToken);
+}
+
+function buildFtsQuery(raw: string): { ftsQuery: string; where: string[]; params: Record<string, InValue> } {
+  const where: string[] = [];
+  const params: Record<string, InValue> = {};
+  const tokens: string[] = [];
+  let structuredIndex = 0;
+
+  for (const part of raw.split(/\s+/)) {
+    const match = part.match(/^([A-Za-z]+):(.+)$/);
+    if (!match) {
+      tokens.push(...terms(part));
+      continue;
+    }
+    const field = match[1] ?? '';
+    const value = match[2] ?? '';
+    const normalizedField = field.toLowerCase();
+    const cleaned = value.trim();
+    if (!cleaned) continue;
+    const ftsField = FTS_FIELD_MAP[normalizedField];
+    if (ftsField) {
+      const scopedTerms = terms(cleaned);
+      tokens.push(...scopedTerms.map((term) => `${ftsField}:${term}`));
+      continue;
+    }
+    const key = `structured_${structuredIndex++}`;
+    if (normalizedField === 'date') {
+      if (/^\d{4}$/.test(cleaned)) {
+        where.push(`documents.date >= @${key}_from AND documents.date <= @${key}_to`);
+        params[`${key}_from`] = `${cleaned}-01-01`;
+        params[`${key}_to`] = `${cleaned}-12-31`;
+      } else if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+        where.push(`documents.date = @${key}`);
+        params[key] = cleaned;
+      }
+      continue;
+    }
+    if (normalizedField === 'collection' || normalizedField === 'source') {
+      where.push(`documents.source LIKE @${key}`);
+      params[key] = `%${cleaned}%`;
+      continue;
+    }
+    tokens.push(...terms(part));
   }
-  return tokens.join(' AND ');
-}
 
-function asNumber(v: unknown): number {
-  return typeof v === 'bigint' ? Number(v) : Number(v ?? 0);
-}
-
-function asString(v: unknown): string {
-  return v == null ? '' : String(v);
+  if (tokens.length === 0) {
+    return { ftsQuery: '""', where, params };
+  }
+  return { ftsQuery: tokens.join(' AND '), where, params };
 }
 
 export function createSearchRouter(db: LibsqlClient): Router {
@@ -53,28 +84,42 @@ export function createSearchRouter(db: LibsqlClient): Router {
       return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
     }
     const { q, type, dateFrom, dateTo, recipient, tag, limit, offset } = parsed.data;
-    const ftsQuery = buildFtsQuery(q);
+    const parsedQuery = buildFtsQuery(q);
+    let ftsQuery = parsedQuery.ftsQuery;
 
-    const where: string[] = ['documents_fts MATCH @ftsQuery'];
-    const filterParams: Record<string, string | number> = { ftsQuery };
+    const where: string[] = ['documents_fts MATCH @ftsQuery', ...parsedQuery.where];
+    const typeFacetWhere: string[] = ['documents_fts MATCH @ftsQuery', ...parsedQuery.where];
+    const tagFacetWhere: string[] = ['documents_fts MATCH @ftsQuery', ...parsedQuery.where];
+    const filterParams: Record<string, InValue> = { ftsQuery, ...parsedQuery.params };
+    const addFilter = (sql: string, except: 'type' | 'tag' | null = null): void => {
+      where.push(sql);
+      if (except !== 'type') typeFacetWhere.push(sql);
+      if (except !== 'tag') tagFacetWhere.push(sql);
+    };
     if (type) {
-      where.push('documents.type = @type');
+      addFilter('documents.type = @type', 'type');
       filterParams.type = type;
     }
     if (dateFrom) {
-      where.push('documents.date >= @dateFrom');
+      addFilter('documents.date >= @dateFrom');
       filterParams.dateFrom = dateFrom;
     }
     if (dateTo) {
-      where.push('documents.date <= @dateTo');
+      addFilter('documents.date <= @dateTo');
       filterParams.dateTo = dateTo;
     }
     if (recipient) {
-      where.push('documents.recipient LIKE @recipient');
-      filterParams.recipient = `%${recipient}%`;
+      const recipientTerms = terms(recipient).map((term) => `recipient:${term}`);
+      if (recipientTerms.length > 0) {
+        ftsQuery = [ftsQuery, ...recipientTerms].join(' AND ');
+        filterParams.ftsQuery = ftsQuery;
+      }
     }
     if (tag !== undefined) {
-      where.push('EXISTS (SELECT 1 FROM json_each(documents.tags) WHERE value = @tag)');
+      addFilter(
+        'EXISTS (SELECT 1 FROM document_topic_assignments dta_filter WHERE dta_filter.document_id = documents.id AND dta_filter.topic = @tag)',
+        'tag',
+      );
       filterParams.tag = tag;
     }
     const whereSql = `WHERE ${where.join(' AND ')}`;
@@ -107,7 +152,8 @@ export function createSearchRouter(db: LibsqlClient): Router {
       });
 
       if (rankResult.rows.length === 0) {
-        return res.json({ results: [], total: 0 });
+        setPublicCache(res);
+        return res.json({ results: [], total: 0, facets: { types: [], tags: [] } });
       }
 
       const total = asNumber(rankResult.rows[0]?.total_count);
@@ -133,12 +179,45 @@ export function createSearchRouter(db: LibsqlClient): Router {
         args: [ftsQuery, ...rowids, ...rowids],
       });
 
+      const facetFromWhere = (facetWhere: readonly string[], includeTopics = false) => `FROM documents_fts
+        JOIN documents ON documents.rowid = documents_fts.rowid
+        ${includeTopics ? 'JOIN document_topic_assignments dta ON dta.document_id = documents.id' : ''}
+        WHERE ${facetWhere.join(' AND ')}`;
+      const [typeFacetResult, tagFacetResult] = await Promise.all([
+        db.execute({
+          sql: `SELECT documents.type AS value, COUNT(*) AS count
+                  ${facetFromWhere(typeFacetWhere)}
+                 GROUP BY documents.type
+                 ORDER BY documents.type ASC`,
+          args: filterParams,
+        }),
+        db.execute({
+          sql: `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
+                  ${facetFromWhere(tagFacetWhere, true)}
+                 GROUP BY dta.topic
+                 ORDER BY count DESC, dta.topic ASC
+                 LIMIT 50`,
+          args: filterParams,
+        }),
+      ]);
+
+      setPublicCache(res);
       return res.json({
         results: hydrateResult.rows.map((row) => ({
           document: rowToDocument(rowToDocumentRow(row)),
           snippet: asString(row.snippet),
         })),
         total,
+        facets: {
+          types: typeFacetResult.rows.map((row) => ({
+            value: asString(row.value),
+            count: asNumber(row.count),
+          })),
+          tags: tagFacetResult.rows.map((row) => ({
+            value: asString(row.value),
+            count: asNumber(row.count),
+          })),
+        },
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
