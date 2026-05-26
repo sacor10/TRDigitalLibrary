@@ -129,6 +129,20 @@ export function rowToDocumentRow(row: Row): DocumentRow {
   };
 }
 
+// Tolerate empty/malformed JSON in the tags/mentions columns. Production has
+// historically held a few rows where these arrived as '' (or invalid JSON)
+// instead of the canonical '[]', and `JSON.parse('')` throws — which would
+// 500 any list query that happens to page over such a row.
+function safeParseStringArray(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 export function rowToDocument(row: DocumentRow): Document {
   return {
     id: row.id,
@@ -146,8 +160,8 @@ export function rowToDocument(row: DocumentRow): Document {
     provenance: row.provenance,
     source: row.source,
     sourceUrl: row.source_url,
-    tags: JSON.parse(row.tags) as string[],
-    mentions: JSON.parse(row.mentions ?? '[]') as string[],
+    tags: safeParseStringArray(row.tags),
+    mentions: safeParseStringArray(row.mentions),
     teiXml: row.tei_xml,
   };
 }

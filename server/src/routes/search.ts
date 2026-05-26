@@ -5,7 +5,12 @@ import { Router } from 'express';
 import { rowToDocument, rowToDocumentRow, type LibsqlClient } from '../db.js';
 import { setPublicCache } from '../http-cache.js';
 
-import { DOCUMENT_SUMMARY_COLUMNS, asNumber, asString } from './document-query.js';
+import {
+  DOCUMENT_SUMMARY_COLUMNS,
+  asNumber,
+  asString,
+  pickReferencedParams,
+} from './document-query.js';
 
 const FTS_FIELD_MAP: Record<string, string> = {
   title: 'title',
@@ -183,22 +188,18 @@ export function createSearchRouter(db: LibsqlClient): Router {
         JOIN documents ON documents.rowid = documents_fts.rowid
         ${includeTopics ? 'JOIN document_topic_assignments dta ON dta.document_id = documents.id' : ''}
         WHERE ${facetWhere.join(' AND ')}`;
-      const [typeFacetResult, tagFacetResult] = await Promise.all([
-        db.execute({
-          sql: `SELECT documents.type AS value, COUNT(*) AS count
+      const typeFacetSql = `SELECT documents.type AS value, COUNT(*) AS count
                   ${facetFromWhere(typeFacetWhere)}
                  GROUP BY documents.type
-                 ORDER BY documents.type ASC`,
-          args: filterParams,
-        }),
-        db.execute({
-          sql: `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
+                 ORDER BY documents.type ASC`;
+      const tagFacetSql = `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
                   ${facetFromWhere(tagFacetWhere, true)}
                  GROUP BY dta.topic
                  ORDER BY count DESC, dta.topic ASC
-                 LIMIT 50`,
-          args: filterParams,
-        }),
+                 LIMIT 50`;
+      const [typeFacetResult, tagFacetResult] = await Promise.all([
+        db.execute({ sql: typeFacetSql, args: pickReferencedParams(typeFacetSql, filterParams) }),
+        db.execute({ sql: tagFacetSql, args: pickReferencedParams(tagFacetSql, filterParams) }),
       ]);
 
       setPublicCache(res);

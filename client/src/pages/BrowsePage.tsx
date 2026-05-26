@@ -1,6 +1,7 @@
 // Lazy-loaded via "Load more" (chosen for accessibility over IntersectionObserver).
 import { type Document, type DocumentListResponse, type DocumentType } from '@tr/shared';
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { fetchDocuments } from '../api/client';
 import { DocumentList } from '../components/DocumentList';
@@ -28,10 +29,27 @@ interface BrowseFilters {
 }
 
 export function BrowsePage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [type, setType] = useState<DocumentType | ''>('');
-  const [tag, setTag] = useState('');
+  const [tag, setTag] = useState(() => searchParams.get('tag') ?? '');
   const [sort, setSort] = useState<Sort>('date');
   const [order, setOrder] = useState<Order>('asc');
+
+  // Keep the chip click handler and a programmatic reset in one place so the
+  // selected tag, the URL, and pagination state stay in sync.
+  const updateTag = (next: string): void => {
+    setTag(next);
+    setSearchParams(
+      (prev) => {
+        const sp = new URLSearchParams(prev);
+        if (next) sp.set('tag', next);
+        else sp.delete('tag');
+        sp.delete('offset');
+        return sp;
+      },
+      { replace: true },
+    );
+  };
 
   const {
     items,
@@ -60,6 +78,17 @@ export function BrowsePage() {
   const facets = data?.facets;
   const tagFacets = facets?.tags ?? [];
   const hasMultipleTypes = availableTypes.length > 1;
+
+  // Tag chips come from the server's facet aggregate, which is reset to
+  // undefined on error. We still want the user to be able to clear the
+  // selected tag in that case, so we ensure the active tag is always
+  // present in the chip list — synthesized with count=0 if the response
+  // didn't include it (e.g. failed request, or tag not in the top-50 cut).
+  const visibleTagChips = useMemo(() => {
+    if (!tag) return tagFacets;
+    if (tagFacets.some((facet) => facet.value === tag)) return tagFacets;
+    return [{ value: tag, count: 0 }, ...tagFacets];
+  }, [tag, tagFacets]);
 
   useEffect(() => {
     if (type && data && !availableTypes.includes(type)) {
@@ -127,7 +156,7 @@ export function BrowsePage() {
         </label>
       </div>
 
-      {tagFacets.length > 0 && (
+      {visibleTagChips.length > 0 && (
         <fieldset className="mb-6">
           <legend className="mb-2 text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
             Topics
@@ -137,19 +166,20 @@ export function BrowsePage() {
               type="button"
               className={`chip ${tag === '' ? 'bg-accent-500 text-white' : ''}`}
               aria-pressed={tag === ''}
-              onClick={() => setTag('')}
+              onClick={() => updateTag('')}
             >
               All
             </button>
-            {tagFacets.slice(0, 12).map((facet) => (
+            {visibleTagChips.slice(0, 12).map((facet) => (
               <button
                 key={facet.value}
                 type="button"
                 className={`chip ${tag === facet.value ? 'bg-accent-500 text-white' : ''}`}
                 aria-pressed={tag === facet.value}
-                onClick={() => setTag((current) => (current === facet.value ? '' : facet.value))}
+                onClick={() => updateTag(tag === facet.value ? '' : facet.value)}
               >
-                {facet.value} ({facet.count})
+                {facet.value}
+                {facet.count > 0 ? ` (${facet.count})` : ''}
               </button>
             ))}
           </div>

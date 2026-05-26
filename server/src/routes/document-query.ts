@@ -47,6 +47,22 @@ export function asString(v: unknown): string {
   return v == null ? '' : String(v);
 }
 
+// Strips entries from `params` whose @name doesn't appear in `sql`. libsql's
+// HTTP transport rejects statements that bind a named parameter the SQL
+// doesn't reference, so the per-facet queries (which include/exclude
+// different WHERE clauses than the main list query) must be handed a
+// matching subset of args.
+export function pickReferencedParams(
+  sql: string,
+  params: Record<string, InValue>,
+): Record<string, InValue> {
+  const out: Record<string, InValue> = {};
+  for (const [name, value] of Object.entries(params)) {
+    if (new RegExp(`@${name}\\b`).test(sql)) out[name] = value;
+  }
+  return out;
+}
+
 export async function getDocumentFacets(
   db: LibsqlClient,
   where: readonly string[],
@@ -60,25 +76,22 @@ export async function getDocumentFacets(
     ? `WHERE ${(opts.tagWhere ?? where).join(' AND ')}`
     : '';
 
-  const [typeResult, tagResult] = await Promise.all([
-    db.execute({
-      sql: `SELECT documents.type AS value, COUNT(*) AS count
+  const typeSql = `SELECT documents.type AS value, COUNT(*) AS count
               FROM documents
               ${typeWhereSql}
              GROUP BY documents.type
-             ORDER BY documents.type ASC`,
-      args: params,
-    }),
-    db.execute({
-      sql: `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
+             ORDER BY documents.type ASC`;
+  const tagSql = `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
               FROM documents
               JOIN document_topic_assignments dta ON dta.document_id = documents.id
               ${tagWhereSql}
              GROUP BY dta.topic
              ORDER BY count DESC, dta.topic ASC
-             LIMIT 50`,
-      args: params,
-    }),
+             LIMIT 50`;
+
+  const [typeResult, tagResult] = await Promise.all([
+    db.execute({ sql: typeSql, args: pickReferencedParams(typeSql, params) }),
+    db.execute({ sql: tagSql, args: pickReferencedParams(tagSql, params) }),
   ]);
 
   return {

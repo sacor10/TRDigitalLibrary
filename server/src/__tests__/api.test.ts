@@ -142,6 +142,32 @@ describe('TR Digital Library API', () => {
       expect(res.body.total).toBe(2);
     });
 
+    // Regression guard for a 500 reported against
+    // /api/documents?tag=Military+affairs&sort=date&order=asc&limit=10&offset=0.
+    // Multi-word topics that have no other shared filter exercise the
+    // params-vs-WHERE mismatch on the tag-facet query — the SQL excludes the
+    // tag clause but @tag still has to be stripped from the bound args.
+    it('filters by multi-word tag without 500', async () => {
+      const milDoc = {
+        ...TEST_DOCUMENTS[0]!,
+        id: 'military-doc',
+        tags: ['Military affairs'],
+        transcription: 'military stub',
+        sourceUrl: null,
+      };
+      await upsertDocument(db, milDoc);
+      try {
+        const res = await request(app).get(
+          '/api/documents?tag=Military+affairs&sort=date&order=asc&limit=10&offset=0',
+        );
+        expect(res.status).toBe(200);
+        expect(res.body.total).toBe(1);
+        expect(res.body.items[0].id).toBe('military-doc');
+      } finally {
+        await db.execute({ sql: 'DELETE FROM documents WHERE id = ?', args: ['military-doc'] });
+      }
+    });
+
     it('rejects malformed query', async () => {
       const res = await request(app).get('/api/documents?dateFrom=not-a-date');
       expect(res.status).toBe(400);

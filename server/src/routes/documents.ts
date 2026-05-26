@@ -85,7 +85,16 @@ export function createDocumentsRouter(
         typeWhere: typeFacetWhere,
         tagWhere: tagFacetWhere,
       });
-      const availableTypes = facets.types.map((row) => DocumentTypeSchema.parse(row.value));
+      // Defensively skip rows whose `type` doesn't match the public enum (e.g.
+      // legacy/partially-migrated data). Throwing here would 500 the whole
+      // list response on a single bad row.
+      const validTypeRows = facets.types.flatMap((row) => {
+        const parsed = DocumentTypeSchema.safeParse(row.value);
+        return parsed.success ? [{ value: parsed.data, count: row.count }] : [];
+      });
+      const availableTypes = validTypeRows.map((row) => row.value);
+      facets.types = validTypeRows;
+      facets.tags = facets.tags.filter((row) => row.value.length > 0);
 
       const listResult = await db.execute({
         sql: `SELECT ${DOCUMENT_SUMMARY_COLUMNS} FROM documents ${whereSql} ${orderSql} LIMIT @limit OFFSET @offset`,
