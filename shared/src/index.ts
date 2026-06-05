@@ -124,6 +124,25 @@ export type { ThemedTimeline } from './config/timelines.js';
 export { EssayMetaSchema } from './schemas/essay.js';
 export type { EssayMeta } from './schemas/essay.js';
 
+export {
+  CollectionSchema,
+  CollectionItemSchema,
+  CollectionDetailSchema,
+  CollectionsListResponseSchema,
+  CollectionCreateInputSchema,
+  CollectionPatchSchema,
+  CollectionItemInputSchema,
+} from './schemas/collection.js';
+export type {
+  Collection,
+  CollectionItem,
+  CollectionDetail,
+  CollectionsListResponse,
+  CollectionCreateInput,
+  CollectionPatch,
+  CollectionItemInput,
+} from './schemas/collection.js';
+
 export type {
   SentimentLabel,
   SentimentBin,

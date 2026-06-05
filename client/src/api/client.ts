@@ -2,6 +2,9 @@ import {
   AnnotationCollectionSchema,
   AnnotationSchema,
   AuthMeResponseSchema,
+  CollectionDetailSchema,
+  CollectionSchema,
+  CollectionsListResponseSchema,
   CorrespondentGraphResponseSchema,
   CorrespondentItemsResponseSchema,
   DocumentListResponseSchema,
@@ -21,6 +24,11 @@ import {
   type AnnotationCreateInput,
   type AnnotationPatch,
   type AuthUser,
+  type Collection,
+  type CollectionDetail,
+  type CollectionCreateInput,
+  type CollectionItemInput,
+  type CollectionsListResponse,
   type CorrespondentGraphResponse,
   type CorrespondentGraphQuery,
   type CorrespondentItemsQuery,
@@ -122,6 +130,48 @@ export async function fetchRelatedDocuments(
   const qs = buildQuery({ limit });
   return getJson(`/api/documents/${encodeURIComponent(id)}/related${qs}`, (raw) =>
     RelatedDocumentsResponseSchema.parse(raw),
+  );
+}
+
+export async function fetchCollections(): Promise<CollectionsListResponse> {
+  return getJson('/api/collections', (raw) => CollectionsListResponseSchema.parse(raw));
+}
+
+export async function fetchCollection(id: string): Promise<CollectionDetail> {
+  return getJson(`/api/collections/${encodeURIComponent(id)}`, (raw) =>
+    CollectionDetailSchema.parse(raw),
+  );
+}
+
+export async function createCollection(
+  input: Partial<CollectionCreateInput> & { title: string },
+): Promise<Collection> {
+  const result = await sendJson('POST', '/api/collections', input, (raw) =>
+    CollectionSchema.parse(raw),
+  );
+  return result!;
+}
+
+export async function deleteCollection(id: string): Promise<void> {
+  await sendJson('DELETE', `/api/collections/${encodeURIComponent(id)}`, null, null);
+}
+
+export async function addCollectionItem(
+  collectionId: string,
+  input: CollectionItemInput,
+): Promise<void> {
+  await sendJson('POST', `/api/collections/${encodeURIComponent(collectionId)}/items`, input, null);
+}
+
+export async function removeCollectionItem(
+  collectionId: string,
+  documentId: string,
+): Promise<void> {
+  await sendJson(
+    'DELETE',
+    `/api/collections/${encodeURIComponent(collectionId)}/items/${encodeURIComponent(documentId)}`,
+    null,
+    null,
   );
 }
 

@@ -7,6 +7,8 @@ import { DocumentViewer } from '../components/DocumentViewer';
 import { FeaturedInEssays } from '../components/FeaturedInEssays';
 import { LoadingModal } from '../components/LoadingModal';
 import { MetadataSidebar } from '../components/MetadataSidebar';
+import { RelatedDocuments } from '../components/RelatedDocuments';
+import { SaveToListButton } from '../components/SaveToListButton';
 import { SentimentBadge } from '../components/SentimentBadge';
 
 export function DocumentPage() {
@@ -68,8 +70,10 @@ export function DocumentPage() {
         </div>
         <div className="space-y-4">
           {annotationSidebar}
+          <SaveToListButton documentId={documentId} />
           <MetadataSidebar document={data} />
           <FeaturedInEssays documentId={documentId} />
+          <RelatedDocuments documentId={documentId} />
         </div>
       </div>
     </article>

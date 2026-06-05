@@ -241,6 +241,25 @@ describe('TR Digital Library API', () => {
     });
   });
 
+  describe('GET /api/documents/:id/related', () => {
+    it('returns related documents excluding self with reasons', async () => {
+      const res = await request(app).get('/api/documents/man-in-the-arena/related');
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.items)).toBe(true);
+      for (const item of res.body.items) {
+        expect(item.document.id).not.toBe('man-in-the-arena');
+        expect(typeof item.score).toBe('number');
+        expect(Array.isArray(item.reasons)).toBe(true);
+        expect(() => DocumentSchema.parse(item.document)).not.toThrow();
+      }
+    });
+
+    it('returns 404 for an unknown document', async () => {
+      const res = await request(app).get('/api/documents/no-such-doc/related');
+      expect(res.status).toBe(404);
+    });
+  });
+
   describe('GET /api/documents/:id', () => {
     it('returns 404 for unknown id', async () => {
       const res = await request(app).get('/api/documents/does-not-exist');
