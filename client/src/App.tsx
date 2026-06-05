@@ -12,6 +12,7 @@ const BrowsePage = lazy(() => import('./pages/BrowsePage').then((m) => ({ defaul
 const DocumentPage = lazy(() => import('./pages/DocumentPage').then((m) => ({ default: m.DocumentPage })));
 const HomePage = lazy(() => import('./pages/HomePage').then((m) => ({ default: m.HomePage })));
 const NetworkPage = lazy(() => import('./pages/NetworkPage').then((m) => ({ default: m.NetworkPage })));
+const PeriodsPage = lazy(() => import('./pages/PeriodsPage').then((m) => ({ default: m.PeriodsPage })));
 const SearchPage = lazy(() => import('./pages/SearchPage').then((m) => ({ default: m.SearchPage })));
 const SentimentPage = lazy(() => import('./pages/SentimentPage').then((m) => ({ default: m.SentimentPage })));
 const TimelinePage = lazy(() => import('./pages/TimelinePage').then((m) => ({ default: m.TimelinePage })));
@@ -33,6 +34,7 @@ export function App() {
               <Routes>
                 <Route path="/" element={<HomePage />} />
                 <Route path="/browse" element={<BrowsePage />} />
+                <Route path="/periods" element={<PeriodsPage />} />
                 <Route path="/search" element={<SearchPage />} />
                 <Route path="/timeline" element={<TimelinePage />} />
                 <Route path="/network" element={<NetworkPage />} />

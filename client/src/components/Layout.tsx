@@ -8,6 +8,7 @@ import { SignInButton } from './SignInButton';
 const NAV_ITEMS = [
   { to: '/', label: 'Home', end: true },
   { to: '/browse', label: 'Browse' },
+  { to: '/periods', label: 'Periods' },
   { to: '/search', label: 'Search' },
   { to: '/timeline', label: 'Timeline' },
   { to: '/network', label: 'Network' },

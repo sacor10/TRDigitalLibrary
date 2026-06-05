@@ -1,4 +1,4 @@
-import { EARLIEST_ROOSEVELT_DOCUMENT_DATE, clampRooseveltDocumentDate } from '../schemas/document.js';
+import { clampRooseveltDocumentDate } from '../schemas/document.js';
 
 /**
  * Named periods of Theodore Roosevelt's life, used to seed the existing

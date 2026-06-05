@@ -1,11 +1,19 @@
 // Lazy-loaded via "Load more" (chosen for accessibility over IntersectionObserver).
 import { type Document, type DocumentListResponse, type DocumentType } from '@tr/shared';
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { fetchDocuments } from '../api/client';
+import { CompactDocumentList } from '../components/CompactDocumentList';
 import { DocumentList } from '../components/DocumentList';
 import { LoadMore } from '../components/LoadMore';
 import { LoadingModal } from '../components/LoadingModal';
+import { PeriodChips } from '../components/PeriodChips';
+import {
+  initialResultsView,
+  ResultsViewToggle,
+  type ResultsView,
+} from '../components/ResultsViewToggle';
 import { usePagedQuery } from '../hooks/usePagedQuery';
 
 const TYPE_LABEL: Record<DocumentType, string> = {
@@ -23,15 +31,40 @@ type Order = 'asc' | 'desc';
 interface BrowseFilters {
   type: DocumentType | '';
   tag: string;
+  source: string;
+  dateFrom: string;
+  dateTo: string;
   sort: Sort;
   order: Order;
 }
 
 export function BrowsePage() {
-  const [type, setType] = useState<DocumentType | ''>('');
-  const [tag, setTag] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [type, setType] = useState<DocumentType | ''>(
+    (searchParams.get('type') as DocumentType | null) ?? '',
+  );
+  const [tag, setTag] = useState(searchParams.get('tag') ?? '');
+  const [source, setSource] = useState(searchParams.get('source') ?? '');
+  const [dateFrom, setDateFrom] = useState(searchParams.get('dateFrom') ?? '');
+  const [dateTo, setDateTo] = useState(searchParams.get('dateTo') ?? '');
   const [sort, setSort] = useState<Sort>('date');
   const [order, setOrder] = useState<Order>('asc');
+  const [view, setView] = useState<ResultsView>(() =>
+    initialResultsView(searchParams.get('view')),
+  );
+
+  // Mirror filter state into the URL so periods/links and reloads stay in sync.
+  const setUrlParam = (name: string, value: string): void => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set(name, value);
+        else next.delete(name);
+        return next;
+      },
+      { replace: true },
+    );
+  };
 
   const {
     items,
@@ -45,11 +78,14 @@ export function BrowsePage() {
     data,
   } = usePagedQuery<Document, BrowseFilters, DocumentListResponse>({
     baseKey: 'documents',
-    filters: { type, tag, sort, order },
+    filters: { type, tag, source, dateFrom, dateTo, sort, order },
     fetcher: (filters, limit, offset) =>
       fetchDocuments({
         ...(filters.type ? { type: filters.type } : {}),
         ...(filters.tag ? { tag: filters.tag } : {}),
+        ...(filters.source ? { source: filters.source } : {}),
+        ...(filters.dateFrom ? { dateFrom: filters.dateFrom } : {}),
+        ...(filters.dateTo ? { dateTo: filters.dateTo } : {}),
         sort: filters.sort,
         order: filters.order,
         limit,
@@ -59,12 +95,15 @@ export function BrowsePage() {
   const availableTypes = useMemo(() => data?.availableTypes ?? [], [data?.availableTypes]);
   const facets = data?.facets;
   const tagFacets = facets?.tags ?? [];
+  const sourceFacets = facets?.sources ?? [];
   const hasMultipleTypes = availableTypes.length > 1;
 
   useEffect(() => {
     if (type && data && !availableTypes.includes(type)) {
       setType('');
+      setUrlParam('type', '');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [availableTypes, data, type]);
 
   return (
@@ -76,6 +115,17 @@ export function BrowsePage() {
         </p>
       </header>
 
+      <PeriodChips
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        onSelect={({ dateFrom: from, dateTo: to }) => {
+          setDateFrom(from);
+          setDateTo(to);
+          setUrlParam('dateFrom', from);
+          setUrlParam('dateTo', to);
+        }}
+      />
+
       <div className="mb-6 grid gap-3 sm:grid-cols-3">
         <label className="flex flex-col gap-1 text-xs">
           <span className="uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
@@ -85,7 +135,11 @@ export function BrowsePage() {
             className="input"
             value={type}
             disabled={!hasMultipleTypes}
-            onChange={(e) => setType((e.target.value as DocumentType | '') || '')}
+            onChange={(e) => {
+              const next = (e.target.value as DocumentType | '') || '';
+              setType(next);
+              setUrlParam('type', next);
+            }}
           >
             <option value="">All</option>
             {availableTypes.map((t) => (
@@ -127,6 +181,42 @@ export function BrowsePage() {
         </label>
       </div>
 
+      {sourceFacets.length > 0 && (
+        <fieldset className="mb-6">
+          <legend className="mb-2 text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
+            Collection / source
+          </legend>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={`chip ${source === '' ? 'bg-accent-500 text-white' : ''}`}
+              aria-pressed={source === ''}
+              onClick={() => {
+                setSource('');
+                setUrlParam('source', '');
+              }}
+            >
+              All
+            </button>
+            {sourceFacets.slice(0, 12).map((facet) => (
+              <button
+                key={facet.value}
+                type="button"
+                className={`chip ${source === facet.value ? 'bg-accent-500 text-white' : ''}`}
+                aria-pressed={source === facet.value}
+                onClick={() => {
+                  const next = source === facet.value ? '' : facet.value;
+                  setSource(next);
+                  setUrlParam('source', next);
+                }}
+              >
+                {facet.value} ({facet.count})
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
+
       {tagFacets.length > 0 && (
         <fieldset className="mb-6">
           <legend className="mb-2 text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
@@ -137,7 +227,10 @@ export function BrowsePage() {
               type="button"
               className={`chip ${tag === '' ? 'bg-accent-500 text-white' : ''}`}
               aria-pressed={tag === ''}
-              onClick={() => setTag('')}
+              onClick={() => {
+                setTag('');
+                setUrlParam('tag', '');
+              }}
             >
               All
             </button>
@@ -147,7 +240,11 @@ export function BrowsePage() {
                 type="button"
                 className={`chip ${tag === facet.value ? 'bg-accent-500 text-white' : ''}`}
                 aria-pressed={tag === facet.value}
-                onClick={() => setTag((current) => (current === facet.value ? '' : facet.value))}
+                onClick={() => {
+                  const next = tag === facet.value ? '' : facet.value;
+                  setTag(next);
+                  setUrlParam('tag', next);
+                }}
               >
                 {facet.value} ({facet.count})
               </button>
@@ -167,7 +264,20 @@ export function BrowsePage() {
       )}
       {items.length > 0 && (
         <>
-          <DocumentList documents={items} />
+          <div className="mb-3 flex justify-end">
+            <ResultsViewToggle
+              view={view}
+              onChange={(next) => {
+                setView(next);
+                setUrlParam('view', next);
+              }}
+            />
+          </div>
+          {view === 'compact' ? (
+            <CompactDocumentList documents={items} />
+          ) : (
+            <DocumentList documents={items} />
+          )}
           <LoadMore
             itemsLength={items.length}
             total={total}
