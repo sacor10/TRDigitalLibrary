@@ -1,17 +1,34 @@
 // Lazy-loaded via "Load more" (chosen for accessibility over IntersectionObserver).
 // `q` input is debounced inside <SearchBar> (250 ms) so this page doesn't fetch on every keystroke.
-import { DocumentTypeSchema, type DocumentType, type SearchResult } from '@tr/shared';
+import {
+  DocumentTypeSchema,
+  type DocumentType,
+  type SearchMode,
+  type SearchResult,
+} from '@tr/shared';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { fetchDocuments, searchDocuments } from '../api/client';
+import { AdvancedSearchForm } from '../components/AdvancedSearchForm';
+import { CompactDocumentList } from '../components/CompactDocumentList';
 import { LoadMore } from '../components/LoadMore';
 import { LoadingModal } from '../components/LoadingModal';
+import {
+  initialResultsView,
+  ResultsViewToggle,
+  type ResultsView,
+} from '../components/ResultsViewToggle';
 import { SearchBar } from '../components/SearchBar';
+import { SearchModeToggle } from '../components/SearchModeToggle';
 import { SearchResults } from '../components/SearchResults';
 import { usePagedQuery } from '../hooks/usePagedQuery';
 
 const TYPES: DocumentType[] = DocumentTypeSchema.options;
+
+function isSearchMode(value: string | null): value is SearchMode {
+  return value === 'lexical' || value === 'hybrid' || value === 'semantic';
+}
 
 interface SearchFilters {
   q: string;
@@ -20,6 +37,8 @@ interface SearchFilters {
   dateFrom: string;
   dateTo: string;
   tag: string;
+  source: string;
+  mode: SearchMode;
 }
 
 interface SearchPageResponse {
@@ -28,6 +47,7 @@ interface SearchPageResponse {
   facets?: {
     types: Array<{ value: DocumentType; count: number }>;
     tags: Array<{ value: string; count: number }>;
+    sources: Array<{ value: string; count: number }>;
   };
 }
 
@@ -39,6 +59,7 @@ export function SearchPage() {
   const initialDateFrom = searchParams.get('dateFrom') ?? '';
   const initialDateTo = searchParams.get('dateTo') ?? '';
   const initialTag = searchParams.get('tag') ?? '';
+  const initialSource = searchParams.get('source') ?? '';
 
   const [q, setQ] = useState(initialQ);
   const [type, setType] = useState<DocumentType | ''>(initialType);
@@ -46,6 +67,13 @@ export function SearchPage() {
   const [dateFrom, setDateFrom] = useState(initialDateFrom);
   const [dateTo, setDateTo] = useState(initialDateTo);
   const [tag, setTag] = useState(initialTag);
+  const [source, setSource] = useState(initialSource);
+  const initialMode = searchParams.get('mode');
+  const [mode, setMode] = useState<SearchMode>(isSearchMode(initialMode) ? initialMode : 'lexical');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [view, setView] = useState<ResultsView>(() =>
+    initialResultsView(searchParams.get('view')),
+  );
 
   const setUrlParam = (name: string, value: string): void => {
     setSearchParams(
@@ -73,7 +101,8 @@ export function SearchPage() {
     trimmedRecipient.length > 0 ||
     dateFrom !== '' ||
     dateTo !== '' ||
-    tag !== '';
+    tag !== '' ||
+    source !== '';
   const filters: SearchFilters = {
     q: trimmedQ,
     type,
@@ -81,6 +110,8 @@ export function SearchPage() {
     dateFrom,
     dateTo,
     tag,
+    source,
+    mode,
   };
 
   const {
@@ -104,6 +135,7 @@ export function SearchPage() {
         ...(f.dateFrom ? { dateFrom: f.dateFrom } : {}),
         ...(f.dateTo ? { dateTo: f.dateTo } : {}),
         ...(f.tag ? { tag: f.tag } : {}),
+        ...(f.source ? { source: f.source } : {}),
         limit,
         offset,
       };
@@ -111,6 +143,7 @@ export function SearchPage() {
       if (f.q) {
         return searchDocuments({
           q: f.q,
+          mode: f.mode,
           ...commonFilters,
         }).then((res) => ({ items: res.results, total: res.total, facets: res.facets }));
       }
@@ -124,6 +157,7 @@ export function SearchPage() {
   });
   const facets = data?.facets;
   const tagFacets = facets?.tags ?? [];
+  const sourceFacets = facets?.sources ?? [];
 
   return (
     <div>
@@ -134,7 +168,23 @@ export function SearchPage() {
         </p>
       </header>
 
-      <div className="mb-6 grid gap-3 md:grid-cols-2">
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <SearchModeToggle
+          mode={mode}
+          onChange={(next) => {
+            setMode(next);
+            setUrlParam('mode', next === 'lexical' ? '' : next);
+          }}
+        />
+        {mode !== 'lexical' && (
+          <span className="text-xs text-ink-700/70 dark:text-parchment-100/60">
+            Ask in plain English — e.g. “TR&rsquo;s views on national parks.” Falls back to keyword
+            search when semantic data isn&rsquo;t available.
+          </span>
+        )}
+      </div>
+
+      <div className="mb-3 grid gap-3 md:grid-cols-2">
         <SearchBar initialValue={initialQ} onChange={handleQueryChange} />
         <label className="flex flex-col gap-1">
           <span className="text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
@@ -206,6 +256,61 @@ export function SearchPage() {
         </div>
       </div>
 
+      <div className="mb-6">
+        <button
+          type="button"
+          className="text-sm text-accent-500 hover:underline"
+          aria-expanded={showAdvanced}
+          onClick={() => setShowAdvanced((prev) => !prev)}
+        >
+          {showAdvanced ? 'Hide advanced search' : 'Advanced search'}
+        </button>
+      </div>
+
+      {showAdvanced && (
+        <AdvancedSearchForm
+          onApply={(compiled) => {
+            handleQueryChange(compiled);
+          }}
+        />
+      )}
+
+      {sourceFacets.length > 0 && (
+        <fieldset className="mb-6">
+          <legend className="mb-2 text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
+            Collection / source
+          </legend>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={`chip ${source === '' ? 'bg-accent-500 text-white' : ''}`}
+              aria-pressed={source === ''}
+              onClick={() => {
+                setSource('');
+                setUrlParam('source', '');
+              }}
+            >
+              All
+            </button>
+            {sourceFacets.slice(0, 12).map((facet) => (
+              <button
+                key={facet.value}
+                type="button"
+                className={`chip ${source === facet.value ? 'bg-accent-500 text-white' : ''}`}
+                aria-pressed={source === facet.value}
+                onClick={() => {
+                  const next = source === facet.value ? '' : facet.value;
+                  setSource(next);
+                  setUrlParam('source', next);
+                }}
+              >
+                {facet.value} ({facet.count})
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
+
       {tagFacets.length > 0 && (
         <fieldset className="mb-6">
           <legend className="mb-2 text-xs uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
@@ -261,10 +366,23 @@ export function SearchPage() {
       )}
       {enabled && items.length > 0 && (
         <>
-          <p className="text-sm text-ink-700/80 dark:text-parchment-100/70 mb-3">
-            {total} match{total === 1 ? '' : 'es'}
-          </p>
-          <SearchResults results={items} />
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="text-sm text-ink-700/80 dark:text-parchment-100/70">
+              {total} match{total === 1 ? '' : 'es'}
+            </p>
+            <ResultsViewToggle
+              view={view}
+              onChange={(next) => {
+                setView(next);
+                setUrlParam('view', next);
+              }}
+            />
+          </div>
+          {view === 'compact' ? (
+            <CompactDocumentList documents={items.map((result) => result.document)} />
+          ) : (
+            <SearchResults results={items} />
+          )}
           <LoadMore
             itemsLength={items.length}
             total={total}

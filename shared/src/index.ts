@@ -9,10 +9,17 @@ export {
   DocumentListQuerySchema,
   DocumentPatchSchema,
   FieldProvenanceSchema,
+  FacetsSchema,
   clampRooseveltDocumentDate,
+  SearchModeSchema,
   SearchQuerySchema,
   SearchResultSchema,
   SearchResponseSchema,
+  RelatedReasonSchema,
+  RelatedDocumentSchema,
+  RelatedDocumentsResponseSchema,
+  OnThisDayQuerySchema,
+  OnThisDayResponseSchema,
   ErrorResponseSchema,
   CorrespondentDirectionSchema,
   CorrespondentGraphQuerySchema,
@@ -74,9 +81,16 @@ export type {
   DocumentListQuery,
   DocumentPatch,
   FieldProvenance,
+  Facets,
+  SearchMode,
   SearchQuery,
   SearchResult,
   SearchResponse,
+  RelatedReason,
+  RelatedDocument,
+  RelatedDocumentsResponse,
+  OnThisDayQuery,
+  OnThisDayResponse,
   ErrorResponse,
   CorrespondentDirection,
   CorrespondentGraphQuery,
@@ -97,6 +111,37 @@ export type {
   TopicDetailResponse,
   TopicDriftResponse,
 } from './schemas/topic.js';
+
+export { TR_LIFE_PERIODS, TR_LIFE_PERIODS_BY_ID } from './config/periods.js';
+export type { TrLifePeriod } from './config/periods.js';
+
+export { CURATED_SEARCHES } from './config/curatedSearches.js';
+export type { CuratedSearch } from './config/curatedSearches.js';
+
+export { THEMED_TIMELINES } from './config/timelines.js';
+export type { ThemedTimeline } from './config/timelines.js';
+
+export { EssayMetaSchema } from './schemas/essay.js';
+export type { EssayMeta } from './schemas/essay.js';
+
+export {
+  CollectionSchema,
+  CollectionItemSchema,
+  CollectionDetailSchema,
+  CollectionsListResponseSchema,
+  CollectionCreateInputSchema,
+  CollectionPatchSchema,
+  CollectionItemInputSchema,
+} from './schemas/collection.js';
+export type {
+  Collection,
+  CollectionItem,
+  CollectionDetail,
+  CollectionsListResponse,
+  CollectionCreateInput,
+  CollectionPatch,
+  CollectionItemInput,
+} from './schemas/collection.js';
 
 export type {
   SentimentLabel,

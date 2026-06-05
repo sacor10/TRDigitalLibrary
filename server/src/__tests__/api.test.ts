@@ -188,9 +188,75 @@ describe('TR Digital Library API', () => {
       const res = await request(countingApp).get('/api/documents?sort=date&order=asc');
       expect(res.status).toBe(200);
       expect(res.body.items.length).toBeGreaterThan(0);
-      // 1 COUNT + 2 facet aggregates + 1 SELECT + 1 batched provenance fetch.
-      // Anything close to N+1 still trips this.
-      expect(executeCount).toBeLessThanOrEqual(5);
+      // 1 COUNT + 3 facet aggregates (type/tag/source) + 1 SELECT + 1 batched
+      // provenance fetch. Anything close to N+1 still trips this.
+      expect(executeCount).toBeLessThanOrEqual(6);
+    });
+  });
+
+  describe('GET /api/documents source facet', () => {
+    it('returns a sources facet with counts', async () => {
+      const res = await request(app).get('/api/documents');
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.facets.sources)).toBe(true);
+      expect(res.body.facets.sources.length).toBeGreaterThan(0);
+      for (const facet of res.body.facets.sources) {
+        expect(typeof facet.value).toBe('string');
+        expect(facet.value.length).toBeGreaterThan(0);
+        expect(facet.count).toBeGreaterThan(0);
+      }
+    });
+
+    it('filters by source and narrows the result set', async () => {
+      const all = await request(app).get('/api/documents');
+      const source = all.body.facets.sources[0]?.value as string;
+      expect(source).toBeTruthy();
+      const res = await request(app).get(
+        `/api/documents?source=${encodeURIComponent(source)}&limit=100`,
+      );
+      expect(res.status).toBe(200);
+      for (const item of res.body.items) {
+        expect(item.source).toBe(source);
+      }
+    });
+  });
+
+  describe('GET /api/documents/on-this-day', () => {
+    it('returns documents matching a given month-day', async () => {
+      const target = TEST_DOCUMENTS[0]!;
+      const monthDay = target.date.slice(5, 10);
+      const res = await request(app).get(`/api/documents/on-this-day?date=${monthDay}`);
+      expect(res.status).toBe(200);
+      expect(res.body.monthDay).toBe(monthDay);
+      expect(res.body.items.length).toBeGreaterThan(0);
+      for (const item of res.body.items) {
+        expect(item.date.slice(5, 10)).toBe(monthDay);
+        expect(() => DocumentSchema.parse(item)).not.toThrow();
+      }
+    });
+
+    it('rejects a malformed date override', async () => {
+      const res = await request(app).get('/api/documents/on-this-day?date=2026-06-05');
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('GET /api/documents/:id/related', () => {
+    it('returns related documents excluding self with reasons', async () => {
+      const res = await request(app).get('/api/documents/man-in-the-arena/related');
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.items)).toBe(true);
+      for (const item of res.body.items) {
+        expect(item.document.id).not.toBe('man-in-the-arena');
+        expect(typeof item.score).toBe('number');
+        expect(Array.isArray(item.reasons)).toBe(true);
+        expect(() => DocumentSchema.parse(item.document)).not.toThrow();
+      }
+    });
+
+    it('returns 404 for an unknown document', async () => {
+      const res = await request(app).get('/api/documents/no-such-doc/related');
+      expect(res.status).toBe(404);
     });
   });
 
@@ -316,7 +382,8 @@ describe('TR Digital Library API', () => {
       expect(res.status).toBe(200);
 
       const ftsCalls = executeCalls.filter((c) => c.sql.includes('documents_fts'));
-      expect(ftsCalls).toHaveLength(4);
+      // ranking + hydration + 3 facet aggregates (type/tag/source).
+      expect(ftsCalls).toHaveLength(5);
 
       const rankingCall = ftsCalls.find((c) => c.sql.includes('COUNT(*) OVER'));
       expect(rankingCall, 'ranking query should carry COUNT(*) OVER ()').toBeDefined();
@@ -335,7 +402,7 @@ describe('TR Digital Library API', () => {
       expect(hydrateArgs.length).toBeGreaterThan(1);
 
       const facetCalls = ftsCalls.filter((c) => c !== rankingCall && c !== hydrateCall);
-      expect(facetCalls).toHaveLength(2);
+      expect(facetCalls).toHaveLength(3);
       for (const facetCall of facetCalls) {
         expect(facetCall.sql).not.toContain('snippet(');
       }

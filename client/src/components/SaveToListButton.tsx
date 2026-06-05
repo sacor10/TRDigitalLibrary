@@ -1,0 +1,118 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+
+import { addCollectionItem, createCollection, fetchCollections } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
+
+/**
+ * "Save to list" control on the document page. Visible only when signed in.
+ * Lets the user add the document to an existing research list or create a new one.
+ */
+export function SaveToListButton({ documentId }: { documentId: string }) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [feedback, setFeedback] = useState<string | null>(null);
+
+  const collectionsQuery = useQuery({
+    queryKey: ['collections'],
+    queryFn: fetchCollections,
+    enabled: open && Boolean(user),
+  });
+
+  const addMutation = useMutation({
+    mutationFn: (collectionId: string) => addCollectionItem(collectionId, { documentId }),
+    onSuccess: (_data, collectionId) => {
+      setFeedback('Saved.');
+      void queryClient.invalidateQueries({ queryKey: ['collections'] });
+      void queryClient.invalidateQueries({ queryKey: ['collection', collectionId] });
+    },
+    onError: (err) => setFeedback(err instanceof Error ? err.message : 'Failed to save.'),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const created = await createCollection({ title: newTitle.trim() });
+      await addCollectionItem(created.id, { documentId });
+      return created;
+    },
+    onSuccess: () => {
+      setNewTitle('');
+      setFeedback('List created and document saved.');
+      void queryClient.invalidateQueries({ queryKey: ['collections'] });
+    },
+    onError: (err) => setFeedback(err instanceof Error ? err.message : 'Failed to create list.'),
+  });
+
+  if (!user) return null;
+
+  return (
+    <section className="card">
+      <button
+        type="button"
+        className="btn w-full"
+        aria-expanded={open}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        {open ? 'Close' : 'Save to a list'}
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          {collectionsQuery.isLoading && (
+            <p className="text-sm text-ink-700/70 dark:text-parchment-100/60">Loading your lists…</p>
+          )}
+          {collectionsQuery.data && collectionsQuery.data.items.length > 0 && (
+            <ul className="grid gap-1">
+              {collectionsQuery.data.items.map((collection) => (
+                <li key={collection.id}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-sm hover:bg-parchment-200/60 dark:hover:bg-ink-700"
+                    disabled={addMutation.isPending}
+                    onClick={() => addMutation.mutate(collection.id)}
+                  >
+                    <span>{collection.title}</span>
+                    <span className="text-xs text-ink-700/60 dark:text-parchment-100/50">
+                      {collection.itemCount} saved
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <form
+            className="flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (newTitle.trim()) createMutation.mutate();
+            }}
+          >
+            <input
+              className="input flex-1"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              placeholder="New list name"
+              aria-label="New list name"
+            />
+            <button
+              type="submit"
+              className="btn bg-accent-500 text-white"
+              disabled={!newTitle.trim() || createMutation.isPending}
+            >
+              Create
+            </button>
+          </form>
+
+          {feedback && (
+            <p className="text-sm text-ink-700 dark:text-parchment-100" role="status">
+              {feedback}
+            </p>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}

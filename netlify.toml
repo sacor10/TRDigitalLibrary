@@ -32,6 +32,11 @@
     "server/src/migrations/*.sql",
     "server/src/annotations-migrations/*.sql",
   ]
+  # @xenova/transformers ships native/wasm/ONNX assets esbuild can't bundle, and
+  # it's only dynamically imported when semantic search is used. Keep it external
+  # so the function build stays lean; if it can't load at runtime, semantic
+  # search degrades to lexical (see server/src/embeddings/model.ts).
+  external_node_modules = ["@xenova/transformers"]
 
 [[redirects]]
   from = "/api/*"

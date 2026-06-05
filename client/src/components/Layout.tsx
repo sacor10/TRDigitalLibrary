@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 
+import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 
 import { SignInButton } from './SignInButton';
@@ -8,7 +9,9 @@ import { SignInButton } from './SignInButton';
 const NAV_ITEMS = [
   { to: '/', label: 'Home', end: true },
   { to: '/browse', label: 'Browse' },
+  { to: '/periods', label: 'Periods' },
   { to: '/search', label: 'Search' },
+  { to: '/essays', label: 'Essays' },
   { to: '/timeline', label: 'Timeline' },
   { to: '/network', label: 'Network' },
   { to: '/topics', label: 'Topics' },
@@ -17,6 +20,8 @@ const NAV_ITEMS = [
 
 export function Layout({ children }: { children: ReactNode }) {
   const { theme, toggle } = useTheme();
+  const { user } = useAuth();
+  const navItems = user ? [...NAV_ITEMS, { to: '/lists', label: 'My lists' }] : NAV_ITEMS;
   return (
     <div className="min-h-screen flex flex-col">
       <a href="#main" className="skip-link">
@@ -49,7 +54,7 @@ export function Layout({ children }: { children: ReactNode }) {
             className="-mx-4 overflow-x-auto px-4 pb-1 text-sm lg:mx-0 lg:px-0 lg:pb-0"
           >
             <div className="flex min-w-max items-center gap-1">
-              {NAV_ITEMS.map((item) => (
+              {navItems.map((item) => (
                 <NavLink
                   key={item.to}
                   to={item.to}

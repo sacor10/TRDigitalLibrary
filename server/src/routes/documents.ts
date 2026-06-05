@@ -1,5 +1,10 @@
 import type { InValue } from '@libsql/client';
-import { DocumentListQuerySchema, DocumentPatchSchema, DocumentTypeSchema } from '@tr/shared';
+import {
+  DocumentListQuerySchema,
+  DocumentPatchSchema,
+  DocumentTypeSchema,
+  OnThisDayQuerySchema,
+} from '@tr/shared';
 import { Router } from 'express';
 
 import {
@@ -19,6 +24,7 @@ import {
   DOCUMENT_DETAIL_COLUMNS,
   DOCUMENT_SUMMARY_COLUMNS,
   asNumber,
+  asString,
   getDocumentFacets,
 } from './document-query.js';
 
@@ -37,16 +43,22 @@ export function createDocumentsRouter(
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
     }
-    const { type, dateFrom, dateTo, recipient, tag, sort, order, limit, offset } = parsed.data;
+    const { type, dateFrom, dateTo, recipient, tag, source, sort, order, limit, offset } =
+      parsed.data;
 
     const where: string[] = [];
     const typeFacetWhere: string[] = [];
     const tagFacetWhere: string[] = [];
+    const sourceFacetWhere: string[] = [];
     const params: Record<string, InValue> = {};
-    const addFilter = (sql: string, except: 'type' | 'tag' | null = null): void => {
+    const addFilter = (
+      sql: string,
+      except: 'type' | 'tag' | 'source' | null = null,
+    ): void => {
       where.push(sql);
       if (except !== 'type') typeFacetWhere.push(sql);
       if (except !== 'tag') tagFacetWhere.push(sql);
+      if (except !== 'source') sourceFacetWhere.push(sql);
     };
     if (type) {
       addFilter('documents.type = @type', 'type');
@@ -71,6 +83,10 @@ export function createDocumentsRouter(
       );
       params.tag = tag;
     }
+    if (source) {
+      addFilter('documents.source = @source', 'source');
+      params.source = source;
+    }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const orderSql = `ORDER BY documents.${sort} ${order.toUpperCase()}`;
 
@@ -84,6 +100,7 @@ export function createDocumentsRouter(
       const facets = await getDocumentFacets(db, where, params, {
         typeWhere: typeFacetWhere,
         tagWhere: tagFacetWhere,
+        sourceWhere: sourceFacetWhere,
       });
       const availableTypes = facets.types.map((row) => DocumentTypeSchema.parse(row.value));
 
@@ -114,6 +131,119 @@ export function createDocumentsRouter(
       const message = err instanceof Error ? err.message : String(err);
       console.error('[documents] list failed', err);
       return res.status(500).json({ error: 'Failed to list documents', details: message });
+    }
+  });
+
+  // Must precede the `/:id` routes so "on-this-day" isn't captured as an id.
+  router.get('/on-this-day', async (req, res) => {
+    const parsed = OnThisDayQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
+    }
+    const { date, limit } = parsed.data;
+    // Default to today's month-day in UTC when no override is given.
+    const monthDay = date ?? new Date().toISOString().slice(5, 10);
+    try {
+      const result = await db.execute({
+        // Same substr(date, 6, 5) expression as idx_documents_monthday so the
+        // expression index is used.
+        sql: `SELECT ${DOCUMENT_SUMMARY_COLUMNS}
+                FROM documents
+               WHERE substr(documents.date, 6, 5) = @monthDay
+               ORDER BY documents.date ASC
+               LIMIT @limit`,
+        args: { monthDay, limit },
+      });
+      const items = result.rows.map((row) => rowToDocument(rowToDocumentRow(row)));
+      setPublicCache(res);
+      return res.json({ monthDay, items });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[documents] on-this-day failed', err);
+      return res.status(500).json({ error: 'Failed to load on-this-day', details: message });
+    }
+  });
+
+  // Related documents: shared topics, same recipient, temporal proximity.
+  // Candidates come from indexed topic/recipient joins, so this never scans the
+  // whole corpus. Registered before `/:id` so "related" isn't captured as an id.
+  router.get('/:id/related', async (req, res) => {
+    const id = req.params.id;
+    const limit = Math.min(Math.max(Number(req.query.limit ?? 8) || 8, 1), 50);
+    try {
+      const selfResult = await db.execute({
+        sql: 'SELECT id, date, recipient FROM documents WHERE id = ?',
+        args: [id],
+      });
+      if (selfResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Document not found' });
+      }
+      const self = selfResult.rows[0]!;
+      const selfDate = asString(self.date);
+      const selfRecipient = self.recipient == null ? null : asString(self.recipient);
+
+      // Shared-topic candidates with a count of overlapping topics.
+      const topicResult = await db.execute({
+        sql: `SELECT dta2.document_id AS id, COUNT(*) AS shared
+                FROM document_topic_assignments dta1
+                JOIN document_topic_assignments dta2 ON dta1.topic = dta2.topic
+               WHERE dta1.document_id = @id AND dta2.document_id != @id
+               GROUP BY dta2.document_id`,
+        args: { id },
+      });
+      const sharedByDoc = new Map<string, number>();
+      for (const row of topicResult.rows) {
+        sharedByDoc.set(asString(row.id), asNumber(row.shared));
+      }
+
+      // Same-recipient candidates (only when this document has a recipient).
+      const recipientMatches = new Set<string>();
+      if (selfRecipient) {
+        const recResult = await db.execute({
+          sql: `SELECT id FROM documents WHERE recipient = @recipient AND id != @id LIMIT 200`,
+          args: { recipient: selfRecipient, id },
+        });
+        for (const row of recResult.rows) recipientMatches.add(asString(row.id));
+      }
+
+      const candidateIds = new Set<string>([...sharedByDoc.keys(), ...recipientMatches]);
+      if (candidateIds.size === 0) {
+        setPublicCache(res);
+        return res.json({ items: [] });
+      }
+
+      const ids = [...candidateIds];
+      const placeholders = ids.map(() => '?').join(', ');
+      const docResult = await db.execute({
+        sql: `SELECT ${DOCUMENT_SUMMARY_COLUMNS} FROM documents WHERE id IN (${placeholders})`,
+        args: ids,
+      });
+
+      const selfYear = Number(selfDate.slice(0, 4));
+      const scored = docResult.rows
+        .map((row) => {
+          const docRow = rowToDocumentRow(row);
+          const doc = rowToDocument(docRow);
+          const sharedTopics = sharedByDoc.get(doc.id) ?? 0;
+          const sameRecipient = recipientMatches.has(doc.id);
+          const yearsApart = Math.abs((Number(doc.date.slice(0, 4)) || selfYear) - selfYear);
+          const temporal = 1 / (1 + yearsApart);
+          const reasons: Array<'shared-topic' | 'same-recipient' | 'temporal-proximity'> = [];
+          if (sharedTopics > 0) reasons.push('shared-topic');
+          if (sameRecipient) reasons.push('same-recipient');
+          if (yearsApart <= 1) reasons.push('temporal-proximity');
+          const score = sharedTopics * 3 + (sameRecipient ? 2 : 0) + temporal;
+          return { document: doc, score, reasons };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+
+      setPublicCache(res);
+      return res.json({ items: scored });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[documents] related failed', err);
+      return res.status(500).json({ error: 'Failed to load related documents', details: message });
     }
   });
 
