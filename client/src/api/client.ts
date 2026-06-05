@@ -7,6 +7,8 @@ import {
   DocumentListResponseSchema,
   DocumentSchema,
   DocumentSentimentSchema,
+  OnThisDayResponseSchema,
+  RelatedDocumentsResponseSchema,
   SearchResponseSchema,
   SentimentExtremesResponseSchema,
   SentimentRangeResponseSchema,
@@ -27,6 +29,8 @@ import {
   type DocumentListQuery,
   type DocumentListResponse,
   type DocumentSentiment,
+  type OnThisDayResponse,
+  type RelatedDocumentsResponse,
   type SearchQuery,
   type SearchResponse,
   type SentimentBin,
@@ -95,12 +99,30 @@ export async function fetchDocuments(
     dateTo: query.dateTo,
     recipient: query.recipient,
     tag: query.tag,
+    source: query.source,
     sort: query.sort,
     order: query.order,
     limit: query.limit,
     offset: query.offset,
   });
   return getJson(`/api/documents${qs}`, (raw) => DocumentListResponseSchema.parse(raw));
+}
+
+export async function fetchOnThisDay(
+  query: { date?: string; limit?: number } = {},
+): Promise<OnThisDayResponse> {
+  const qs = buildQuery({ date: query.date, limit: query.limit });
+  return getJson(`/api/documents/on-this-day${qs}`, (raw) => OnThisDayResponseSchema.parse(raw));
+}
+
+export async function fetchRelatedDocuments(
+  id: string,
+  limit?: number,
+): Promise<RelatedDocumentsResponse> {
+  const qs = buildQuery({ limit });
+  return getJson(`/api/documents/${encodeURIComponent(id)}/related${qs}`, (raw) =>
+    RelatedDocumentsResponseSchema.parse(raw),
+  );
 }
 
 export async function fetchDocument(id: string): Promise<Document> {

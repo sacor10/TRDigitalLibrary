@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 
 import { fetchDocument, fetchDocumentSentiment } from '../api/client';
 import { DocumentViewer } from '../components/DocumentViewer';
+import { FeaturedInEssays } from '../components/FeaturedInEssays';
 import { LoadingModal } from '../components/LoadingModal';
 import { MetadataSidebar } from '../components/MetadataSidebar';
 import { SentimentBadge } from '../components/SentimentBadge';
@@ -68,6 +69,7 @@ export function DocumentPage() {
         <div className="space-y-4">
           {annotationSidebar}
           <MetadataSidebar document={data} />
+          <FeaturedInEssays documentId={documentId} />
         </div>
       </div>
     </article>

@@ -1,5 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { DocumentTypeSchema, type Document, type DocumentType } from '@tr/shared';
+import {
+  DocumentTypeSchema,
+  THEMED_TIMELINES,
+  type Document,
+  type DocumentType,
+} from '@tr/shared';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { fetchDocuments, fetchTopics, searchDocuments } from '../api/client';
@@ -88,6 +93,18 @@ export function TimelinePage() {
     clearSelection();
   };
 
+  const applyTheme = (themeId: string): void => {
+    const theme = THEMED_TIMELINES.find((t) => t.id === themeId);
+    if (!theme) return;
+    setType((theme.type as DocumentType | undefined) ?? '');
+    setTag(theme.tag ?? '');
+    setDateFrom(theme.dateFrom ?? DEFAULT_DATE_FROM);
+    setDateTo(theme.dateTo ?? DEFAULT_DATE_TO);
+    setKeyword('');
+    setRecipient('');
+    clearSelection();
+  };
+
   useEffect(() => {
     setTimelineOffset(0);
     setTimelineItems([]);
@@ -117,6 +134,24 @@ export function TimelinePage() {
           zoom to six months; click the selected marker again to open the document.
         </p>
       </header>
+
+      <label className="mb-4 flex flex-col gap-1 text-xs sm:max-w-xs">
+        <span className="uppercase tracking-wide text-ink-700/70 dark:text-parchment-100/70">
+          Themed timeline
+        </span>
+        <select
+          className="input"
+          defaultValue="all"
+          onChange={(e) => applyTheme(e.target.value)}
+          aria-label="Apply a themed timeline preset"
+        >
+          {THEMED_TIMELINES.map((theme) => (
+            <option key={theme.id} value={theme.id} title={theme.description}>
+              {theme.label}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <form
         className="mb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-[1.2fr_repeat(5,minmax(0,1fr))_auto] xl:items-end"

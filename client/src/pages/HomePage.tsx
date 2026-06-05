@@ -1,5 +1,8 @@
 import { Link } from 'react-router-dom';
 
+import { CuratedSearches } from '../components/CuratedSearches';
+import { OnThisDay } from '../components/OnThisDay';
+
 export function HomePage() {
   return (
     <div className="max-w-none">
@@ -47,6 +50,9 @@ export function HomePage() {
           </p>
         </div>
       </section>
+
+      <CuratedSearches />
+      <OnThisDay />
     </div>
   );
 }

@@ -221,6 +221,26 @@ describe('TR Digital Library API', () => {
     });
   });
 
+  describe('GET /api/documents/on-this-day', () => {
+    it('returns documents matching a given month-day', async () => {
+      const target = TEST_DOCUMENTS[0]!;
+      const monthDay = target.date.slice(5, 10);
+      const res = await request(app).get(`/api/documents/on-this-day?date=${monthDay}`);
+      expect(res.status).toBe(200);
+      expect(res.body.monthDay).toBe(monthDay);
+      expect(res.body.items.length).toBeGreaterThan(0);
+      for (const item of res.body.items) {
+        expect(item.date.slice(5, 10)).toBe(monthDay);
+        expect(() => DocumentSchema.parse(item)).not.toThrow();
+      }
+    });
+
+    it('rejects a malformed date override', async () => {
+      const res = await request(app).get('/api/documents/on-this-day?date=2026-06-05');
+      expect(res.status).toBe(400);
+    });
+  });
+
   describe('GET /api/documents/:id', () => {
     it('returns 404 for unknown id', async () => {
       const res = await request(app).get('/api/documents/does-not-exist');

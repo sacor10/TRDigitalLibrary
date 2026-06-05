@@ -1,5 +1,10 @@
 import type { InValue } from '@libsql/client';
-import { DocumentListQuerySchema, DocumentPatchSchema, DocumentTypeSchema } from '@tr/shared';
+import {
+  DocumentListQuerySchema,
+  DocumentPatchSchema,
+  DocumentTypeSchema,
+  OnThisDayQuerySchema,
+} from '@tr/shared';
 import { Router } from 'express';
 
 import {
@@ -125,6 +130,36 @@ export function createDocumentsRouter(
       const message = err instanceof Error ? err.message : String(err);
       console.error('[documents] list failed', err);
       return res.status(500).json({ error: 'Failed to list documents', details: message });
+    }
+  });
+
+  // Must precede the `/:id` routes so "on-this-day" isn't captured as an id.
+  router.get('/on-this-day', async (req, res) => {
+    const parsed = OnThisDayQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
+    }
+    const { date, limit } = parsed.data;
+    // Default to today's month-day in UTC when no override is given.
+    const monthDay = date ?? new Date().toISOString().slice(5, 10);
+    try {
+      const result = await db.execute({
+        // Same substr(date, 6, 5) expression as idx_documents_monthday so the
+        // expression index is used.
+        sql: `SELECT ${DOCUMENT_SUMMARY_COLUMNS}
+                FROM documents
+               WHERE substr(documents.date, 6, 5) = @monthDay
+               ORDER BY documents.date ASC
+               LIMIT @limit`,
+        args: { monthDay, limit },
+      });
+      const items = result.rows.map((row) => rowToDocument(rowToDocumentRow(row)));
+      setPublicCache(res);
+      return res.json({ monthDay, items });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[documents] on-this-day failed', err);
+      return res.status(500).json({ error: 'Failed to load on-this-day', details: message });
     }
   });
 

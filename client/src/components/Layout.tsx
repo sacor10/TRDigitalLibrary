@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { to: '/browse', label: 'Browse' },
   { to: '/periods', label: 'Periods' },
   { to: '/search', label: 'Search' },
+  { to: '/essays', label: 'Essays' },
   { to: '/timeline', label: 'Timeline' },
   { to: '/network', label: 'Network' },
   { to: '/topics', label: 'Topics' },

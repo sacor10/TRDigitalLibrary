@@ -18,6 +18,9 @@ import {
   DocumentPatchSchema,
   DocumentSchema,
   ErrorResponseSchema,
+  OnThisDayQuerySchema,
+  OnThisDayResponseSchema,
+  RelatedDocumentsResponseSchema,
   FieldProvenanceSchema,
   SearchQuerySchema,
   SearchResponseSchema,
@@ -43,6 +46,8 @@ export function buildOpenApiDocument(): object {
   registry.register('DocumentPatch', DocumentPatchSchema);
   registry.register('FieldProvenance', FieldProvenanceSchema);
   registry.register('SearchResponse', SearchResponseSchema);
+  registry.register('OnThisDayResponse', OnThisDayResponseSchema);
+  registry.register('RelatedDocumentsResponse', RelatedDocumentsResponseSchema);
   registry.register('CorrespondentGraphResponse', CorrespondentGraphResponseSchema);
   registry.register('CorrespondentItemsResponse', CorrespondentItemsResponseSchema);
   registry.register('Topic', TopicSchema);
@@ -76,6 +81,39 @@ export function buildOpenApiDocument(): object {
       200: {
         description: 'List of documents',
         content: { 'application/json': { schema: DocumentListResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/documents/on-this-day',
+    summary: "Documents written on today's month-day (or a given MM-DD override).",
+    request: { query: OnThisDayQuerySchema },
+    responses: {
+      200: {
+        description: 'Documents matching the month-day',
+        content: { 'application/json': { schema: OnThisDayResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/documents/{id}/related',
+    summary: 'Documents related to the given document (embedding similarity or topic/recipient overlap).',
+    request: {
+      params: z.object({ id: z.string() }),
+      query: z.object({ limit: z.coerce.number().int().positive().max(50).optional() }),
+    },
+    responses: {
+      200: {
+        description: 'Related documents with scores and match reasons',
+        content: { 'application/json': { schema: RelatedDocumentsResponseSchema } },
+      },
+      404: {
+        description: 'Not found',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
       },
     },
   });

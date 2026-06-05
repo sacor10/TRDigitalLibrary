@@ -121,6 +121,9 @@ export type { CuratedSearch } from './config/curatedSearches.js';
 export { THEMED_TIMELINES } from './config/timelines.js';
 export type { ThemedTimeline } from './config/timelines.js';
 
+export { EssayMetaSchema } from './schemas/essay.js';
+export type { EssayMeta } from './schemas/essay.js';
+
 export type {
   SentimentLabel,
   SentimentBin,
