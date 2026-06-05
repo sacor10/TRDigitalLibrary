@@ -1,6 +1,11 @@
 // Lazy-loaded via "Load more" (chosen for accessibility over IntersectionObserver).
 // `q` input is debounced inside <SearchBar> (250 ms) so this page doesn't fetch on every keystroke.
-import { DocumentTypeSchema, type DocumentType, type SearchResult } from '@tr/shared';
+import {
+  DocumentTypeSchema,
+  type DocumentType,
+  type SearchMode,
+  type SearchResult,
+} from '@tr/shared';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
@@ -15,10 +20,15 @@ import {
   type ResultsView,
 } from '../components/ResultsViewToggle';
 import { SearchBar } from '../components/SearchBar';
+import { SearchModeToggle } from '../components/SearchModeToggle';
 import { SearchResults } from '../components/SearchResults';
 import { usePagedQuery } from '../hooks/usePagedQuery';
 
 const TYPES: DocumentType[] = DocumentTypeSchema.options;
+
+function isSearchMode(value: string | null): value is SearchMode {
+  return value === 'lexical' || value === 'hybrid' || value === 'semantic';
+}
 
 interface SearchFilters {
   q: string;
@@ -28,6 +38,7 @@ interface SearchFilters {
   dateTo: string;
   tag: string;
   source: string;
+  mode: SearchMode;
 }
 
 interface SearchPageResponse {
@@ -57,6 +68,8 @@ export function SearchPage() {
   const [dateTo, setDateTo] = useState(initialDateTo);
   const [tag, setTag] = useState(initialTag);
   const [source, setSource] = useState(initialSource);
+  const initialMode = searchParams.get('mode');
+  const [mode, setMode] = useState<SearchMode>(isSearchMode(initialMode) ? initialMode : 'lexical');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [view, setView] = useState<ResultsView>(() =>
     initialResultsView(searchParams.get('view')),
@@ -98,6 +111,7 @@ export function SearchPage() {
     dateTo,
     tag,
     source,
+    mode,
   };
 
   const {
@@ -129,6 +143,7 @@ export function SearchPage() {
       if (f.q) {
         return searchDocuments({
           q: f.q,
+          mode: f.mode,
           ...commonFilters,
         }).then((res) => ({ items: res.results, total: res.total, facets: res.facets }));
       }
@@ -152,6 +167,22 @@ export function SearchPage() {
           Full-text search across titles and transcriptions, ranked by SQLite FTS5 BM25.
         </p>
       </header>
+
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <SearchModeToggle
+          mode={mode}
+          onChange={(next) => {
+            setMode(next);
+            setUrlParam('mode', next === 'lexical' ? '' : next);
+          }}
+        />
+        {mode !== 'lexical' && (
+          <span className="text-xs text-ink-700/70 dark:text-parchment-100/60">
+            Ask in plain English — e.g. “TR&rsquo;s views on national parks.” Falls back to keyword
+            search when semantic data isn&rsquo;t available.
+          </span>
+        )}
+      </div>
 
       <div className="mb-3 grid gap-3 md:grid-cols-2">
         <SearchBar initialValue={initialQ} onChange={handleQueryChange} />

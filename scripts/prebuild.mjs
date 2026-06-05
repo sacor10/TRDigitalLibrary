@@ -36,3 +36,4 @@ if (process.env.NETLIFY === 'true') {
 
 runNpm(['run', 'repair-topic-tags']);
 run(process.execPath, [join(repoRoot, 'scripts', 'ensure-sentiment.mjs')]);
+run(process.execPath, [join(repoRoot, 'scripts', 'ensure-embeddings.mjs')]);
