@@ -37,6 +37,7 @@ export interface FacetCount {
 export interface Facets {
   types: FacetCount[];
   tags: FacetCount[];
+  sources: FacetCount[];
 }
 
 export function asNumber(v: unknown): number {
@@ -51,7 +52,11 @@ export async function getDocumentFacets(
   db: LibsqlClient,
   where: readonly string[],
   params: Record<string, InValue>,
-  opts: { typeWhere?: readonly string[]; tagWhere?: readonly string[] } = {},
+  opts: {
+    typeWhere?: readonly string[];
+    tagWhere?: readonly string[];
+    sourceWhere?: readonly string[];
+  } = {},
 ): Promise<Facets> {
   const typeWhereSql = (opts.typeWhere ?? where).length
     ? `WHERE ${(opts.typeWhere ?? where).join(' AND ')}`
@@ -59,8 +64,11 @@ export async function getDocumentFacets(
   const tagWhereSql = (opts.tagWhere ?? where).length
     ? `WHERE ${(opts.tagWhere ?? where).join(' AND ')}`
     : '';
+  const sourceWhereSql = (opts.sourceWhere ?? where).length
+    ? `WHERE ${(opts.sourceWhere ?? where).join(' AND ')}`
+    : '';
 
-  const [typeResult, tagResult] = await Promise.all([
+  const [typeResult, tagResult, sourceResult] = await Promise.all([
     db.execute({
       sql: `SELECT documents.type AS value, COUNT(*) AS count
               FROM documents
@@ -79,11 +87,23 @@ export async function getDocumentFacets(
              LIMIT 50`,
       args: params,
     }),
+    db.execute({
+      sql: `SELECT documents.source AS value, COUNT(*) AS count
+              FROM documents
+              ${sourceWhereSql}
+             GROUP BY documents.source
+             ORDER BY count DESC, documents.source ASC
+             LIMIT 50`,
+      args: params,
+    }),
   ]);
 
   return {
     types: typeResult.rows.map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
     tags: tagResult.rows.map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
+    sources: sourceResult.rows
+      .filter((row) => asString(row.value).length > 0)
+      .map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
   };
 }
 

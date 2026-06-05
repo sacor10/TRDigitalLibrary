@@ -211,7 +211,9 @@ export async function fetchDocumentSentiment(id: string): Promise<DocumentSentim
   return DocumentSentimentSchema.parse(await res.json());
 }
 
-export async function searchDocuments(query: SearchQuery): Promise<SearchResponse> {
+export async function searchDocuments(
+  query: Partial<SearchQuery> & { q: string },
+): Promise<SearchResponse> {
   const qs = buildQuery({
     q: query.q,
     type: query.type,
@@ -219,6 +221,9 @@ export async function searchDocuments(query: SearchQuery): Promise<SearchRespons
     dateTo: query.dateTo,
     recipient: query.recipient,
     tag: query.tag,
+    source: query.source,
+    mode: query.mode,
+    alpha: query.alpha,
     limit: query.limit,
     offset: query.offset,
   });

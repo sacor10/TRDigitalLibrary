@@ -83,18 +83,20 @@ export function createSearchRouter(db: LibsqlClient): Router {
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
     }
-    const { q, type, dateFrom, dateTo, recipient, tag, limit, offset } = parsed.data;
+    const { q, type, dateFrom, dateTo, recipient, tag, source, limit, offset } = parsed.data;
     const parsedQuery = buildFtsQuery(q);
     let ftsQuery = parsedQuery.ftsQuery;
 
     const where: string[] = ['documents_fts MATCH @ftsQuery', ...parsedQuery.where];
     const typeFacetWhere: string[] = ['documents_fts MATCH @ftsQuery', ...parsedQuery.where];
     const tagFacetWhere: string[] = ['documents_fts MATCH @ftsQuery', ...parsedQuery.where];
+    const sourceFacetWhere: string[] = ['documents_fts MATCH @ftsQuery', ...parsedQuery.where];
     const filterParams: Record<string, InValue> = { ftsQuery, ...parsedQuery.params };
-    const addFilter = (sql: string, except: 'type' | 'tag' | null = null): void => {
+    const addFilter = (sql: string, except: 'type' | 'tag' | 'source' | null = null): void => {
       where.push(sql);
       if (except !== 'type') typeFacetWhere.push(sql);
       if (except !== 'tag') tagFacetWhere.push(sql);
+      if (except !== 'source') sourceFacetWhere.push(sql);
     };
     if (type) {
       addFilter('documents.type = @type', 'type');
@@ -107,6 +109,10 @@ export function createSearchRouter(db: LibsqlClient): Router {
     if (dateTo) {
       addFilter('documents.date <= @dateTo');
       filterParams.dateTo = dateTo;
+    }
+    if (source) {
+      addFilter('documents.source = @source', 'source');
+      filterParams.source = source;
     }
     if (recipient) {
       const recipientTerms = terms(recipient).map((term) => `recipient:${term}`);
@@ -153,7 +159,11 @@ export function createSearchRouter(db: LibsqlClient): Router {
 
       if (rankResult.rows.length === 0) {
         setPublicCache(res);
-        return res.json({ results: [], total: 0, facets: { types: [], tags: [] } });
+        return res.json({
+          results: [],
+          total: 0,
+          facets: { types: [], tags: [], sources: [] },
+        });
       }
 
       const total = asNumber(rankResult.rows[0]?.total_count);
@@ -183,7 +193,7 @@ export function createSearchRouter(db: LibsqlClient): Router {
         JOIN documents ON documents.rowid = documents_fts.rowid
         ${includeTopics ? 'JOIN document_topic_assignments dta ON dta.document_id = documents.id' : ''}
         WHERE ${facetWhere.join(' AND ')}`;
-      const [typeFacetResult, tagFacetResult] = await Promise.all([
+      const [typeFacetResult, tagFacetResult, sourceFacetResult] = await Promise.all([
         db.execute({
           sql: `SELECT documents.type AS value, COUNT(*) AS count
                   ${facetFromWhere(typeFacetWhere)}
@@ -196,6 +206,14 @@ export function createSearchRouter(db: LibsqlClient): Router {
                   ${facetFromWhere(tagFacetWhere, true)}
                  GROUP BY dta.topic
                  ORDER BY count DESC, dta.topic ASC
+                 LIMIT 50`,
+          args: filterParams,
+        }),
+        db.execute({
+          sql: `SELECT documents.source AS value, COUNT(*) AS count
+                  ${facetFromWhere(sourceFacetWhere)}
+                 GROUP BY documents.source
+                 ORDER BY count DESC, documents.source ASC
                  LIMIT 50`,
           args: filterParams,
         }),
@@ -217,6 +235,12 @@ export function createSearchRouter(db: LibsqlClient): Router {
             value: asString(row.value),
             count: asNumber(row.count),
           })),
+          sources: sourceFacetResult.rows
+            .filter((row) => asString(row.value).length > 0)
+            .map((row) => ({
+              value: asString(row.value),
+              count: asNumber(row.count),
+            })),
         },
       });
     } catch (err) {

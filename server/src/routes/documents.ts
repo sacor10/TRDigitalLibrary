@@ -37,16 +37,22 @@ export function createDocumentsRouter(
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
     }
-    const { type, dateFrom, dateTo, recipient, tag, sort, order, limit, offset } = parsed.data;
+    const { type, dateFrom, dateTo, recipient, tag, source, sort, order, limit, offset } =
+      parsed.data;
 
     const where: string[] = [];
     const typeFacetWhere: string[] = [];
     const tagFacetWhere: string[] = [];
+    const sourceFacetWhere: string[] = [];
     const params: Record<string, InValue> = {};
-    const addFilter = (sql: string, except: 'type' | 'tag' | null = null): void => {
+    const addFilter = (
+      sql: string,
+      except: 'type' | 'tag' | 'source' | null = null,
+    ): void => {
       where.push(sql);
       if (except !== 'type') typeFacetWhere.push(sql);
       if (except !== 'tag') tagFacetWhere.push(sql);
+      if (except !== 'source') sourceFacetWhere.push(sql);
     };
     if (type) {
       addFilter('documents.type = @type', 'type');
@@ -71,6 +77,10 @@ export function createDocumentsRouter(
       );
       params.tag = tag;
     }
+    if (source) {
+      addFilter('documents.source = @source', 'source');
+      params.source = source;
+    }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const orderSql = `ORDER BY documents.${sort} ${order.toUpperCase()}`;
 
@@ -84,6 +94,7 @@ export function createDocumentsRouter(
       const facets = await getDocumentFacets(db, where, params, {
         typeWhere: typeFacetWhere,
         tagWhere: tagFacetWhere,
+        sourceWhere: sourceFacetWhere,
       });
       const availableTypes = facets.types.map((row) => DocumentTypeSchema.parse(row.value));
 
