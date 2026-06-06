@@ -87,7 +87,11 @@ export function SaveToListButton({ documentId }: { documentId: string }) {
             className="flex gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              if (newTitle.trim()) createMutation.mutate();
+              if (!newTitle.trim()) {
+                setFeedback('Please enter a list name.');
+                return;
+              }
+              createMutation.mutate();
             }}
           >
             <input
@@ -100,9 +104,9 @@ export function SaveToListButton({ documentId }: { documentId: string }) {
             <button
               type="submit"
               className="btn bg-accent-500 text-white"
-              disabled={!newTitle.trim() || createMutation.isPending}
+              disabled={createMutation.isPending}
             >
-              Create
+              {createMutation.isPending ? 'Creating…' : 'Create'}
             </button>
           </form>
 
