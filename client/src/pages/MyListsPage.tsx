@@ -10,6 +10,7 @@ export function MyListsPage() {
   const { user, loading } = useAuth();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
+  const [feedback, setFeedback] = useState<string | null>(null);
 
   const listsQuery = useQuery({
     queryKey: ['collections'],
@@ -21,8 +22,11 @@ export function MyListsPage() {
     mutationFn: () => createCollection({ title: title.trim() }),
     onSuccess: () => {
       setTitle('');
+      setFeedback(null);
       void queryClient.invalidateQueries({ queryKey: ['collections'] });
     },
+    onError: (err) =>
+      setFeedback(err instanceof Error ? err.message : 'Failed to create list.'),
   });
 
   if (loading) return <LoadingModal message="Loading…" />;
@@ -51,26 +55,46 @@ export function MyListsPage() {
         className="mb-6 flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          if (title.trim()) createMutation.mutate();
+          if (!title.trim()) {
+            setFeedback('Please enter a list name.');
+            return;
+          }
+          createMutation.mutate();
         }}
       >
         <input
           className="input flex-1"
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            if (feedback) setFeedback(null);
+          }}
           placeholder="New list name"
           aria-label="New list name"
         />
         <button
           type="submit"
           className="btn bg-accent-500 text-white"
-          disabled={!title.trim() || createMutation.isPending}
+          disabled={createMutation.isPending}
         >
-          Create list
+          {createMutation.isPending ? 'Creating…' : 'Create list'}
         </button>
       </form>
 
+      {feedback && (
+        <p className="mb-4 text-sm text-red-600 dark:text-red-400" role="alert">
+          {feedback}
+        </p>
+      )}
+
       {listsQuery.isLoading && <LoadingModal message="Loading your lists…" />}
+      {listsQuery.isError && (
+        <p className="text-sm text-red-600 dark:text-red-400" role="alert">
+          {listsQuery.error instanceof Error
+            ? listsQuery.error.message
+            : 'Failed to load your lists.'}
+        </p>
+      )}
       {listsQuery.data && listsQuery.data.items.length === 0 && (
         <p className="text-ink-700 dark:text-parchment-100">
           No lists yet. Create one above, or use “Save to a list” on any document.
