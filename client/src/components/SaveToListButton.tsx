@@ -69,7 +69,7 @@ export function SaveToListButton({ documentId }: { documentId: string }) {
                 <li key={collection.id}>
                   <button
                     type="button"
-                    className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-sm hover:bg-parchment-200/60 dark:hover:bg-ink-700"
+                    className="btn w-full justify-between text-left"
                     disabled={addMutation.isPending}
                     onClick={() => addMutation.mutate(collection.id)}
                   >
