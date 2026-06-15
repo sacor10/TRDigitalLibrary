@@ -472,6 +472,27 @@ export async function upsertDocumentsBatch(
 }
 
 /**
+ * Merges the FTS5 b-tree segments for the corpus indexes.
+ *
+ * External-content FTS5 accumulates a new segment on every insert/update, so a
+ * long-running incremental ingest leaves `documents_fts` fragmented into many
+ * segments and `MATCH` slows down over time. Running the 'optimize' command
+ * coalesces them back into one segment. This is a write, so it belongs at the
+ * end of an ingest run — never on the read/search path. Best-effort: a failure
+ * here must not fail the ingest, since the data is already committed.
+ */
+export async function optimizeFtsIndexes(client: LibsqlClient): Promise<void> {
+  for (const table of ['documents_fts', 'sections_fts']) {
+    try {
+      await client.execute(`INSERT INTO ${table}(${table}) VALUES('optimize')`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[db] FTS optimize for ${table} failed (non-fatal): ${message}`);
+    }
+  }
+}
+
+/**
  * Returns the row's existing `tei_source_hash` (or `null` if the row exists
  * with no recorded hash, or `undefined` if the row does not exist). The TEI
  * ingest uses this to short-circuit unchanged files without parsing or

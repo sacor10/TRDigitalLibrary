@@ -188,8 +188,9 @@ describe('TR Digital Library API', () => {
       const res = await request(countingApp).get('/api/documents?sort=date&order=asc');
       expect(res.status).toBe(200);
       expect(res.body.items.length).toBeGreaterThan(0);
-      // 1 COUNT + 2 facet aggregates + 1 SELECT + 1 batched provenance fetch.
-      // Anything close to N+1 still trips this.
+      // Wave A (concurrent): COUNT + 2 facet aggregates + SELECT. Wave B: 1
+      // batched IN-clause provenance fetch. 5 queries, 2 round-trip waves —
+      // anything close to N+1 still trips this.
       expect(executeCount).toBeLessThanOrEqual(5);
     });
   });
@@ -285,16 +286,17 @@ describe('TR Digital Library API', () => {
       expect(res.body.total).toBe(2);
     });
 
-    it('issues a single ranking query (with COUNT OVER) plus a rowid-scoped hydration query', async () => {
-      // Regression guard for two perf properties of the two-phase search:
+    it('issues a ranking query (with COUNT OVER, no documents join) plus a rowid-scoped hydration query', async () => {
+      // Regression guard for the perf properties of the two-phase search:
       //  1. The unbounded total piggybacks on the ranking query via COUNT(*)
-      //     OVER (), so there is no separate COUNT round-trip. If we ever go
-      //     back to a 3rd query for the count, p50 latency regresses on Turso.
+      //     OVER (), so there is no separate COUNT round-trip.
       //  2. snippet()/transcription reads happen only in the hydration query
       //     and only against the page rowids — never against the full match
       //     set. If snippet() leaks into the ranking SELECT, every match
-      //     materializes its transcription before LIMIT (the original 21s
-      //     bug).
+      //     materializes its transcription before LIMIT (the original 21s bug).
+      //  3. On an unfiltered keyword search the ranking query must NOT join the
+      //     documents table — the join forces a ~1MB-row PK lookup per match
+      //     and is what pushed broad terms past the function timeout (504).
       const executeCalls: Array<{ sql: string; args?: unknown }> = [];
       const countingDb = new Proxy(db, {
         get(target, prop, receiver) {
@@ -322,10 +324,11 @@ describe('TR Digital Library API', () => {
       expect(rankingCall, 'ranking query should carry COUNT(*) OVER ()').toBeDefined();
       // Ranking query must not compute snippets; that's the whole point.
       expect(rankingCall!.sql).not.toContain('snippet(');
+      // Unfiltered search: ranking runs on the FTS index alone, no documents join.
+      expect(rankingCall!.sql).not.toMatch(/JOIN\s+documents/);
 
-      const hydrateCall = ftsCalls.find((c) => c !== rankingCall);
+      const hydrateCall = ftsCalls.find((c) => c.sql.includes('snippet('));
       expect(hydrateCall, 'hydration query should exist').toBeDefined();
-      expect(hydrateCall!.sql).toContain('snippet(');
       expect(hydrateCall!.sql).toContain('documents.rowid IN');
       // Hydration is rowid-bound: args are positional [ftsQuery, ...rowids, ...rowids],
       // never @limit/@offset.
@@ -345,6 +348,32 @@ describe('TR Digital Library API', () => {
         /\bSELECT\s+COUNT\(\*\)\s+as\s+c\b/i.test(c.sql),
       );
       expect(standaloneCount).toBeUndefined();
+    });
+
+    it('keeps the documents join in the ranking query when a documents.* filter is present', async () => {
+      // The join is only droppable when nothing filters on a documents column.
+      // With a type filter the ranking subquery must still join documents.
+      const executeCalls: Array<{ sql: string }> = [];
+      const countingDb = new Proxy(db, {
+        get(target, prop, receiver) {
+          if (prop === 'execute') {
+            return async (stmt: Parameters<LibsqlClient['execute']>[0]) => {
+              if (typeof stmt === 'object' && stmt !== null && 'sql' in stmt) {
+                executeCalls.push({ sql: String((stmt as { sql: unknown }).sql) });
+              }
+              return (target.execute as LibsqlClient['execute'])(stmt);
+            };
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      }) as LibsqlClient;
+      const countingApp = createApp(countingDb);
+
+      const res = await request(countingApp).get('/api/search?q=alpenglow&type=letter');
+      expect(res.status).toBe(200);
+      const rankingCall = executeCalls.find((c) => c.sql.includes('COUNT(*) OVER'));
+      expect(rankingCall, 'ranking query should exist').toBeDefined();
+      expect(rankingCall!.sql).toMatch(/JOIN\s+documents/);
     });
 
     it('paginates via offset', async () => {

@@ -5,7 +5,7 @@ import { parseArgs } from 'node:util';
 
 import { DocumentTypeSchema, type DocumentType } from '@tr/shared';
 
-import { openLibraryDb, type LibsqlClient } from './db.js';
+import { openLibraryDb, optimizeFtsIndexes, type LibsqlClient } from './db.js';
 import { ingestTeiFolder, type IngestReport } from './ingest/index.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -158,6 +158,11 @@ async function main(): Promise<void> {
     const report = await ingestTeiFolder(opts.folder, db, ingestOpts);
 
     printReport(report, opts.dryRun);
+    // Coalesce FTS5 segments appended by this run (documents + sections) so
+    // MATCH stays fast across incremental builds. Best-effort, write-only.
+    if (db && !opts.dryRun && report.written + report.updated > 0) {
+      await optimizeFtsIndexes(db);
+    }
     process.exit(report.invalid > 0 ? 1 : 0);
   } finally {
     db?.close();

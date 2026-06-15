@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { rowToDocument, rowToDocumentRow, type LibsqlClient } from '../db.js';
 import { setPublicCache } from '../http-cache.js';
 
-import { DOCUMENT_SUMMARY_COLUMNS, asNumber, asString } from './document-query.js';
+import { DOCUMENT_SUMMARY_COLUMNS, asNumber, asString, rowsToFacets } from './document-query.js';
 
 const FTS_FIELD_MAP: Record<string, string> = {
   title: 'title',
@@ -124,6 +124,27 @@ export function createSearchRouter(db: LibsqlClient): Router {
     }
     const whereSql = `WHERE ${where.join(' AND ')}`;
 
+    // Only join `documents` in the ranking subquery when a structured filter
+    // actually references a documents.* column. The rowid we emit is identical
+    // to documents_fts.rowid, so on an unfiltered keyword search (the common
+    // case) the join is pure overhead: it forces a primary-key lookup into the
+    // documents table — whose rows carry ~1MB transcriptions — for every match,
+    // which is what pushes broad terms past the function timeout (504). Without
+    // it, ranking runs entirely on the FTS index.
+    const hasDocFilter =
+      parsedQuery.where.length > 0 ||
+      Boolean(type) ||
+      Boolean(dateFrom) ||
+      Boolean(dateTo) ||
+      tag !== undefined;
+    const rankInnerFrom = hasDocFilter
+      ? `FROM documents_fts
+        JOIN documents ON documents.rowid = documents_fts.rowid
+        ${whereSql}`
+      : `FROM documents_fts
+        ${whereSql}`;
+    const rankInnerRowid = hasDocFilter ? 'documents.rowid' : 'documents_fts.rowid';
+
     // Phase 1: rank + page rowids + total, no snippets. Computing snippet() in
     // the same SELECT as ORDER BY rank LIMIT forces FTS5 to read every matched
     // row's transcription before truncating, which is what made this 21s.
@@ -136,20 +157,39 @@ export function createSearchRouter(db: LibsqlClient): Router {
       SELECT inner_q.rowid AS rowid, inner_q.rank AS rank,
              COUNT(*) OVER () AS total_count
       FROM (
-        SELECT documents.rowid AS rowid, bm25(documents_fts) AS rank
-        FROM documents_fts
-        JOIN documents ON documents.rowid = documents_fts.rowid
-        ${whereSql}
+        SELECT ${rankInnerRowid} AS rowid, bm25(documents_fts) AS rank
+        ${rankInnerFrom}
       ) AS inner_q
       ORDER BY inner_q.rank
       LIMIT @limit OFFSET @offset
     `;
 
+    // Wave A: rank+count and both facet aggregates are mutually independent, so
+    // they run concurrently (one round-trip wave) rather than the facets
+    // running after rank+hydrate. Concurrency — not a serial batch — matters
+    // here: for a broad term these are three heavy full-match scans, so their
+    // wall time must overlap (max), not stack (sum). Phase-2 hydration (wave B)
+    // needs the rowids this produces, so it stays a separate execute below.
+    const facetFromWhere = (facetWhere: readonly string[], includeTopics = false) => `FROM documents_fts
+        JOIN documents ON documents.rowid = documents_fts.rowid
+        ${includeTopics ? 'JOIN document_topic_assignments dta ON dta.document_id = documents.id' : ''}
+        WHERE ${facetWhere.join(' AND ')}`;
+    const typeFacetSql = `SELECT documents.type AS value, COUNT(*) AS count
+                  ${facetFromWhere(typeFacetWhere)}
+                 GROUP BY documents.type
+                 ORDER BY documents.type ASC`;
+    const tagFacetSql = `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
+                  ${facetFromWhere(tagFacetWhere, true)}
+                 GROUP BY dta.topic
+                 ORDER BY count DESC, dta.topic ASC
+                 LIMIT 50`;
+
     try {
-      const rankResult = await db.execute({
-        sql: rankSql,
-        args: { ...filterParams, limit, offset },
-      });
+      const [rankResult, typeFacetResult, tagFacetResult] = await Promise.all([
+        db.execute({ sql: rankSql, args: { ...filterParams, limit, offset } }),
+        db.execute({ sql: typeFacetSql, args: filterParams }),
+        db.execute({ sql: tagFacetSql, args: filterParams }),
+      ]);
 
       if (rankResult.rows.length === 0) {
         setPublicCache(res);
@@ -179,28 +219,6 @@ export function createSearchRouter(db: LibsqlClient): Router {
         args: [ftsQuery, ...rowids, ...rowids],
       });
 
-      const facetFromWhere = (facetWhere: readonly string[], includeTopics = false) => `FROM documents_fts
-        JOIN documents ON documents.rowid = documents_fts.rowid
-        ${includeTopics ? 'JOIN document_topic_assignments dta ON dta.document_id = documents.id' : ''}
-        WHERE ${facetWhere.join(' AND ')}`;
-      const [typeFacetResult, tagFacetResult] = await Promise.all([
-        db.execute({
-          sql: `SELECT documents.type AS value, COUNT(*) AS count
-                  ${facetFromWhere(typeFacetWhere)}
-                 GROUP BY documents.type
-                 ORDER BY documents.type ASC`,
-          args: filterParams,
-        }),
-        db.execute({
-          sql: `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
-                  ${facetFromWhere(tagFacetWhere, true)}
-                 GROUP BY dta.topic
-                 ORDER BY count DESC, dta.topic ASC
-                 LIMIT 50`,
-          args: filterParams,
-        }),
-      ]);
-
       setPublicCache(res);
       return res.json({
         results: hydrateResult.rows.map((row) => ({
@@ -208,16 +226,7 @@ export function createSearchRouter(db: LibsqlClient): Router {
           snippet: asString(row.snippet),
         })),
         total,
-        facets: {
-          types: typeFacetResult.rows.map((row) => ({
-            value: asString(row.value),
-            count: asNumber(row.count),
-          })),
-          tags: tagFacetResult.rows.map((row) => ({
-            value: asString(row.value),
-            count: asNumber(row.count),
-          })),
-        },
+        facets: rowsToFacets(typeFacetResult.rows, tagFacetResult.rows),
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

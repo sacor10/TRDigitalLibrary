@@ -19,7 +19,8 @@ import {
   DOCUMENT_DETAIL_COLUMNS,
   DOCUMENT_SUMMARY_COLUMNS,
   asNumber,
-  getDocumentFacets,
+  buildDocumentFacetStatements,
+  rowsToFacets,
 } from './document-query.js';
 
 export interface CreateDocumentsRouterOptions {
@@ -75,22 +76,29 @@ export function createDocumentsRouter(
     const orderSql = `ORDER BY documents.${sort} ${order.toUpperCase()}`;
 
     try {
-      const totalResult = await db.execute({
-        sql: `SELECT COUNT(*) as c FROM documents ${whereSql}`,
-        args: params,
-      });
-      const total = asNumber(totalResult.rows[0]?.c);
-
-      const facets = await getDocumentFacets(db, where, params, {
+      // Wave A: COUNT, both facet aggregates, and the page SELECT are mutually
+      // independent, so they run concurrently (one round-trip wave) instead of
+      // the old four sequential awaits. The provenance fetch (wave B) depends on
+      // the page ids, so it stays a separate query below.
+      const { typeStmt, tagStmt } = buildDocumentFacetStatements(params, {
+        where,
         typeWhere: typeFacetWhere,
         tagWhere: tagFacetWhere,
       });
+      const [totalResult, typeFacetResult, tagFacetResult, listResult] = await Promise.all([
+        db.execute({ sql: `SELECT COUNT(*) as c FROM documents ${whereSql}`, args: params }),
+        db.execute(typeStmt),
+        db.execute(tagStmt),
+        db.execute({
+          sql: `SELECT ${DOCUMENT_SUMMARY_COLUMNS} FROM documents ${whereSql} ${orderSql} LIMIT @limit OFFSET @offset`,
+          args: { ...params, limit, offset },
+        }),
+      ]);
+
+      const total = asNumber(totalResult.rows[0]?.c);
+      const facets = rowsToFacets(typeFacetResult.rows, tagFacetResult.rows);
       const availableTypes = facets.types.map((row) => DocumentTypeSchema.parse(row.value));
 
-      const listResult = await db.execute({
-        sql: `SELECT ${DOCUMENT_SUMMARY_COLUMNS} FROM documents ${whereSql} ${orderSql} LIMIT @limit OFFSET @offset`,
-        args: { ...params, limit, offset },
-      });
       const rows = listResult.rows.map(rowToDocumentRow);
 
       // Single batched provenance fetch instead of N+1 per-row queries — see

@@ -1,4 +1,4 @@
-import type { InValue } from '@libsql/client';
+import type { InStatement, InValue, Row } from '@libsql/client';
 
 import type { LibsqlClient } from '../db.js';
 
@@ -47,29 +47,33 @@ export function asString(v: unknown): string {
   return v == null ? '' : String(v);
 }
 
-export async function getDocumentFacets(
-  db: LibsqlClient,
-  where: readonly string[],
+/**
+ * Builds the two facet aggregate statements (type counts, topic-tag counts)
+ * over the non-FTS `documents` table. Returned as InStatements so callers can
+ * fire them concurrently (Promise.all) alongside their own COUNT/list queries —
+ * the heavy aggregate scans overlap in one round-trip wave instead of running
+ * after the list query.
+ */
+export function buildDocumentFacetStatements(
   params: Record<string, InValue>,
-  opts: { typeWhere?: readonly string[]; tagWhere?: readonly string[] } = {},
-): Promise<Facets> {
-  const typeWhereSql = (opts.typeWhere ?? where).length
-    ? `WHERE ${(opts.typeWhere ?? where).join(' AND ')}`
-    : '';
-  const tagWhereSql = (opts.tagWhere ?? where).length
-    ? `WHERE ${(opts.tagWhere ?? where).join(' AND ')}`
-    : '';
+  opts: { where?: readonly string[]; typeWhere?: readonly string[]; tagWhere?: readonly string[] } = {},
+): { typeStmt: InStatement; tagStmt: InStatement } {
+  const base = opts.where ?? [];
+  const typeWhere = opts.typeWhere ?? base;
+  const tagWhere = opts.tagWhere ?? base;
+  const typeWhereSql = typeWhere.length ? `WHERE ${typeWhere.join(' AND ')}` : '';
+  const tagWhereSql = tagWhere.length ? `WHERE ${tagWhere.join(' AND ')}` : '';
 
-  const [typeResult, tagResult] = await Promise.all([
-    db.execute({
+  return {
+    typeStmt: {
       sql: `SELECT documents.type AS value, COUNT(*) AS count
               FROM documents
               ${typeWhereSql}
              GROUP BY documents.type
              ORDER BY documents.type ASC`,
       args: params,
-    }),
-    db.execute({
+    },
+    tagStmt: {
       sql: `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
               FROM documents
               JOIN document_topic_assignments dta ON dta.document_id = documents.id
@@ -78,12 +82,26 @@ export async function getDocumentFacets(
              ORDER BY count DESC, dta.topic ASC
              LIMIT 50`,
       args: params,
-    }),
-  ]);
-
-  return {
-    types: typeResult.rows.map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
-    tags: tagResult.rows.map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
+    },
   };
+}
+
+/** Maps the two facet result sets into the Facets response shape. */
+export function rowsToFacets(typeRows: readonly Row[], tagRows: readonly Row[]): Facets {
+  return {
+    types: typeRows.map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
+    tags: tagRows.map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
+  };
+}
+
+export async function getDocumentFacets(
+  db: LibsqlClient,
+  where: readonly string[],
+  params: Record<string, InValue>,
+  opts: { typeWhere?: readonly string[]; tagWhere?: readonly string[] } = {},
+): Promise<Facets> {
+  const { typeStmt, tagStmt } = buildDocumentFacetStatements(params, { where, ...opts });
+  const [typeResult, tagResult] = await Promise.all([db.execute(typeStmt), db.execute(tagStmt)]);
+  return rowsToFacets(typeResult.rows, tagResult.rows);
 }
 
