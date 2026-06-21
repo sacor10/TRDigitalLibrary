@@ -3,7 +3,9 @@ import { NavLink } from 'react-router-dom';
 
 import { useAuth } from '../auth/AuthContext';
 import { useTheme } from '../context/ThemeContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
+import { MobileLayout } from './mobile/MobileLayout';
 import { SignInButton } from './SignInButton';
 
 const NAV_ITEMS = [
@@ -21,7 +23,13 @@ const NAV_ITEMS = [
 export function Layout({ children }: { children: ReactNode }) {
   const { theme, toggle } = useTheme();
   const { user } = useAuth();
+  const isMobile = useIsMobile();
   const navItems = user ? [...NAV_ITEMS, { to: '/lists', label: 'My lists' }] : NAV_ITEMS;
+
+  if (isMobile) {
+    return <MobileLayout>{children}</MobileLayout>;
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       <a href="#main" className="skip-link">

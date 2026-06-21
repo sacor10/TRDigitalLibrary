@@ -7,14 +7,21 @@ import { DocumentViewer } from '../components/DocumentViewer';
 import { FeaturedInEssays } from '../components/FeaturedInEssays';
 import { LoadingModal } from '../components/LoadingModal';
 import { MetadataSidebar } from '../components/MetadataSidebar';
+import { BottomSheet } from '../components/mobile/BottomSheet';
 import { RelatedDocuments } from '../components/RelatedDocuments';
+import { SaveToListBody } from '../components/SaveToListBody';
 import { SaveToListButton } from '../components/SaveToListButton';
 import { SentimentBadge } from '../components/SentimentBadge';
+import { useAuth } from '../auth/AuthContext';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export function DocumentPage() {
   const { id } = useParams<{ id: string }>();
   const documentId = id ?? '';
+  const isMobile = useIsMobile();
+  const { user } = useAuth();
   const [annotationSidebar, setAnnotationSidebar] = useState<ReactNode | null>(null);
+  const [saveSheetOpen, setSaveSheetOpen] = useState(false);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['document', documentId],
@@ -47,7 +54,7 @@ export function DocumentPage() {
   }
 
   return (
-    <article>
+    <article className={isMobile ? 'pb-20' : undefined}>
       <header className="mb-6">
         <p className="text-sm text-ink-700/80 dark:text-parchment-100/80">
           <Link to="/browse" className="underline">
@@ -70,12 +77,36 @@ export function DocumentPage() {
         </div>
         <div className="space-y-4">
           {annotationSidebar}
-          <SaveToListButton documentId={documentId} />
+          {!isMobile && <SaveToListButton documentId={documentId} />}
           <MetadataSidebar document={data} />
           <FeaturedInEssays documentId={documentId} />
           <RelatedDocuments documentId={documentId} />
         </div>
       </div>
+
+      {isMobile && user && (
+        <>
+          <div
+            className="fixed inset-x-0 z-30 px-4"
+            style={{ bottom: 'calc(4rem + env(safe-area-inset-bottom))' }}
+          >
+            <button
+              type="button"
+              className="btn btn-primary tap w-full shadow-lg"
+              onClick={() => setSaveSheetOpen(true)}
+            >
+              Save to a list
+            </button>
+          </div>
+          <BottomSheet
+            open={saveSheetOpen}
+            onClose={() => setSaveSheetOpen(false)}
+            title="Save to a list"
+          >
+            <SaveToListBody documentId={documentId} />
+          </BottomSheet>
+        </>
+      )}
     </article>
   );
 }

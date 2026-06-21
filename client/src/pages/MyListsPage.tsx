@@ -5,12 +5,16 @@ import { Link } from 'react-router-dom';
 import { createCollection, fetchCollections } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { LoadingModal } from '../components/LoadingModal';
+import { BottomSheet } from '../components/mobile/BottomSheet';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export function MyListsPage() {
   const { user, loading } = useAuth();
+  const isMobile = useIsMobile();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [createSheetOpen, setCreateSheetOpen] = useState(false);
 
   const listsQuery = useQuery({
     queryKey: ['collections'],
@@ -23,6 +27,7 @@ export function MyListsPage() {
     onSuccess: () => {
       setTitle('');
       setFeedback(null);
+      setCreateSheetOpen(false);
       void queryClient.invalidateQueries({ queryKey: ['collections'] });
     },
     onError: (err) =>
@@ -42,6 +47,38 @@ export function MyListsPage() {
     );
   }
 
+  const createForm = (
+    <form
+      className="flex gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!title.trim()) {
+          setFeedback('Please enter a list name.');
+          return;
+        }
+        createMutation.mutate();
+      }}
+    >
+      <input
+        className="input flex-1"
+        value={title}
+        onChange={(e) => {
+          setTitle(e.target.value);
+          if (feedback) setFeedback(null);
+        }}
+        placeholder="New list name"
+        aria-label="New list name"
+      />
+      <button
+        type="submit"
+        className="btn bg-accent-500 text-white"
+        disabled={createMutation.isPending}
+      >
+        {createMutation.isPending ? 'Creating…' : 'Create list'}
+      </button>
+    </form>
+  );
+
   return (
     <div>
       <header className="mb-6">
@@ -51,40 +88,37 @@ export function MyListsPage() {
         </p>
       </header>
 
-      <form
-        className="mb-6 flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!title.trim()) {
-            setFeedback('Please enter a list name.');
-            return;
-          }
-          createMutation.mutate();
-        }}
-      >
-        <input
-          className="input flex-1"
-          value={title}
-          onChange={(e) => {
-            setTitle(e.target.value);
-            if (feedback) setFeedback(null);
-          }}
-          placeholder="New list name"
-          aria-label="New list name"
-        />
-        <button
-          type="submit"
-          className="btn bg-accent-500 text-white"
-          disabled={createMutation.isPending}
-        >
-          {createMutation.isPending ? 'Creating…' : 'Create list'}
-        </button>
-      </form>
-
-      {feedback && (
-        <p className="mb-4 text-sm text-red-600 dark:text-red-400" role="alert">
-          {feedback}
-        </p>
+      {isMobile ? (
+        <>
+          <button
+            type="button"
+            className="btn btn-primary tap mb-6 w-full"
+            onClick={() => setCreateSheetOpen(true)}
+          >
+            New list
+          </button>
+          <BottomSheet
+            open={createSheetOpen}
+            onClose={() => setCreateSheetOpen(false)}
+            title="New list"
+          >
+            {createForm}
+            {feedback && (
+              <p className="mt-3 text-sm text-red-600 dark:text-red-400" role="alert">
+                {feedback}
+              </p>
+            )}
+          </BottomSheet>
+        </>
+      ) : (
+        <>
+          <div className="mb-6">{createForm}</div>
+          {feedback && (
+            <p className="mb-4 text-sm text-red-600 dark:text-red-400" role="alert">
+              {feedback}
+            </p>
+          )}
+        </>
       )}
 
       {listsQuery.isLoading && <LoadingModal message="Loading your lists…" />}

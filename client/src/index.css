@@ -51,4 +51,52 @@
   .card {
     @apply rounded-lg border border-ink-700/10 bg-white/70 p-4 shadow-sm dark:border-parchment-50/10 dark:bg-ink-800/60 sm:p-5;
   }
+  /* Touch-sized chip for use inside sheets / mobile filter UI (>=44px tall). */
+  .chip-touch {
+    @apply inline-flex min-h-11 items-center gap-1 rounded-full bg-parchment-200/70 px-4 text-sm font-medium text-ink-800 dark:bg-ink-700 dark:text-parchment-50;
+  }
+  /* Sticky section header (e.g. year groups in mobile lists). */
+  .sticky-header {
+    @apply sticky z-10 bg-parchment-50/95 px-1 py-1.5 text-xs font-semibold uppercase tracking-wide text-ink-700/70 backdrop-blur dark:bg-ink-900/95 dark:text-parchment-100/70;
+  }
+}
+
+@layer utilities {
+  /* Instant tap feedback + disable double-tap zoom / 300ms delay. */
+  .tap {
+    @apply transition-transform duration-100 active:scale-[0.98];
+    touch-action: manipulation;
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  /* Margin variants for clearing fixed bars while keeping safe-area room. */
+  .pb-safe-tabbar {
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+  }
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+  @keyframes sheet-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  .animate-sheet-up {
+    animation: sheet-up 0.24s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .animate-sheet-fade {
+    animation: sheet-fade 0.2s ease-out;
+  }
 }

@@ -12,8 +12,12 @@ import { useSearchParams } from 'react-router-dom';
 import { fetchDocuments, searchDocuments } from '../api/client';
 import { AdvancedSearchForm } from '../components/AdvancedSearchForm';
 import { CompactDocumentList } from '../components/CompactDocumentList';
+import { SearchFilterControls } from '../components/filters/SearchFilterControls';
 import { LoadMore } from '../components/LoadMore';
 import { LoadingModal } from '../components/LoadingModal';
+import { FilterButtonBar } from '../components/mobile/FilterButtonBar';
+import { FilterSheet } from '../components/mobile/FilterSheet';
+import { MobileSearchResults } from '../components/mobile/MobileSearchResults';
 import {
   initialResultsView,
   ResultsViewToggle,
@@ -22,6 +26,7 @@ import {
 import { SearchBar } from '../components/SearchBar';
 import { SearchModeToggle } from '../components/SearchModeToggle';
 import { SearchResults } from '../components/SearchResults';
+import { useIsMobile } from '../hooks/useIsMobile';
 import { usePagedQuery } from '../hooks/usePagedQuery';
 
 const TYPES: DocumentType[] = DocumentTypeSchema.options;
@@ -53,6 +58,7 @@ interface SearchPageResponse {
 
 export function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const isMobile = useIsMobile();
   const initialQ = searchParams.get('q') ?? '';
   const initialType = (searchParams.get('type') as DocumentType | null) ?? '';
   const initialRecipient = searchParams.get('recipient') ?? '';
@@ -74,6 +80,7 @@ export function SearchPage() {
   const [view, setView] = useState<ResultsView>(() =>
     initialResultsView(searchParams.get('view')),
   );
+  const [filterSheetOpen, setFilterSheetOpen] = useState(false);
 
   const setUrlParam = (name: string, value: string): void => {
     setSearchParams(
@@ -184,23 +191,160 @@ export function SearchPage() {
   const tagFacets = facets?.tags ?? [];
   const sourceFacets = facets?.sources ?? [];
 
+  // Filter handlers (state + URL mirroring) reused by the mobile filter sheet.
+  const handleType = (next: DocumentType | ''): void => {
+    setType(next);
+    setUrlParam('type', next);
+  };
+  const handleRecipient = (next: string): void => {
+    setRecipient(next);
+    setUrlParam('recipient', next.trim());
+  };
+  const handleDateFrom = (next: string): void => {
+    setDateFrom(next);
+    setUrlParam('dateFrom', next);
+  };
+  const handleDateTo = (next: string): void => {
+    setDateTo(next);
+    setUrlParam('dateTo', next);
+  };
+  const handleMode = (next: SearchMode): void => {
+    setMode(next);
+    setUrlParam('mode', next === 'lexical' ? '' : next);
+  };
+  const handleSource = (next: string): void => {
+    setSource(next);
+    setUrlParam('source', next);
+  };
+  const handleTag = (next: string): void => {
+    setTag(next);
+    setUrlParam('tag', next);
+  };
+  const handleView = (next: ResultsView): void => {
+    setView(next);
+    setUrlParam('view', next);
+  };
+  const clearAllFilters = (): void => {
+    handleType('');
+    handleRecipient('');
+    handleDateFrom('');
+    handleDateTo('');
+    handleTag('');
+    handleSource('');
+    handleMode('lexical');
+  };
+  const activeFilterCount =
+    [type, trimmedRecipient, tag, source].filter(Boolean).length +
+    (dateFrom || dateTo ? 1 : 0) +
+    (mode !== 'lexical' ? 1 : 0);
+
+  const header = (
+    <header className="mb-6">
+      <h1 className="text-2xl font-semibold sm:text-3xl">Search</h1>
+      <p className="text-ink-700 dark:text-parchment-100 mt-1">
+        Full-text search across titles and transcriptions, ranked by SQLite FTS5 BM25.
+      </p>
+    </header>
+  );
+
+  const resultStatus = (
+    <>
+      {!enabled && (
+        <p className="text-ink-700 dark:text-parchment-100">
+          Type a query or add a filter to search — try <em>arena</em>, <em>conservation</em>, or{' '}
+          <em>strenuous</em>.
+        </p>
+      )}
+      {enabled && isLoading && items.length === 0 && <LoadingModal message="Searching..." />}
+      {enabled && error ? (
+        <p className="text-red-600 dark:text-red-400">
+          {error instanceof Error ? error.message : 'Search failed.'}
+        </p>
+      ) : null}
+      {enabled && !isLoading && items.length === 0 && total === 0 && !error && (
+        <p className="text-ink-700 dark:text-parchment-100">
+          No matches. Try a different query or remove a filter.
+        </p>
+      )}
+    </>
+  );
+
+  if (isMobile) {
+    return (
+      <div>
+        {header}
+        <div className="sticky top-12 z-20 -mx-4 mb-3 bg-parchment-50/95 px-4 py-2 backdrop-blur dark:bg-ink-900/95">
+          <SearchBar initialValue={initialQ} onChange={handleQueryChange} />
+        </div>
+        <FilterButtonBar
+          activeCount={activeFilterCount}
+          onOpen={() => setFilterSheetOpen(true)}
+          view={view}
+          onChangeView={handleView}
+          topClass="top-[6.5rem]"
+        />
+        <FilterSheet
+          open={filterSheetOpen}
+          onClose={() => setFilterSheetOpen(false)}
+          onClear={clearAllFilters}
+          resultCount={enabled ? total : undefined}
+        >
+          <SearchFilterControls
+            types={TYPES}
+            type={type}
+            onTypeChange={handleType}
+            recipient={recipient}
+            onRecipientChange={handleRecipient}
+            dateFrom={dateFrom}
+            dateTo={dateTo}
+            onDateFromChange={handleDateFrom}
+            onDateToChange={handleDateTo}
+            mode={mode}
+            onModeChange={handleMode}
+            showAdvanced={showAdvanced}
+            onToggleAdvanced={() => setShowAdvanced((prev) => !prev)}
+            onApplyAdvanced={(compiled) => handleQueryChange(compiled)}
+            source={source}
+            onSourceChange={handleSource}
+            tag={tag}
+            onTagChange={handleTag}
+            typeFacets={facets?.types ?? []}
+            sourceFacets={sourceFacets}
+            tagFacets={tagFacets}
+          />
+        </FilterSheet>
+
+        {resultStatus}
+        {enabled && items.length > 0 && (
+          <>
+            <p className="mb-2 text-sm text-ink-700/80 dark:text-parchment-100/70">
+              {total} match{total === 1 ? '' : 'es'}
+            </p>
+            {view === 'compact' ? (
+              <CompactDocumentList documents={items.map((result) => result.document)} />
+            ) : (
+              <MobileSearchResults results={items} />
+            )}
+            <LoadMore
+              itemsLength={items.length}
+              total={total}
+              pageSize={pageSize}
+              onPageSizeChange={setPageSize}
+              onLoadMore={loadMore}
+              isFetching={isFetching}
+            />
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold sm:text-3xl">Search</h1>
-        <p className="text-ink-700 dark:text-parchment-100 mt-1">
-          Full-text search across titles and transcriptions, ranked by SQLite FTS5 BM25.
-        </p>
-      </header>
+      {header}
 
       <div className="mb-3 flex flex-wrap items-center gap-3">
-        <SearchModeToggle
-          mode={mode}
-          onChange={(next) => {
-            setMode(next);
-            setUrlParam('mode', next === 'lexical' ? '' : next);
-          }}
-        />
+        <SearchModeToggle mode={mode} onChange={handleMode} />
         {mode !== 'lexical' && (
           <span className="text-xs text-ink-700/70 dark:text-parchment-100/60">
             Ask in plain English — e.g. “TR&rsquo;s views on national parks.” Falls back to keyword
@@ -218,11 +362,7 @@ export function SearchPage() {
           <select
             className="input"
             value={type}
-            onChange={(e) => {
-              const next = (e.target.value as DocumentType | '') || '';
-              setType(next);
-              setUrlParam('type', next);
-            }}
+            onChange={(e) => handleType((e.target.value as DocumentType | '') || '')}
           >
             <option value="">All types</option>
             {TYPES.map((t) => (
@@ -242,10 +382,7 @@ export function SearchPage() {
           <input
             className="input"
             value={recipient}
-            onChange={(e) => {
-              setRecipient(e.target.value);
-              setUrlParam('recipient', e.target.value.trim());
-            }}
+            onChange={(e) => handleRecipient(e.target.value)}
             placeholder="e.g. Kermit, Lodge, Congress"
           />
         </label>
@@ -258,10 +395,7 @@ export function SearchPage() {
               type="date"
               className="input"
               value={dateFrom}
-              onChange={(e) => {
-                setDateFrom(e.target.value);
-                setUrlParam('dateFrom', e.target.value);
-              }}
+              onChange={(e) => handleDateFrom(e.target.value)}
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -272,10 +406,7 @@ export function SearchPage() {
               type="date"
               className="input"
               value={dateTo}
-              onChange={(e) => {
-                setDateTo(e.target.value);
-                setUrlParam('dateTo', e.target.value);
-              }}
+              onChange={(e) => handleDateTo(e.target.value)}
             />
           </label>
         </div>
@@ -310,10 +441,7 @@ export function SearchPage() {
               type="button"
               className={`chip ${source === '' ? 'bg-accent-500 text-white' : ''}`}
               aria-pressed={source === ''}
-              onClick={() => {
-                setSource('');
-                setUrlParam('source', '');
-              }}
+              onClick={() => handleSource('')}
             >
               All
             </button>
@@ -323,11 +451,7 @@ export function SearchPage() {
                 type="button"
                 className={`chip ${source === facet.value ? 'bg-accent-500 text-white' : ''}`}
                 aria-pressed={source === facet.value}
-                onClick={() => {
-                  const next = source === facet.value ? '' : facet.value;
-                  setSource(next);
-                  setUrlParam('source', next);
-                }}
+                onClick={() => handleSource(source === facet.value ? '' : facet.value)}
               >
                 {facet.value} ({facet.count})
               </button>
@@ -346,10 +470,7 @@ export function SearchPage() {
               type="button"
               className={`chip ${tag === '' ? 'bg-accent-500 text-white' : ''}`}
               aria-pressed={tag === ''}
-              onClick={() => {
-                setTag('');
-                setUrlParam('tag', '');
-              }}
+              onClick={() => handleTag('')}
             >
               All
             </button>
@@ -359,11 +480,7 @@ export function SearchPage() {
                 type="button"
                 className={`chip ${tag === facet.value ? 'bg-accent-500 text-white' : ''}`}
                 aria-pressed={tag === facet.value}
-                onClick={() => {
-                  const next = tag === facet.value ? '' : facet.value;
-                  setTag(next);
-                  setUrlParam('tag', next);
-                }}
+                onClick={() => handleTag(tag === facet.value ? '' : facet.value)}
               >
                 {facet.value} ({facet.count})
               </button>
@@ -372,36 +489,14 @@ export function SearchPage() {
         </fieldset>
       )}
 
-      {!enabled && (
-        <p className="text-ink-700 dark:text-parchment-100">
-          Type a query or add a filter to search — try <em>arena</em>, <em>conservation</em>, or{' '}
-          <em>strenuous</em>.
-        </p>
-      )}
-      {enabled && isLoading && items.length === 0 && <LoadingModal message="Searching..." />}
-      {enabled && error ? (
-        <p className="text-red-600 dark:text-red-400">
-          {error instanceof Error ? error.message : 'Search failed.'}
-        </p>
-      ) : null}
-      {enabled && !isLoading && items.length === 0 && total === 0 && !error && (
-        <p className="text-ink-700 dark:text-parchment-100">
-          No matches. Try a different query or remove a filter.
-        </p>
-      )}
+      {resultStatus}
       {enabled && items.length > 0 && (
         <>
           <div className="mb-3 flex items-center justify-between gap-3">
             <p className="text-sm text-ink-700/80 dark:text-parchment-100/70">
               {total} match{total === 1 ? '' : 'es'}
             </p>
-            <ResultsViewToggle
-              view={view}
-              onChange={(next) => {
-                setView(next);
-                setUrlParam('view', next);
-              }}
-            />
+            <ResultsViewToggle view={view} onChange={handleView} />
           </div>
           {view === 'compact' ? (
             <CompactDocumentList documents={items.map((result) => result.document)} />
