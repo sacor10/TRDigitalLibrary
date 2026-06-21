@@ -97,7 +97,7 @@ export function SignInButton() {
         window.google.accounts.id.renderButton(containerRef.current, {
           type: 'standard',
           theme: 'outline',
-          size: 'medium',
+          size: 'small',
           text: 'signin_with',
           shape: 'pill',
         });
