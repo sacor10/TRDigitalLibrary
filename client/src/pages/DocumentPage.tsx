@@ -88,7 +88,7 @@ export function DocumentPage() {
         <>
           <div
             className="fixed inset-x-0 z-30 px-4"
-            style={{ bottom: 'calc(4rem + env(safe-area-inset-bottom))' }}
+            style={{ bottom: 'calc(4.5rem + env(safe-area-inset-bottom))' }}
           >
             <button
               type="button"

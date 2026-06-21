@@ -13,7 +13,9 @@ const TABS: Array<{ to: string; label: string; icon: TabIcon; end?: boolean }> =
 ];
 
 const itemClass =
-  'tap flex flex-1 flex-col items-center justify-center gap-0.5 py-1.5 text-[11px] font-medium';
+  'tap flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[13px] font-medium';
+
+const ICON_SIZE = 28;
 
 export function MobileTabBar() {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -21,7 +23,7 @@ export function MobileTabBar() {
     <>
       <nav
         aria-label="Primary"
-        className="safe-bottom fixed inset-x-0 bottom-0 z-40 flex h-16 items-stretch border-t border-ink-700/10 bg-parchment-100/95 backdrop-blur dark:border-parchment-50/10 dark:bg-ink-800/95"
+        className="safe-bottom fixed inset-x-0 bottom-0 z-40 flex h-[72px] items-stretch border-t border-ink-700/10 bg-parchment-100/95 backdrop-blur dark:border-parchment-50/10 dark:bg-ink-800/95"
       >
         {TABS.map(({ to, label, icon: Icon, end }) => (
           <NavLink
@@ -36,7 +38,7 @@ export function MobileTabBar() {
               }`
             }
           >
-            <Icon width={24} height={24} />
+            <Icon width={ICON_SIZE} height={ICON_SIZE} />
             <span>{label}</span>
           </NavLink>
         ))}
@@ -49,7 +51,7 @@ export function MobileTabBar() {
             moreOpen ? 'text-accent-500' : 'text-ink-700/70 dark:text-parchment-100/70'
           }`}
         >
-          <MoreIcon width={24} height={24} />
+          <MoreIcon width={ICON_SIZE} height={ICON_SIZE} />
           <span>More</span>
         </button>
       </nav>

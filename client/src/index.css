@@ -75,7 +75,7 @@
   }
   /* Margin variants for clearing fixed bars while keeping safe-area room. */
   .pb-safe-tabbar {
-    padding-bottom: calc(4rem + env(safe-area-inset-bottom));
+    padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
   }
   @keyframes sheet-up {
     from {
