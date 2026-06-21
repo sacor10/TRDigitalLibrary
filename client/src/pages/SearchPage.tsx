@@ -6,7 +6,7 @@ import {
   type SearchMode,
   type SearchResult,
 } from '@tr/shared';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { fetchDocuments, searchDocuments } from '../api/client';
@@ -155,7 +155,32 @@ export function SearchPage() {
       }));
     },
   });
-  const facets = data?.facets;
+  // The server computes facets only on the first page (offset 0); "Load more"
+  // responses omit them to avoid redundant full scans. Retain the first page's
+  // facets so the type/topic/source chips don't vanish when paginating, and
+  // reset them whenever the search itself changes.
+  const [stickyFacets, setStickyFacets] = useState<SearchPageResponse['facets']>();
+  const searchKey = JSON.stringify({
+    q: trimmedQ,
+    type,
+    recipient: trimmedRecipient,
+    dateFrom,
+    dateTo,
+    tag,
+    source,
+    mode,
+  });
+  useEffect(() => {
+    setStickyFacets(undefined);
+  }, [searchKey]);
+  useEffect(() => {
+    const next = data?.facets;
+    if (next && (next.types.length > 0 || next.tags.length > 0 || next.sources.length > 0)) {
+      setStickyFacets(next);
+    }
+  }, [data]);
+
+  const facets = stickyFacets ?? data?.facets;
   const tagFacets = facets?.tags ?? [];
   const sourceFacets = facets?.sources ?? [];
 

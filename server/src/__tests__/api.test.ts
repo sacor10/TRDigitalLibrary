@@ -351,67 +351,64 @@ describe('TR Digital Library API', () => {
       expect(res.body.total).toBe(2);
     });
 
-    it('issues a single ranking query (with COUNT OVER) plus a rowid-scoped hydration query', async () => {
-      // Regression guard for two perf properties of the two-phase search:
+    it('keeps snippet() off the transcription column and skips facets when paginating', async () => {
+      // Regression guards for the chunk-snippet architecture:
       //  1. The unbounded total piggybacks on the ranking query via COUNT(*)
-      //     OVER (), so there is no separate COUNT round-trip. If we ever go
-      //     back to a 3rd query for the count, p50 latency regresses on Turso.
-      //  2. snippet()/transcription reads happen only in the hydration query
-      //     and only against the page rowids — never against the full match
-      //     set. If snippet() leaks into the ranking SELECT, every match
-      //     materializes its transcription before LIMIT (the original 21s
-      //     bug).
-      const executeCalls: Array<{ sql: string; args?: unknown }> = [];
-      const countingDb = new Proxy(db, {
-        get(target, prop, receiver) {
-          if (prop === 'execute') {
-            return async (stmt: Parameters<LibsqlClient['execute']>[0]) => {
-              if (typeof stmt === 'object' && stmt !== null && 'sql' in stmt) {
-                const s = stmt as { sql: unknown; args?: unknown };
-                executeCalls.push({ sql: String(s.sql), args: s.args });
-              }
-              return (target.execute as LibsqlClient['execute'])(stmt);
-            };
-          }
-          return Reflect.get(target, prop, receiver);
-        },
-      }) as LibsqlClient;
-      const countingApp = createApp(countingDb);
+      //     OVER () — no separate COUNT round-trip.
+      //  2. snippet() never runs against documents_fts (the multi-MB
+      //     transcription column — the ~18 s bug). Snippets come from the
+      //     bounded document_chunks_fts index instead.
+      //  3. Facets describe the whole match set, so they are computed once on
+      //     the first page and skipped on "Load more" (offset > 0).
+      const run = async (path: string) => {
+        const executeCalls: Array<{ sql: string; args?: unknown }> = [];
+        const countingDb = new Proxy(db, {
+          get(target, prop, receiver) {
+            if (prop === 'execute') {
+              return async (stmt: Parameters<LibsqlClient['execute']>[0]) => {
+                if (typeof stmt === 'object' && stmt !== null && 'sql' in stmt) {
+                  const s = stmt as { sql: unknown; args?: unknown };
+                  executeCalls.push({ sql: String(s.sql), args: s.args });
+                }
+                return (target.execute as LibsqlClient['execute'])(stmt);
+              };
+            }
+            return Reflect.get(target, prop, receiver);
+          },
+        }) as LibsqlClient;
+        const res = await request(createApp(countingDb)).get(path);
+        expect(res.status).toBe(200);
+        return executeCalls;
+      };
 
-      const res = await request(countingApp).get('/api/search?q=alpenglow&limit=5&offset=2');
-      expect(res.status).toBe(200);
-
-      const ftsCalls = executeCalls.filter((c) => c.sql.includes('documents_fts'));
-      // ranking + hydration + 3 facet aggregates (type/tag/source).
-      expect(ftsCalls).toHaveLength(5);
-
-      const rankingCall = ftsCalls.find((c) => c.sql.includes('COUNT(*) OVER'));
+      // First page: ranking + 3 facets, snippet sourced from chunks.
+      const firstPage = await run('/api/search?q=alpenglow&limit=5&offset=0');
+      const docsFtsCalls = firstPage.filter((c) => c.sql.includes('documents_fts'));
+      const rankingCall = docsFtsCalls.find((c) => c.sql.includes('COUNT(*) OVER'));
       expect(rankingCall, 'ranking query should carry COUNT(*) OVER ()').toBeDefined();
-      // Ranking query must not compute snippets; that's the whole point.
-      expect(rankingCall!.sql).not.toContain('snippet(');
-
-      const hydrateCall = ftsCalls.find((c) => c !== rankingCall);
-      expect(hydrateCall, 'hydration query should exist').toBeDefined();
-      expect(hydrateCall!.sql).toContain('snippet(');
-      expect(hydrateCall!.sql).toContain('documents.rowid IN');
-      // Hydration is rowid-bound: args are positional [ftsQuery, ...rowids, ...rowids],
-      // never @limit/@offset.
-      expect(Array.isArray(hydrateCall!.args)).toBe(true);
-      const hydrateArgs = hydrateCall!.args as unknown[];
-      expect(hydrateArgs[0]).toBe('"alpenglow"');
-      expect(hydrateArgs.length).toBeGreaterThan(1);
-
-      const facetCalls = ftsCalls.filter((c) => c !== rankingCall && c !== hydrateCall);
-      expect(facetCalls).toHaveLength(3);
-      for (const facetCall of facetCalls) {
-        expect(facetCall.sql).not.toContain('snippet(');
+      // No documents_fts query may compute a snippet — that is the whole fix.
+      for (const c of docsFtsCalls) {
+        expect(c.sql).not.toContain('snippet(');
       }
-
-      // Belt-and-braces: no separate COUNT(*) query survives.
-      const standaloneCount = executeCalls.find((c) =>
-        /\bSELECT\s+COUNT\(\*\)\s+as\s+c\b/i.test(c.sql),
+      // Snippets come from the bounded chunk index.
+      const chunkSnippet = firstPage.find(
+        (c) => c.sql.includes('document_chunks_fts') && c.sql.includes('snippet('),
       );
-      expect(standaloneCount).toBeUndefined();
+      expect(chunkSnippet, 'snippet should be sourced from document_chunks_fts').toBeDefined();
+      // Three facet aggregates (type/tag/source) on the first page.
+      const facetCalls = docsFtsCalls.filter((c) => c !== rankingCall);
+      expect(facetCalls).toHaveLength(3);
+      // Belt-and-braces: no separate COUNT(*) query survives.
+      expect(
+        firstPage.find((c) => /\bSELECT\s+COUNT\(\*\)\s+as\s+c\b/i.test(c.sql)),
+      ).toBeUndefined();
+
+      // Paginated request: facets are skipped entirely.
+      const secondPage = await run('/api/search?q=alpenglow&limit=5&offset=5');
+      const secondFacetCalls = secondPage
+        .filter((c) => c.sql.includes('documents_fts'))
+        .filter((c) => !c.sql.includes('COUNT(*) OVER'));
+      expect(secondFacetCalls, 'no facet scans on offset > 0').toHaveLength(0);
     });
 
     it('paginates via offset', async () => {

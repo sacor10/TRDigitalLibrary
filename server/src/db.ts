@@ -11,6 +11,8 @@ import type {
 } from '@libsql/client';
 import type { Document, DocumentPatch, DocumentSection, FieldProvenance } from '@tr/shared';
 
+import { chunkText } from './text/chunk.js';
+
 const __dirname = (() => {
   try {
     return dirname(fileURLToPath(import.meta.url));
@@ -405,6 +407,45 @@ export interface UpsertDocumentOptions {
   teiSourceHash?: string | null;
 }
 
+// document_chunks feeds document_chunks_fts, the bounded-text index used to
+// generate search snippets cheaply (snippet() over the multi-MB `transcription`
+// column cost up to ~18 s). Chunks are a derived index written separately from
+// the atomic document upsert: a single multi-MB document is ~1k chunks, which
+// would blow the libsql per-batch statement limit if folded into the document
+// batch, and a partial chunk failure must leave the document intact (search
+// falls back to the title snippet, and the backfill script repairs gaps).
+const CHUNK_WRITE_BATCH = 200;
+
+export async function syncDocumentChunks(
+  client: LibsqlClient,
+  documentId: string,
+  transcription: string,
+  opts: { onlyIfMissing?: boolean } = {},
+): Promise<void> {
+  if (opts.onlyIfMissing) {
+    const existing = await client.execute({
+      sql: 'SELECT 1 FROM document_chunks WHERE document_id = ? LIMIT 1',
+      args: [documentId],
+    });
+    if (existing.rows.length > 0) return;
+  }
+  await client.execute({
+    sql: 'DELETE FROM document_chunks WHERE document_id = ?',
+    args: [documentId],
+  });
+  const chunks = chunkText(transcription);
+  for (let i = 0; i < chunks.length; i += CHUNK_WRITE_BATCH) {
+    const slice = chunks.slice(i, i + CHUNK_WRITE_BATCH);
+    await client.batch(
+      slice.map((text, j) => ({
+        sql: 'INSERT INTO document_chunks (document_id, chunk_index, text) VALUES (?, ?, ?)',
+        args: [documentId, i + j, text] as InValue[],
+      })),
+      'write',
+    );
+  }
+}
+
 export async function upsertDocument(
   client: LibsqlClient,
   doc: Document,
@@ -428,6 +469,9 @@ export async function upsertDocument(
   } else {
     await client.batch(stmts, 'write');
   }
+  await syncDocumentChunks(client, doc.id, doc.transcription, {
+    onlyIfMissing: opts.mode === 'skip-if-exists',
+  });
 }
 
 /**
@@ -469,6 +513,11 @@ export async function upsertDocumentsBatch(
     }
   }
   await client.batch(stmts, 'write');
+  for (const { doc } of items) {
+    await syncDocumentChunks(client, doc.id, doc.transcription, {
+      onlyIfMissing: opts.mode === 'skip-if-exists',
+    });
+  }
 }
 
 /**

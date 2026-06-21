@@ -7,7 +7,7 @@ import { embedText } from '../embeddings/model.js';
 import { cosineSimilarity, decodeEmbedding, hybridScores } from '../embeddings/vector.js';
 import { setPublicCache } from '../http-cache.js';
 
-import { DOCUMENT_SUMMARY_COLUMNS, asNumber, asString } from './document-query.js';
+import { DOCUMENT_SUMMARY_COLUMNS, asNumber, asString, type FacetCount } from './document-query.js';
 
 // For semantic/hybrid we re-rank a bounded BM25 candidate pool by embedding
 // similarity, so per-query cost stays independent of corpus size.
@@ -32,7 +32,15 @@ function terms(raw: string): string[] {
     .map(quoteFtsToken);
 }
 
-function buildFtsQuery(raw: string): { ftsQuery: string; where: string[]; params: Record<string, InValue> } {
+function buildFtsQuery(raw: string): {
+  ftsQuery: string;
+  // Bare (unscoped) body terms, used to MATCH the chunk-snippet index. Field-
+  // scoped tokens like `title:"x"` are excluded — they target metadata columns,
+  // not transcription body text.
+  bodyTokens: string[];
+  where: string[];
+  params: Record<string, InValue>;
+} {
   const where: string[] = [];
   const params: Record<string, InValue> = {};
   const tokens: string[] = [];
@@ -75,10 +83,13 @@ function buildFtsQuery(raw: string): { ftsQuery: string; where: string[]; params
     tokens.push(...terms(part));
   }
 
+  // Bare body terms are the quoted tokens; field-scoped tokens look like
+  // `field:"..."` and are skipped for the chunk MATCH.
+  const bodyTokens = tokens.filter((t) => t.startsWith('"'));
   if (tokens.length === 0) {
-    return { ftsQuery: '""', where, params };
+    return { ftsQuery: '""', bodyTokens, where, params };
   }
-  return { ftsQuery: tokens.join(' AND '), where, params };
+  return { ftsQuery: tokens.join(' AND '), bodyTokens, where, params };
 }
 
 export interface CreateSearchRouterOptions {
@@ -243,69 +254,115 @@ export function createSearchRouter(
         return res.json({ results: [], total, facets: { types: [], tags: [], sources: [] } });
       }
 
-      // Phase 2: hydrate only the page. MATCH is required for snippet() to
-      // have positions to highlight; rowid IN (...) prunes to the page.
-      // CASE preserves the (re-)ranked order without re-scoring.
+      // Phase 2: hydrate only the page's documents by rowid. No snippet() here —
+      // snippet() over the multi-MB `transcription` column cost up to ~18 s per
+      // page; snippets now come from the bounded chunk index below. CASE
+      // preserves the (re-)ranked order without re-scoring.
       const placeholders = rowids.map(() => '?').join(', ');
       const orderCase = rowids.map((_, i) => `WHEN ? THEN ${i}`).join(' ');
-      const hydrateSql = `
-        SELECT
-          documents.rowid AS rowid,
-          ${DOCUMENT_SUMMARY_COLUMNS},
-          snippet(documents_fts, -1, '<mark>', '</mark>', '…', 16) AS snippet
-        FROM documents_fts
-        JOIN documents ON documents.rowid = documents_fts.rowid
-        WHERE documents_fts MATCH ?
-          AND documents.rowid IN (${placeholders})
-        ORDER BY CASE documents.rowid ${orderCase} END
-      `;
       const hydrateResult = await db.execute({
-        sql: hydrateSql,
-        args: [ftsQuery, ...rowids, ...rowids],
+        sql: `
+          SELECT documents.rowid AS rowid, ${DOCUMENT_SUMMARY_COLUMNS}
+          FROM documents
+          WHERE documents.rowid IN (${placeholders})
+          ORDER BY CASE documents.rowid ${orderCase} END
+        `,
+        args: [...rowids, ...rowids],
       });
 
-      const facetFromWhere = (facetWhere: readonly string[], includeTopics = false) => `FROM documents_fts
-        JOIN documents ON documents.rowid = documents_fts.rowid
-        ${includeTopics ? 'JOIN document_topic_assignments dta ON dta.document_id = documents.id' : ''}
-        WHERE ${facetWhere.join(' AND ')}`;
-      const [typeFacetResult, tagFacetResult, sourceFacetResult] = await Promise.all([
-        db.execute({
-          sql: `SELECT documents.type AS value, COUNT(*) AS count
-                  ${facetFromWhere(typeFacetWhere)}
-                 GROUP BY documents.type
-                 ORDER BY documents.type ASC`,
-          args: filterParams,
-        }),
-        db.execute({
-          sql: `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
-                  ${facetFromWhere(tagFacetWhere, true)}
-                 GROUP BY dta.topic
-                 ORDER BY count DESC, dta.topic ASC
-                 LIMIT 50`,
-          args: filterParams,
-        }),
-        db.execute({
-          sql: `SELECT documents.source AS value, COUNT(*) AS count
-                  ${facetFromWhere(sourceFacetWhere)}
-                 GROUP BY documents.source
-                 ORDER BY count DESC, documents.source ASC
-                 LIMIT 50`,
-          args: filterParams,
-        }),
-      ]);
+      // Snippets from the bounded chunk index: snippet() runs over a ~2 KB chunk
+      // instead of a full transcription. Two cheap queries — pick each page
+      // document's best-matching chunk by bm25 (bm25 can't share a SELECT with a
+      // window function, so it's isolated in the innermost query), then snippet()
+      // only those winning chunks. Documents whose match was in title/recipient/
+      // tags (no body hit) fall back to the title.
+      const snippetByDoc = new Map<string, string>();
+      const bodyQuery = parsedQuery.bodyTokens.join(' AND ');
+      if (bodyQuery) {
+        const pageIds = pageCandidates.map((c) => c.id);
+        const idPlaceholders = pageIds.map(() => '?').join(', ');
+        const bestChunks = await db.execute({
+          sql: `
+            SELECT document_id, rowid FROM (
+              SELECT document_id, rowid,
+                     ROW_NUMBER() OVER (PARTITION BY document_id ORDER BY rank) AS rn
+              FROM (
+                SELECT dc.document_id AS document_id,
+                       document_chunks_fts.rowid AS rowid,
+                       bm25(document_chunks_fts) AS rank
+                FROM document_chunks_fts
+                JOIN document_chunks dc ON dc.rowid = document_chunks_fts.rowid
+                WHERE document_chunks_fts MATCH ?
+                  AND dc.document_id IN (${idPlaceholders})
+              )
+            ) WHERE rn = 1
+          `,
+          args: [bodyQuery, ...pageIds],
+        });
+        const docByChunkRowid = new Map<number, string>();
+        for (const row of bestChunks.rows) {
+          docByChunkRowid.set(asNumber(row.rowid), asString(row.document_id));
+        }
+        if (docByChunkRowid.size > 0) {
+          const chunkRowids = [...docByChunkRowid.keys()];
+          const rowidPlaceholders = chunkRowids.map(() => '?').join(', ');
+          const snippets = await db.execute({
+            sql: `
+              SELECT document_chunks_fts.rowid AS rowid,
+                     snippet(document_chunks_fts, 0, '<mark>', '</mark>', '…', 16) AS snippet
+              FROM document_chunks_fts
+              WHERE document_chunks_fts MATCH ?
+                AND document_chunks_fts.rowid IN (${rowidPlaceholders})
+            `,
+            args: [bodyQuery, ...chunkRowids],
+          });
+          for (const row of snippets.rows) {
+            const docId = docByChunkRowid.get(asNumber(row.rowid));
+            if (docId) snippetByDoc.set(docId, asString(row.snippet));
+          }
+        }
+      }
 
-      setPublicCache(res);
-      return res.json({
-        results: hydrateResult.rows.map((row) => {
-          const score = scoreByRowid.get(asNumber(row.rowid));
-          return {
-            document: rowToDocument(rowToDocumentRow(row)),
-            snippet: asString(row.snippet),
-            ...(score !== undefined ? { score, mode: responseMode } : {}),
-          };
-        }),
-        total,
-        facets: {
+      // Facets describe the whole match set, not the page, so they're identical
+      // across paginated requests. Compute them once on the first page; "Load
+      // more" (offset > 0) skips the three extra full scans entirely. The client
+      // retains the first page's facets.
+      let facets: { types: FacetCount[]; tags: FacetCount[]; sources: FacetCount[] } = {
+        types: [],
+        tags: [],
+        sources: [],
+      };
+      if (offset === 0) {
+        const facetFromWhere = (facetWhere: readonly string[], includeTopics = false) => `FROM documents_fts
+          JOIN documents ON documents.rowid = documents_fts.rowid
+          ${includeTopics ? 'JOIN document_topic_assignments dta ON dta.document_id = documents.id' : ''}
+          WHERE ${facetWhere.join(' AND ')}`;
+        const [typeFacetResult, tagFacetResult, sourceFacetResult] = await Promise.all([
+          db.execute({
+            sql: `SELECT documents.type AS value, COUNT(*) AS count
+                    ${facetFromWhere(typeFacetWhere)}
+                   GROUP BY documents.type
+                   ORDER BY documents.type ASC`,
+            args: filterParams,
+          }),
+          db.execute({
+            sql: `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
+                    ${facetFromWhere(tagFacetWhere, true)}
+                   GROUP BY dta.topic
+                   ORDER BY count DESC, dta.topic ASC
+                   LIMIT 50`,
+            args: filterParams,
+          }),
+          db.execute({
+            sql: `SELECT documents.source AS value, COUNT(*) AS count
+                    ${facetFromWhere(sourceFacetWhere)}
+                   GROUP BY documents.source
+                   ORDER BY count DESC, documents.source ASC
+                   LIMIT 50`,
+            args: filterParams,
+          }),
+        ]);
+        facets = {
           types: typeFacetResult.rows.map((row) => ({
             value: asString(row.value),
             count: asNumber(row.count),
@@ -320,7 +377,23 @@ export function createSearchRouter(
               value: asString(row.value),
               count: asNumber(row.count),
             })),
-        },
+        };
+      }
+
+      setPublicCache(res);
+      return res.json({
+        results: hydrateResult.rows.map((row) => {
+          const score = scoreByRowid.get(asNumber(row.rowid));
+          const docId = asString(row.id);
+          const snippet = snippetByDoc.get(docId) ?? asString(row.title);
+          return {
+            document: rowToDocument(rowToDocumentRow(row)),
+            snippet,
+            ...(score !== undefined ? { score, mode: responseMode } : {}),
+          };
+        }),
+        total,
+        facets,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -10,11 +10,10 @@
  * localModelPath + allowLocalModels).
  */
 
+import { chunkText } from '../text/chunk.js';
+
 export const EMBEDDINGS_MODEL = process.env.EMBEDDINGS_MODEL ?? 'Xenova/bge-small-en-v1.5';
 export const EMBEDDINGS_DIM = Number(process.env.EMBEDDINGS_DIM ?? 384);
-
-// ~2000 chars keeps each chunk comfortably under the model's token limit.
-const CHUNK_CHARS = 2000;
 
 export function embeddingModelVersion(): string {
   return EMBEDDINGS_MODEL;
@@ -47,16 +46,6 @@ async function getExtractor(): Promise<Extractor> {
     });
   }
   return extractorPromise;
-}
-
-function chunkText(text: string): string[] {
-  const clean = text.replace(/\s+/g, ' ').trim();
-  if (!clean) return [];
-  const chunks: string[] = [];
-  for (let i = 0; i < clean.length; i += CHUNK_CHARS) {
-    chunks.push(clean.slice(i, i + CHUNK_CHARS));
-  }
-  return chunks;
 }
 
 /** True when an embedding model can be loaded in this environment. */
