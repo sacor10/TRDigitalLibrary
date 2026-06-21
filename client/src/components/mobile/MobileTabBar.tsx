@@ -13,9 +13,13 @@ const TABS: Array<{ to: string; label: string; icon: TabIcon; end?: boolean }> =
 ];
 
 const itemClass =
-  'tap flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[13px] font-medium';
+  'tap flex flex-1 flex-col items-center justify-center gap-1 py-2';
 
-const ICON_SIZE = 28;
+// Native-style tab labels: sans-serif (not the app's serif body font), small and
+// tight so the icon — not the label — is the dominant element.
+const labelClass = 'font-sans text-[11px] font-medium leading-none tracking-wide';
+
+const ICON_SIZE = 26;
 
 export function MobileTabBar() {
   const [moreOpen, setMoreOpen] = useState(false);
@@ -39,7 +43,7 @@ export function MobileTabBar() {
             }
           >
             <Icon width={ICON_SIZE} height={ICON_SIZE} />
-            <span>{label}</span>
+            <span className={labelClass}>{label}</span>
           </NavLink>
         ))}
         <button
@@ -52,7 +56,7 @@ export function MobileTabBar() {
           }`}
         >
           <MoreIcon width={ICON_SIZE} height={ICON_SIZE} />
-          <span>More</span>
+          <span className={labelClass}>More</span>
         </button>
       </nav>
       <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} />
