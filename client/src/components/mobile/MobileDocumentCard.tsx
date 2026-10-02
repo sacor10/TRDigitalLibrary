@@ -84,6 +84,7 @@ export function MobileDocumentCard({
         <SearchResultPreview
           documentId={document.id}
           searchQuery={searchQuery}
+          snippet={snippet}
           initialDocument={document}
           onClose={onClose}
         />

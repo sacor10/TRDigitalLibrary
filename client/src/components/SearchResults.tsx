@@ -127,6 +127,7 @@ export function SearchResults({ results, searchQuery = '' }: SearchResultsProps)
               <SearchResultPreview
                 documentId={document.id}
                 searchQuery={searchQuery}
+                snippet={snippet}
                 initialDocument={document}
                 onClose={() => setExpandedDocId(null)}
               />
