@@ -196,6 +196,25 @@ export function SearchResultPreview({
         </div>
       </div>
 
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-700/90 dark:text-parchment-100/90">
+        <div>
+          <span className="font-semibold uppercase tracking-wider text-ink-700/60 dark:text-parchment-100/60">
+            From:{' '}
+          </span>
+          <span className="font-medium text-ink-900 dark:text-parchment-50">
+            {document.author || 'Theodore Roosevelt'}
+          </span>
+        </div>
+        <div>
+          <span className="font-semibold uppercase tracking-wider text-ink-700/60 dark:text-parchment-100/60">
+            To:{' '}
+          </span>
+          <span className="font-medium text-ink-900 dark:text-parchment-50">
+            {document.recipient || 'Not specified'}
+          </span>
+        </div>
+      </div>
+
       {/* If matched by metadata/topic rather than transcription body text */}
       {terms.length > 0 && !matchInfo.hasMatch && (
         <div className="mt-3 rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
