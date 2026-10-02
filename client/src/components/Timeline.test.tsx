@@ -119,15 +119,19 @@ describe('Timeline', () => {
     expect(screen.getByText(/Document opened/i)).toBeTruthy();
   });
 
-  it('previews the selected marker title and date in the timeline frame', () => {
+  it('previews the selected marker title and date in the timeline frame as a clickable link', () => {
     renderTimeline(docs, {
       dateFrom: '1910-01-23',
       dateTo: '1910-07-23',
       selectedDocumentId: 'e',
     });
 
-    expect(screen.getByText('E')).toBeTruthy();
-    expect(screen.getByText('1910-04-23')).toBeTruthy();
+    const link = screen.getByRole('link', { name: /E 1910-04-23/i });
+    expect(link).toBeTruthy();
+    expect(link.getAttribute('href')).toBe('/documents/e');
+
+    fireEvent.click(link);
+    expect(screen.getByText('Document opened')).toBeTruthy();
   });
 
   it('recenters the six-month window when another marker is activated at exactly six months', () => {

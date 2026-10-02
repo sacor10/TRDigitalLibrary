@@ -4,7 +4,7 @@ import {
   type Document,
 } from '@tr/shared';
 import { useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 
 interface TimelineProps {
@@ -310,7 +310,7 @@ export function Timeline({
     if (!onViewRangeChange) return;
     const target = e.target as Element | null;
     const tag = target?.tagName?.toLowerCase();
-    if (tag === 'circle' || tag === 'button' || target?.closest('button')) return;
+    if (tag === 'circle' || tag === 'button' || tag === 'a' || target?.closest('button') || target?.closest('a')) return;
     const node = wrapperRef.current;
     if (!node) return;
     const width = node.getBoundingClientRect().width || 1;
@@ -389,8 +389,9 @@ export function Timeline({
         onPointerCancel={endDrag}
       >
         {selectedDocument && (
-          <div
-            className="pointer-events-none absolute left-12 top-3 z-10 max-w-[min(28rem,calc(100%-6rem))] rounded-md border border-ink-700/15 bg-white/90 px-3 py-2 text-sm shadow-sm backdrop-blur dark:border-parchment-50/15 dark:bg-ink-900/90"
+          <Link
+            to={`/documents/${selectedDocument.id}`}
+            className="absolute left-12 top-3 z-10 block max-w-[min(28rem,calc(100%-6rem))] rounded-md border border-ink-700/15 bg-white/90 px-3 py-2 text-sm shadow-sm backdrop-blur transition hover:bg-white hover:border-ink-700/30 dark:border-parchment-50/15 dark:bg-ink-900/90 dark:hover:bg-ink-900 dark:hover:border-parchment-50/30"
             aria-live="polite"
           >
             <p className="truncate font-medium text-ink-900 dark:text-parchment-50">
@@ -399,7 +400,7 @@ export function Timeline({
             <p className="mt-0.5 text-xs text-ink-700/75 dark:text-parchment-100/75">
               {selectedDocument.date}
             </p>
-          </div>
+          </Link>
         )}
         <button
           type="button"
