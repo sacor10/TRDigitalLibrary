@@ -32,6 +32,7 @@ const MODEL = process.env.EMBEDDINGS_MODEL ?? 'Xenova/bge-small-en-v1.5';
 const DIM = Number(process.env.EMBEDDINGS_DIM ?? 384);
 const CHUNK_CHARS = 2000;
 const DEFAULT_BATCH_SIZE = 25;
+const MAX_CHUNKS_PER_DOC = 8; // ~16 KB text window per document
 
 function log(msg) {
   console.log(`[ensure-embeddings] ${msg}`);
@@ -79,7 +80,7 @@ async function loadExtractor() {
 }
 
 async function embed(extractor, text) {
-  const chunks = chunkText(text);
+  const chunks = chunkText(text).slice(0, MAX_CHUNKS_PER_DOC);
   if (chunks.length === 0) return null;
   const acc = new Float32Array(DIM);
   let count = 0;
@@ -227,7 +228,10 @@ async function main() {
       log(`wrote ${written} embedding row(s)`);
       batch = [];
     };
-    for (const row of corpus.rows) {
+    for (let i = 0; i < corpus.rows.length; i++) {
+      const row = corpus.rows[i];
+      const chunks = chunkText(String(row.transcription)).slice(0, MAX_CHUNKS_PER_DOC);
+      log(`[${i + 1}/${corpus.rows.length}] ${row.id} (${chunks.length} chunks)...`);
       const vec = await embed(extractor, String(row.transcription));
       if (!vec) continue;
       batch.push({

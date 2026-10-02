@@ -7,7 +7,13 @@ import { embedText } from '../embeddings/model.js';
 import { cosineSimilarity, decodeEmbedding, hybridScores } from '../embeddings/vector.js';
 import { setPublicCache } from '../http-cache.js';
 
-import { DOCUMENT_SUMMARY_COLUMNS, asNumber, asString, type FacetCount } from './document-query.js';
+import {
+  DOCUMENT_SUMMARY_COLUMNS,
+  asNumber,
+  asString,
+  rowsToFacets,
+  type FacetCount,
+} from './document-query.js';
 
 // For semantic/hybrid we re-rank a bounded BM25 candidate pool by embedding
 // similarity, so per-query cost stays independent of corpus size.
@@ -167,24 +173,99 @@ export function createSearchRouter(
     const wantSemantic = mode !== 'lexical';
     const rankLimit = wantSemantic ? SEMANTIC_CANDIDATE_CAP : limit;
     const rankOffset = wantSemantic ? 0 : offset;
+
+    // Only join `documents` in the ranking subquery when a structured filter
+    // actually references a documents.* column (or when semantic/hybrid needs documents.id).
+    // The rowid we emit is identical to documents_fts.rowid, so on an unfiltered keyword search
+    // (the common case) the join is pure overhead: it forces a primary-key lookup into the
+    // documents table — whose rows carry ~1MB transcriptions — for every match,
+    // which is what pushes broad terms past the function timeout (504). Without
+    // it, ranking runs entirely on the FTS index.
+    const hasDocFilter =
+      parsedQuery.where.length > 0 ||
+      Boolean(type) ||
+      Boolean(dateFrom) ||
+      Boolean(dateTo) ||
+      Boolean(source) ||
+      tag !== undefined ||
+      wantSemantic;
+    const rankInnerFrom = hasDocFilter
+      ? `FROM documents_fts
+        JOIN documents ON documents.rowid = documents_fts.rowid
+        ${whereSql}`
+      : `FROM documents_fts
+        ${whereSql}`;
+    const rankInnerRowid = hasDocFilter ? 'documents.rowid' : 'documents_fts.rowid';
+    const rankInnerId = hasDocFilter ? 'documents.id' : "''";
+
     const rankSql = `
       SELECT inner_q.rowid AS rowid, inner_q.id AS id, inner_q.rank AS rank,
              COUNT(*) OVER () AS total_count
       FROM (
-        SELECT documents.rowid AS rowid, documents.id AS id, bm25(documents_fts) AS rank
-        FROM documents_fts
-        JOIN documents ON documents.rowid = documents_fts.rowid
-        ${whereSql}
+        SELECT ${rankInnerRowid} AS rowid, ${rankInnerId} AS id, bm25(documents_fts) AS rank
+        ${rankInnerFrom}
       ) AS inner_q
       ORDER BY inner_q.rank
       LIMIT @limit OFFSET @offset
     `;
 
+    // Wave A: rank+count and facet aggregates are mutually independent, so
+    // they run concurrently (one round-trip wave) on offset 0 rather than the
+    // facets running after rank+hydrate. Concurrency — not a serial batch —
+    // matters here: for a broad term these are heavy full-match scans, so their
+    // wall time must overlap (max), not stack (sum). When offset > 0, facets
+    // are skipped entirely because the client retains the first page's facets.
+    // Phase-2 hydration (wave B) needs the rowids this produces, so it stays
+    // a separate execute below.
+    const facetFromWhere = (facetWhere: readonly string[], includeTopics = false) => `FROM documents_fts
+        JOIN documents ON documents.rowid = documents_fts.rowid
+        ${includeTopics ? 'JOIN document_topic_assignments dta ON dta.document_id = documents.id' : ''}
+        WHERE ${facetWhere.join(' AND ')}`;
+    const typeFacetSql = `SELECT documents.type AS value, COUNT(*) AS count
+                  ${facetFromWhere(typeFacetWhere)}
+                 GROUP BY documents.type
+                 ORDER BY documents.type ASC`;
+    const tagFacetSql = `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
+                  ${facetFromWhere(tagFacetWhere, true)}
+                 GROUP BY dta.topic
+                 ORDER BY count DESC, dta.topic ASC
+                 LIMIT 50`;
+    const sourceFacetSql = `SELECT documents.source AS value, COUNT(*) AS count
+                  ${facetFromWhere(sourceFacetWhere)}
+                 GROUP BY documents.source
+                 ORDER BY count DESC, documents.source ASC
+                 LIMIT 50`;
+
     try {
-      const rankResult = await db.execute({
-        sql: rankSql,
-        args: { ...filterParams, limit: rankLimit, offset: rankOffset },
-      });
+      let rankResult;
+      let facets: { types: FacetCount[]; tags: FacetCount[]; sources: FacetCount[] } = {
+        types: [],
+        tags: [],
+        sources: [],
+      };
+
+      if (offset === 0) {
+        const [rResult, typeFacetResult, tagFacetResult, sourceFacetResult] = await Promise.all([
+          db.execute({
+            sql: rankSql,
+            args: { ...filterParams, limit: rankLimit, offset: rankOffset },
+          }),
+          db.execute({ sql: typeFacetSql, args: filterParams }),
+          db.execute({ sql: tagFacetSql, args: filterParams }),
+          db.execute({ sql: sourceFacetSql, args: filterParams }),
+        ]);
+        rankResult = rResult;
+        facets = rowsToFacets(
+          typeFacetResult.rows,
+          tagFacetResult.rows,
+          sourceFacetResult.rows,
+        );
+      } else {
+        rankResult = await db.execute({
+          sql: rankSql,
+          args: { ...filterParams, limit: rankLimit, offset: rankOffset },
+        });
+      }
 
       if (rankResult.rows.length === 0) {
         setPublicCache(res);
@@ -279,7 +360,7 @@ export function createSearchRouter(
       const snippetByDoc = new Map<string, string>();
       const bodyQuery = parsedQuery.bodyTokens.join(' AND ');
       if (bodyQuery) {
-        const pageIds = pageCandidates.map((c) => c.id);
+        const pageIds = hydrateResult.rows.map((row) => asString(row.id));
         const idPlaceholders = pageIds.map(() => '?').join(', ');
         const bestChunks = await db.execute({
           sql: `
@@ -321,63 +402,6 @@ export function createSearchRouter(
             if (docId) snippetByDoc.set(docId, asString(row.snippet));
           }
         }
-      }
-
-      // Facets describe the whole match set, not the page, so they're identical
-      // across paginated requests. Compute them once on the first page; "Load
-      // more" (offset > 0) skips the three extra full scans entirely. The client
-      // retains the first page's facets.
-      let facets: { types: FacetCount[]; tags: FacetCount[]; sources: FacetCount[] } = {
-        types: [],
-        tags: [],
-        sources: [],
-      };
-      if (offset === 0) {
-        const facetFromWhere = (facetWhere: readonly string[], includeTopics = false) => `FROM documents_fts
-          JOIN documents ON documents.rowid = documents_fts.rowid
-          ${includeTopics ? 'JOIN document_topic_assignments dta ON dta.document_id = documents.id' : ''}
-          WHERE ${facetWhere.join(' AND ')}`;
-        const [typeFacetResult, tagFacetResult, sourceFacetResult] = await Promise.all([
-          db.execute({
-            sql: `SELECT documents.type AS value, COUNT(*) AS count
-                    ${facetFromWhere(typeFacetWhere)}
-                   GROUP BY documents.type
-                   ORDER BY documents.type ASC`,
-            args: filterParams,
-          }),
-          db.execute({
-            sql: `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
-                    ${facetFromWhere(tagFacetWhere, true)}
-                   GROUP BY dta.topic
-                   ORDER BY count DESC, dta.topic ASC
-                   LIMIT 50`,
-            args: filterParams,
-          }),
-          db.execute({
-            sql: `SELECT documents.source AS value, COUNT(*) AS count
-                    ${facetFromWhere(sourceFacetWhere)}
-                   GROUP BY documents.source
-                   ORDER BY count DESC, documents.source ASC
-                   LIMIT 50`,
-            args: filterParams,
-          }),
-        ]);
-        facets = {
-          types: typeFacetResult.rows.map((row) => ({
-            value: asString(row.value),
-            count: asNumber(row.count),
-          })),
-          tags: tagFacetResult.rows.map((row) => ({
-            value: asString(row.value),
-            count: asNumber(row.count),
-          })),
-          sources: sourceFacetResult.rows
-            .filter((row) => asString(row.value).length > 0)
-            .map((row) => ({
-              value: asString(row.value),
-              count: asNumber(row.count),
-            })),
-        };
       }
 
       setPublicCache(res);

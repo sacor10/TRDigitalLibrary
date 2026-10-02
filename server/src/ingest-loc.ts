@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 
-import { openLibraryDb, type LibsqlClient } from './db.js';
+import { openLibraryDb, optimizeFtsIndexes, type LibsqlClient } from './db.js';
 import { ingestLocCollection, type LocIngestReport } from './sources/loc.js';
 
 /**
@@ -236,6 +236,12 @@ async function main(): Promise<void> {
     );
     const report = await ingestLocCollection(ingestOptions);
     printReport(report);
+    // Coalesce the FTS5 segments this run appended so MATCH stays fast as the
+    // corpus grows across incremental builds. Best-effort and write-only, so
+    // it never touches the search path. Skip when nothing was written.
+    if (db && !opts.dryRun && report.written > 0) {
+      await optimizeFtsIndexes(db);
+    }
     // Exit codes:
     //   - 0 when we wrote anything (progress!) or the collection is complete
     //     (scanned=0 means autoResume early-exited on a completed cursor).

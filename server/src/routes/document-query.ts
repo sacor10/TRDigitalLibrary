@@ -1,4 +1,4 @@
-import type { InValue } from '@libsql/client';
+import type { InStatement, InValue, Row } from '@libsql/client';
 
 import type { LibsqlClient } from '../db.js';
 
@@ -48,6 +48,76 @@ export function asString(v: unknown): string {
   return v == null ? '' : String(v);
 }
 
+/**
+ * Builds the two facet aggregate statements (type counts, topic-tag counts)
+ * over the non-FTS `documents` table. Returned as InStatements so callers can
+ * fire them concurrently (Promise.all) alongside their own COUNT/list queries —
+ * the heavy aggregate scans overlap in one round-trip wave instead of running
+ * after the list query.
+ */
+export function buildDocumentFacetStatements(
+  params: Record<string, InValue>,
+  opts: {
+    where?: readonly string[];
+    typeWhere?: readonly string[];
+    tagWhere?: readonly string[];
+    sourceWhere?: readonly string[];
+  } = {},
+): { typeStmt: InStatement; tagStmt: InStatement; sourceStmt: InStatement } {
+  const base = opts.where ?? [];
+  const typeWhere = opts.typeWhere ?? base;
+  const tagWhere = opts.tagWhere ?? base;
+  const sourceWhere = opts.sourceWhere ?? base;
+  const typeWhereSql = typeWhere.length ? `WHERE ${typeWhere.join(' AND ')}` : '';
+  const tagWhereSql = tagWhere.length ? `WHERE ${tagWhere.join(' AND ')}` : '';
+  const sourceWhereSql = sourceWhere.length ? `WHERE ${sourceWhere.join(' AND ')}` : '';
+
+  return {
+    typeStmt: {
+      sql: `SELECT documents.type AS value, COUNT(*) AS count
+              FROM documents
+              ${typeWhereSql}
+             GROUP BY documents.type
+             ORDER BY documents.type ASC`,
+      args: params,
+    },
+    tagStmt: {
+      sql: `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
+              FROM documents
+              JOIN document_topic_assignments dta ON dta.document_id = documents.id
+              ${tagWhereSql}
+             GROUP BY dta.topic
+             ORDER BY count DESC, dta.topic ASC
+             LIMIT 50`,
+      args: params,
+    },
+    sourceStmt: {
+      sql: `SELECT documents.source AS value, COUNT(*) AS count
+              FROM documents
+              ${sourceWhereSql}
+             GROUP BY documents.source
+             ORDER BY count DESC, documents.source ASC
+             LIMIT 50`,
+      args: params,
+    },
+  };
+}
+
+/** Maps the three facet result sets into the Facets response shape. */
+export function rowsToFacets(
+  typeRows: readonly Row[],
+  tagRows: readonly Row[],
+  sourceRows: readonly Row[] = [],
+): Facets {
+  return {
+    types: typeRows.map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
+    tags: tagRows.map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
+    sources: sourceRows
+      .filter((row) => asString(row.value).length > 0)
+      .map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
+  };
+}
+
 export async function getDocumentFacets(
   db: LibsqlClient,
   where: readonly string[],
@@ -58,52 +128,12 @@ export async function getDocumentFacets(
     sourceWhere?: readonly string[];
   } = {},
 ): Promise<Facets> {
-  const typeWhereSql = (opts.typeWhere ?? where).length
-    ? `WHERE ${(opts.typeWhere ?? where).join(' AND ')}`
-    : '';
-  const tagWhereSql = (opts.tagWhere ?? where).length
-    ? `WHERE ${(opts.tagWhere ?? where).join(' AND ')}`
-    : '';
-  const sourceWhereSql = (opts.sourceWhere ?? where).length
-    ? `WHERE ${(opts.sourceWhere ?? where).join(' AND ')}`
-    : '';
-
+  const { typeStmt, tagStmt, sourceStmt } = buildDocumentFacetStatements(params, { where, ...opts });
   const [typeResult, tagResult, sourceResult] = await Promise.all([
-    db.execute({
-      sql: `SELECT documents.type AS value, COUNT(*) AS count
-              FROM documents
-              ${typeWhereSql}
-             GROUP BY documents.type
-             ORDER BY documents.type ASC`,
-      args: params,
-    }),
-    db.execute({
-      sql: `SELECT dta.topic AS value, COUNT(DISTINCT documents.id) AS count
-              FROM documents
-              JOIN document_topic_assignments dta ON dta.document_id = documents.id
-              ${tagWhereSql}
-             GROUP BY dta.topic
-             ORDER BY count DESC, dta.topic ASC
-             LIMIT 50`,
-      args: params,
-    }),
-    db.execute({
-      sql: `SELECT documents.source AS value, COUNT(*) AS count
-              FROM documents
-              ${sourceWhereSql}
-             GROUP BY documents.source
-             ORDER BY count DESC, documents.source ASC
-             LIMIT 50`,
-      args: params,
-    }),
+    db.execute(typeStmt),
+    db.execute(tagStmt),
+    db.execute(sourceStmt),
   ]);
-
-  return {
-    types: typeResult.rows.map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
-    tags: tagResult.rows.map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
-    sources: sourceResult.rows
-      .filter((row) => asString(row.value).length > 0)
-      .map((row) => ({ value: asString(row.value), count: asNumber(row.count) })),
-  };
+  return rowsToFacets(typeResult.rows, tagResult.rows, sourceResult.rows);
 }
 
