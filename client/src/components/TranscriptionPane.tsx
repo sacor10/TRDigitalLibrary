@@ -16,7 +16,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 
 import {
   createAnnotation,
@@ -44,6 +44,11 @@ interface Segment {
   annotationIds: string[];
 }
 
+interface TermRange {
+  start: number;
+  end: number;
+}
+
 const LONG_TRANSCRIPTION_CHAR_LIMIT = 3000;
 const TRANSCRIPTION_PREVIEW_WORD_LIMIT = 500;
 
@@ -61,6 +66,30 @@ function firstWords(text: string, count: number): string {
     }
   }
   return text;
+}
+
+function extractKeywords(rawQuery: string): string[] {
+  const stripped = rawQuery.replace(/[A-Za-z]+:[^\s]+/g, ' ');
+  return stripped
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}-]/gu, ''))
+    .filter((w) => w.length > 0);
+}
+
+function findTermRanges(text: string, terms: string[]): TermRange[] {
+  if (!text || terms.length === 0) return [];
+  const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const regex = new RegExp(`(${escaped.join('|')})`, 'gi');
+  const ranges: TermRange[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    ranges.push({
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+  }
+  return ranges;
 }
 
 function buildSegments(
@@ -93,6 +122,51 @@ function buildSegments(
   return segments;
 }
 
+function renderTextWithTerms(
+  text: string,
+  terms: string[],
+  segmentKey: string,
+  isFirstMatchRef: { current: boolean },
+): ReactNode {
+  if (!terms.length) {
+    return text;
+  }
+  const termRanges = findTermRanges(text, terms);
+  if (termRanges.length === 0) {
+    return text;
+  }
+
+  const nodes: ReactNode[] = [];
+  let lastIndex = 0;
+  termRanges.forEach((range, idx) => {
+    if (range.start > lastIndex) {
+      nodes.push(text.slice(lastIndex, range.start));
+    }
+    const matchText = text.slice(range.start, range.end);
+    const isFirstMatch = isFirstMatchRef.current;
+    if (isFirstMatch) {
+      isFirstMatchRef.current = false;
+    }
+
+    nodes.push(
+      <mark
+        key={`${segmentKey}-term-${idx}`}
+        data-search-match="true"
+        data-first-match={isFirstMatch ? 'true' : undefined}
+        className="bg-yellow-200 text-ink-900 rounded-px px-0.5 dark:bg-yellow-800/80 dark:text-parchment-50 font-medium"
+      >
+        {matchText}
+      </mark>,
+    );
+    lastIndex = range.end;
+  });
+
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes;
+}
+
 export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPaneProps) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -100,6 +174,10 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
   const [activeId, setActiveId] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+
+  const queryParam = searchParams.get('q') ?? '';
+  const searchTerms = useMemo(() => extractKeywords(queryParam), [queryParam]);
 
   const annotationsQuery = useQuery({
     queryKey: ['annotations', document.id],
@@ -119,8 +197,30 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
   const isLongTranscription =
     document.transcription.length > LONG_TRANSCRIPTION_CHAR_LIMIT &&
     previewTranscription.length < document.transcription.length;
+
+  // If a searched term is NOT in the preview section of the document, auto-expand
+  // so the entire document is loaded and can be scrolled to.
+  const termMatchesFull = useMemo(
+    () => findTermRanges(document.transcription, searchTerms),
+    [document.transcription, searchTerms],
+  );
+  const termMatchesPreview = useMemo(
+    () => findTermRanges(previewTranscription, searchTerms),
+    [previewTranscription, searchTerms],
+  );
+
+  const shouldAutoExpand = useMemo(() => {
+    if (!isLongTranscription || searchTerms.length === 0) return false;
+    // If there is any match in the document and either none in the preview or
+    // we want to ensure any match is fully available
+    return termMatchesFull.length > 0 && termMatchesPreview.length === 0;
+  }, [isLongTranscription, searchTerms.length, termMatchesFull.length, termMatchesPreview.length]);
+
   const displayedTranscription =
-    isLongTranscription && !isExpanded ? previewTranscription : document.transcription;
+    isLongTranscription && !isExpanded && !shouldAutoExpand
+      ? previewTranscription
+      : document.transcription;
+
   const displayedText = useMemo(() => {
     if (!displayedTranscription) return '';
     return displayedTranscription.split(/\n{2,}/).join('');
@@ -140,8 +240,14 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
 
   const visibleLocated = useMemo(
     () =>
-      located.filter((a) => isExpanded || a.range === null || a.range.end <= displayedText.length),
-    [displayedText.length, isExpanded, located],
+      located.filter(
+        (a) =>
+          isExpanded ||
+          shouldAutoExpand ||
+          a.range === null ||
+          a.range.end <= displayedText.length,
+      ),
+    [displayedText.length, isExpanded, shouldAutoExpand, located],
   );
 
   const jumpToAnnotation = useCallback((id: string): void => {
@@ -154,6 +260,28 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
       window.setTimeout(() => el.classList.remove('anno-flash'), 1600);
     });
   }, []);
+
+  const jumpToSearchMatch = useCallback((): void => {
+    requestAnimationFrame(() => {
+      const matchEl =
+        rootRef.current?.querySelector<HTMLElement>('[data-first-match="true"]') ??
+        rootRef.current?.querySelector<HTMLElement>('[data-search-match="true"]');
+      if (!matchEl) return;
+      matchEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      matchEl.classList.add('anno-flash');
+      window.setTimeout(() => matchEl.classList.remove('anno-flash'), 1600);
+    });
+  }, []);
+
+  // When search terms are present, scroll to the first matching search term
+  useEffect(() => {
+    if (searchTerms.length > 0 && document.transcription) {
+      const timer = window.setTimeout(() => {
+        jumpToSearchMatch();
+      }, 150);
+      return () => window.clearTimeout(timer);
+    }
+  }, [document.transcription, jumpToSearchMatch, searchTerms.length, isExpanded, shouldAutoExpand]);
 
   const validRanges = useMemo(
     () =>
@@ -315,6 +443,8 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
 
   const paragraphs = displayedTranscription.split(/\n{2,}/);
   let cursor = 0;
+  const isFirstMatchTracker = { current: true };
+
   const renderedParagraphs = paragraphs.map((p, i) => {
     const paragraphStart = cursor;
     cursor += p.length;
@@ -323,8 +453,13 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
       <p key={i}>
         {segments.map((seg, j) => {
           const text = p.slice(seg.start, seg.end);
+          const segmentKey = `p${i}-s${j}`;
           if (seg.annotationIds.length === 0) {
-            return <Fragment key={j}>{text}</Fragment>;
+            return (
+              <Fragment key={j}>
+                {renderTextWithTerms(text, searchTerms, segmentKey, isFirstMatchTracker)}
+              </Fragment>
+            );
           }
           const top = seg.annotationIds[seg.annotationIds.length - 1] ?? '';
           const isActive = top === activeId;
@@ -340,7 +475,7 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
               onClick={() => handleSelectAnnotation(top)}
               className="cursor-pointer"
             >
-              {text}
+              {renderTextWithTerms(text, searchTerms, segmentKey, isFirstMatchTracker)}
             </mark>
           );
         })}
@@ -357,7 +492,7 @@ export function TranscriptionPane({ document, onSidebarChange }: TranscriptionPa
       >
         {renderedParagraphs}
       </article>
-      {isLongTranscription && !isExpanded && (
+      {isLongTranscription && !isExpanded && !shouldAutoExpand && (
         <button
           type="button"
           className="btn btn-primary mt-6"

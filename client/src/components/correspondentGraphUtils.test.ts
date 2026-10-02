@@ -152,12 +152,39 @@ describe('buildCorrespondentGraphElements', () => {
     const large = sizeFor('person-3');
     const tr = sizeFor('theodore-roosevelt');
 
-    expect(small).toBeLessThan(medium);
-    expect(medium).toBeLessThan(large);
-    [small, medium, large].forEach((size) => {
-      expect(size).toBeGreaterThanOrEqual(16);
-      expect(size).toBeLessThanOrEqual(82);
-    });
-    expect(tr).toBe(84);
+    expect(small).toBe(16);
+    expect(medium).toBeGreaterThan(small);
+    expect(large).toBe(50);
+    expect(tr).toBe(78);
+  });
+
+  it('scales edge widths relative to edge counts', () => {
+    const nodes = [trNode, makeNode(1, 1), makeNode(2, 50)];
+    const edges: CorrespondentEdge[] = [
+      {
+        source: 'theodore-roosevelt',
+        target: 'person-1',
+        totalCount: 1,
+        fromTrCount: 1,
+        toTrCount: 0,
+        firstDate: null,
+        lastDate: null,
+      },
+      {
+        source: 'person-2',
+        target: 'theodore-roosevelt',
+        totalCount: 50,
+        fromTrCount: 0,
+        toTrCount: 50,
+        firstDate: null,
+        lastDate: null,
+      },
+    ];
+    const elements = buildCorrespondentGraphElements(nodes, edges, null);
+    const edge1 = elements.find((e) => e.data?.id === 'theodore-roosevelt__person-1');
+    const edge2 = elements.find((e) => e.data?.id === 'person-2__theodore-roosevelt');
+
+    expect(edge1?.data?.width).toBe(1.5);
+    expect(edge2?.data?.width).toBe(6.0);
   });
 });

@@ -323,7 +323,7 @@ export function SearchPage() {
             {view === 'compact' ? (
               <CompactDocumentList documents={items.map((result) => result.document)} />
             ) : (
-              <MobileSearchResults results={items} />
+              <MobileSearchResults results={items} searchQuery={q} />
             )}
             <LoadMore
               itemsLength={items.length}
@@ -501,7 +501,7 @@ export function SearchPage() {
           {view === 'compact' ? (
             <CompactDocumentList documents={items.map((result) => result.document)} />
           ) : (
-            <SearchResults results={items} />
+            <SearchResults results={items} searchQuery={q} />
           )}
           <LoadMore
             itemsLength={items.length}
