@@ -151,6 +151,14 @@ export function buildCorrespondentGraphElements(
     });
   }
 
+  const correspondentCounts = correspondents.map((n) => Math.log(n.totalCount + 1));
+  const cMin = correspondentCounts.length > 0 ? Math.min(...correspondentCounts) : 0;
+  const cMax = correspondentCounts.length > 0 ? Math.max(...correspondentCounts) : 0;
+
+  const MIN_NODE_SIZE = 16;
+  const MAX_NODE_SIZE = 50;
+  const TR_NODE_SIZE = 78;
+
   const nodeElements: cytoscape.ElementDefinition[] = nodes.map((node) => {
     const placement = positionedNodes.get(node.id) ?? {
       x: 0,
@@ -167,23 +175,33 @@ export function buildCorrespondentGraphElements(
       .filter(Boolean)
       .join(' ');
 
+    const nodeSize = node.isTR
+      ? TR_NODE_SIZE
+      : (() => {
+          if (cMax === cMin) return 28;
+          const c = Math.log(node.totalCount + 1);
+          const ratio = (c - cMin) / (cMax - cMin);
+          return Math.round(MIN_NODE_SIZE + ratio * (MAX_NODE_SIZE - MIN_NODE_SIZE));
+        })();
+
     return {
       data: {
         id: node.id,
         label: labelIds.has(node.id) ? node.label : '',
         totalCount: node.totalCount,
         isTR: node.isTR,
-        size: node.isTR
-          ? 84
-          : (() => {
-              const c = Math.log(node.totalCount + 1);
-              return Math.max(16, Math.min(82, 14 + c * 9 + Math.max(0, c - 2.5) * 13));
-            })(),
+        size: nodeSize,
       },
       classes,
       position: { x: placement.x, y: placement.y },
     };
   });
+
+  const edgeWeights = edges.map((e) => Math.log(e.totalCount + 1));
+  const eMin = edgeWeights.length > 0 ? Math.min(...edgeWeights) : 0;
+  const eMax = edgeWeights.length > 0 ? Math.max(...edgeWeights) : 0;
+  const MIN_EDGE_WIDTH = 1.5;
+  const MAX_EDGE_WIDTH = 6.0;
 
   const edgeElements: cytoscape.ElementDefinition[] = edges.map((edge) => {
     const classes = [
@@ -193,13 +211,20 @@ export function buildCorrespondentGraphElements(
       .filter(Boolean)
       .join(' ');
 
+    const edgeWidth = (() => {
+      if (eMax === eMin) return 2.0;
+      const w = Math.log(edge.totalCount + 1);
+      const ratio = (w - eMin) / (eMax - eMin);
+      return Number((MIN_EDGE_WIDTH + ratio * (MAX_EDGE_WIDTH - MIN_EDGE_WIDTH)).toFixed(1));
+    })();
+
     return {
       data: {
         id: `${edge.source}__${edge.target}`,
         source: edge.source,
         target: edge.target,
         weight: edge.totalCount,
-        width: Math.max(1.5, Math.min(6, 1.5 + Math.sqrt(edge.totalCount) * 0.9)),
+        width: edgeWidth,
       },
       classes,
     };

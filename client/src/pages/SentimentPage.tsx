@@ -137,11 +137,23 @@ function MoodChart({
         {points.map((p, i) => {
           const x = padding.left + i * stepX;
           const y = yToPx(p.meanPolarity);
+          const yMin = yToPx(p.minPolarity ?? p.meanPolarity);
+          const yMax = yToPx(p.maxPolarity ?? p.meanPolarity);
+          const whiskerTop = Math.min(yMin, yMax);
+          const whiskerBottom = Math.max(yMin, yMax);
+          const hasRange =
+            p.minPolarity !== undefined &&
+            p.maxPolarity !== undefined &&
+            p.minPolarity !== p.maxPolarity;
           const fill = p.meanPolarity >= 0 ? 'currentColor' : 'rgb(220 38 38)';
           const selected = selectedPeriod === p.period;
-          const label = `Show documents for ${p.period}: ${formatPolarity(p.meanPolarity)} (${p.documentCount} ${
+          const minFormatted = formatPolarity(p.minPolarity ?? p.meanPolarity);
+          const maxFormatted = formatPolarity(p.maxPolarity ?? p.meanPolarity);
+          const rangeLabel = hasRange ? ` [range: ${minFormatted} to ${maxFormatted}]` : '';
+          const label = `Show documents for ${p.period}: ${formatPolarity(p.meanPolarity)}${rangeLabel} (${p.documentCount} ${
             p.documentCount === 1 ? 'doc' : 'docs'
           })`;
+          const capWidth = 3.5;
           return (
             <g
               key={p.period}
@@ -157,28 +169,67 @@ function MoodChart({
                 onTogglePeriod(p.period);
               }}
             >
-              <circle cx={x} cy={y} r={9} fill="transparent" />
+              {/* Range whisker line */}
+              <line
+                x1={x}
+                x2={x}
+                y1={whiskerTop}
+                y2={whiskerBottom}
+                stroke="currentColor"
+                strokeWidth={selected ? 2 : 1.5}
+                strokeOpacity={selected ? 0.9 : 0.45}
+              />
+              {/* Whisker top cap */}
+              <line
+                x1={x - capWidth}
+                x2={x + capWidth}
+                y1={whiskerTop}
+                y2={whiskerTop}
+                stroke="currentColor"
+                strokeWidth={1.5}
+                strokeOpacity={selected ? 0.9 : 0.45}
+              />
+              {/* Whisker bottom cap */}
+              <line
+                x1={x - capWidth}
+                x2={x + capWidth}
+                y1={whiskerBottom}
+                y2={whiskerBottom}
+                stroke="currentColor"
+                strokeWidth={1.5}
+                strokeOpacity={selected ? 0.9 : 0.45}
+              />
+              {/* Expanded hit target */}
+              <rect
+                x={x - 8}
+                y={Math.min(whiskerTop, y) - 6}
+                width={16}
+                height={Math.max(whiskerBottom - whiskerTop, 0) + 12}
+                fill="transparent"
+              />
               {selected && (
                 <circle
                   cx={x}
                   cy={y}
-                  r={6}
+                  r={7}
                   fill="none"
                   stroke="currentColor"
                   strokeWidth={1.5}
                 />
               )}
+              {/* Mean polarity marker */}
               <circle
                 cx={x}
                 cy={y}
-                r={selected ? 4 : 3}
+                r={selected ? 4.5 : 3}
                 fill={fill}
                 stroke="currentColor"
                 strokeWidth={selected ? 1 : 0}
               >
                 <title>
-                  {p.period}: {formatPolarity(p.meanPolarity)} ({p.documentCount}{' '}
-                  {p.documentCount === 1 ? 'doc' : 'docs'})
+                  {p.period}: {formatPolarity(p.meanPolarity)}
+                  {hasRange ? ` (range: ${minFormatted} to ${maxFormatted})` : ''}{' '}
+                  ({p.documentCount} {p.documentCount === 1 ? 'doc' : 'docs'})
                 </title>
               </circle>
             </g>

@@ -27,6 +27,8 @@ export type DocumentSentiment = z.infer<typeof DocumentSentimentSchema>;
 export const SentimentTimelinePointSchema = z.object({
   period: z.string().min(1),
   meanPolarity: z.number().min(-1).max(1),
+  minPolarity: z.number().min(-1).max(1),
+  maxPolarity: z.number().min(-1).max(1),
   documentCount: z.number().int().nonnegative(),
 });
 

@@ -1,10 +1,11 @@
 import type { SearchResult } from '@tr/shared';
-import { type KeyboardEvent } from 'react';
+import { useState, type KeyboardEvent } from 'react';
 
 import { MobileDocumentCard } from './MobileDocumentCard';
 
 interface MobileSearchResultsProps {
   results: SearchResult[];
+  searchQuery?: string;
 }
 
 function handleArrowNav(event: KeyboardEvent<HTMLUListElement>): void {
@@ -20,11 +21,25 @@ function handleArrowNav(event: KeyboardEvent<HTMLUListElement>): void {
   event.preventDefault();
 }
 
-export function MobileSearchResults({ results }: MobileSearchResultsProps) {
+export function MobileSearchResults({ results, searchQuery = '' }: MobileSearchResultsProps) {
+  const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
+
+  const toggleExpand = (docId: string) => {
+    setExpandedDocId((current) => (current === docId ? null : docId));
+  };
+
   return (
     <ul className="grid gap-2" onKeyDown={handleArrowNav}>
       {results.map(({ document, snippet }) => (
-        <MobileDocumentCard key={document.id} document={document} snippet={snippet} />
+        <MobileDocumentCard
+          key={document.id}
+          document={document}
+          snippet={snippet}
+          searchQuery={searchQuery}
+          isExpanded={expandedDocId === document.id}
+          onToggleExpand={() => toggleExpand(document.id)}
+          onClose={() => setExpandedDocId(null)}
+        />
       ))}
     </ul>
   );

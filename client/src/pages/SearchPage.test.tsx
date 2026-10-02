@@ -6,12 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SearchPage } from './SearchPage';
 
-const { fetchDocumentsMock, searchDocumentsMock } = vi.hoisted(() => ({
+const { fetchDocumentMock, fetchDocumentsMock, searchDocumentsMock } = vi.hoisted(() => ({
+  fetchDocumentMock: vi.fn(),
   fetchDocumentsMock: vi.fn(),
   searchDocumentsMock: vi.fn(),
 }));
 
 vi.mock('../api/client', () => ({
+  fetchDocument: fetchDocumentMock,
   fetchDocuments: fetchDocumentsMock,
   searchDocuments: searchDocumentsMock,
 }));
@@ -52,11 +54,13 @@ function renderPage(initialPath = '/search?q=arena') {
 
 describe('SearchPage lazy pagination', () => {
   beforeEach(() => {
+    fetchDocumentMock.mockReset();
     fetchDocumentsMock.mockReset();
     searchDocumentsMock.mockReset();
   });
 
   afterEach(() => {
+    fetchDocumentMock.mockReset();
     fetchDocumentsMock.mockReset();
     searchDocumentsMock.mockReset();
   });
@@ -150,5 +154,38 @@ describe('SearchPage lazy pagination', () => {
     });
     expect(searchDocumentsMock).not.toHaveBeenCalled();
     expect(await screen.findByText('Doc lodge-letter')).toBeTruthy();
+  });
+
+  it('allows expanding search result preview drawer on click', async () => {
+    const doc = {
+      ...makeDoc('doc-preview-1'),
+      transcription: 'This is the document transcription excerpt talking about national parks.',
+    };
+    searchDocumentsMock.mockResolvedValueOnce({
+      results: [{ document: doc, snippet: '<mark>parks</mark>' }],
+      total: 1,
+    });
+    fetchDocumentMock.mockResolvedValueOnce(doc);
+    fetchDocumentsMock.mockResolvedValueOnce({
+      items: [doc],
+      total: 1,
+    });
+
+    renderPage('/search?q=parks');
+
+    await waitFor(() => {
+      expect(screen.getByText('Doc doc-preview-1')).toBeTruthy();
+    });
+
+    expect(screen.getByText(/quick preview ▼/i)).toBeTruthy();
+    expect(screen.queryByText(/document preview/i)).toBeNull();
+
+    // Clicking on the quick preview trigger or card toggles the preview drawer
+    fireEvent.click(screen.getByText(/quick preview ▼/i));
+
+    await waitFor(() => {
+      expect(screen.getByText(/document preview/i)).toBeTruthy();
+      expect(screen.getByText(/view full document/i)).toBeTruthy();
+    });
   });
 });

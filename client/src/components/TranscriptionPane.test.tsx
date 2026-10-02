@@ -107,4 +107,29 @@ describe('TranscriptionPane progressive disclosure', () => {
     expect(screen.getByText(/no cached transcription is available/i)).not.toBeNull();
     expect(screen.getByRole('link', { name: 'https://example.org/doc-1' })).not.toBeNull();
   });
+
+  it('automatically expands a long document when the search query term is only in the hidden section', () => {
+    const words = Array.from({ length: 620 }, (_, i) => `word${i}`);
+    words[550] = 'wilderness';
+    const text = words.join(' ');
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/documents/doc-1?q=wilderness']}>
+          <TranscriptionPane document={makeDocument(text)} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    // Because 'wilderness' was beyond word 500, the pane automatically expands
+    expect(container.textContent).toContain('wilderness');
+    expect(container.textContent).toContain('word619');
+    expect(screen.queryByRole('button', { name: /show more/i })).toBeNull();
+
+    // Verify search term is wrapped in a highlight mark
+    const mark = container.querySelector('mark[data-search-match="true"]');
+    expect(mark).not.toBeNull();
+    expect(mark?.textContent).toBe('wilderness');
+  });
 });

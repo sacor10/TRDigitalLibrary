@@ -122,6 +122,8 @@ describe('Sentiment API', () => {
       const oct = parsed.points.find((p) => p.period === '1912-10');
       expect(oct?.meanPolarity).toBeCloseTo(-0.65, 5);
       expect(oct?.documentCount).toBe(1);
+      expect(oct?.minPolarity).toBeCloseTo(-0.65, 5);
+      expect(oct?.maxPolarity).toBeCloseTo(-0.65, 5);
     });
 
     it('aggregates by year and excludes out-of-range docs', async () => {
@@ -133,6 +135,8 @@ describe('Sentiment API', () => {
       expect(parsed.points).toHaveLength(1);
       expect(parsed.points[0]!.period).toBe('1912');
       expect(parsed.points[0]!.documentCount).toBe(4);
+      expect(parsed.points[0]!.minPolarity).toBeCloseTo(-0.65, 5);
+      expect(parsed.points[0]!.maxPolarity).toBeCloseTo(0.7, 5);
       const expected = (0.55 + 0.7 - 0.4 - 0.65) / 4;
       expect(parsed.points[0]!.meanPolarity).toBeCloseTo(expected, 5);
     });
