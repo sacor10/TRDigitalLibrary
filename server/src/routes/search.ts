@@ -3,9 +3,21 @@ import { SearchQuerySchema } from '@tr/shared';
 import { Router } from 'express';
 
 import { rowToDocument, rowToDocumentRow, type LibsqlClient } from '../db.js';
+import { embedText } from '../embeddings/model.js';
+import { cosineSimilarity, decodeEmbedding, hybridScores } from '../embeddings/vector.js';
 import { setPublicCache } from '../http-cache.js';
 
-import { DOCUMENT_SUMMARY_COLUMNS, asNumber, asString, rowsToFacets } from './document-query.js';
+import {
+  DOCUMENT_SUMMARY_COLUMNS,
+  asNumber,
+  asString,
+  rowsToFacets,
+  type FacetCount,
+} from './document-query.js';
+
+// For semantic/hybrid we re-rank a bounded BM25 candidate pool by embedding
+// similarity, so per-query cost stays independent of corpus size.
+const SEMANTIC_CANDIDATE_CAP = 200;
 
 const FTS_FIELD_MAP: Record<string, string> = {
   title: 'title',
@@ -26,7 +38,15 @@ function terms(raw: string): string[] {
     .map(quoteFtsToken);
 }
 
-function buildFtsQuery(raw: string): { ftsQuery: string; where: string[]; params: Record<string, InValue> } {
+function buildFtsQuery(raw: string): {
+  ftsQuery: string;
+  // Bare (unscoped) body terms, used to MATCH the chunk-snippet index. Field-
+  // scoped tokens like `title:"x"` are excluded — they target metadata columns,
+  // not transcription body text.
+  bodyTokens: string[];
+  where: string[];
+  params: Record<string, InValue>;
+} {
   const where: string[] = [];
   const params: Record<string, InValue> = {};
   const tokens: string[] = [];
@@ -69,32 +89,48 @@ function buildFtsQuery(raw: string): { ftsQuery: string; where: string[]; params
     tokens.push(...terms(part));
   }
 
+  // Bare body terms are the quoted tokens; field-scoped tokens look like
+  // `field:"..."` and are skipped for the chunk MATCH.
+  const bodyTokens = tokens.filter((t) => t.startsWith('"'));
   if (tokens.length === 0) {
-    return { ftsQuery: '""', where, params };
+    return { ftsQuery: '""', bodyTokens, where, params };
   }
-  return { ftsQuery: tokens.join(' AND '), where, params };
+  return { ftsQuery: tokens.join(' AND '), bodyTokens, where, params };
 }
 
-export function createSearchRouter(db: LibsqlClient): Router {
+export interface CreateSearchRouterOptions {
+  /** Injectable query embedder (defaults to the local model). Returns null
+   *  when embeddings are unavailable, triggering graceful lexical fallback. */
+  embedQuery?: (text: string) => Promise<Float32Array | null>;
+}
+
+export function createSearchRouter(
+  db: LibsqlClient,
+  opts: CreateSearchRouterOptions = {},
+): Router {
   const router = Router();
+  const embedQuery = opts.embedQuery ?? embedText;
 
   router.get('/', async (req, res) => {
     const parsed = SearchQuerySchema.safeParse(req.query);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Invalid query', details: parsed.error.flatten() });
     }
-    const { q, type, dateFrom, dateTo, recipient, tag, limit, offset } = parsed.data;
+    const { q, type, dateFrom, dateTo, recipient, tag, source, mode, alpha, limit, offset } =
+      parsed.data;
     const parsedQuery = buildFtsQuery(q);
     let ftsQuery = parsedQuery.ftsQuery;
 
     const where: string[] = ['documents_fts MATCH @ftsQuery', ...parsedQuery.where];
     const typeFacetWhere: string[] = ['documents_fts MATCH @ftsQuery', ...parsedQuery.where];
     const tagFacetWhere: string[] = ['documents_fts MATCH @ftsQuery', ...parsedQuery.where];
+    const sourceFacetWhere: string[] = ['documents_fts MATCH @ftsQuery', ...parsedQuery.where];
     const filterParams: Record<string, InValue> = { ftsQuery, ...parsedQuery.params };
-    const addFilter = (sql: string, except: 'type' | 'tag' | null = null): void => {
+    const addFilter = (sql: string, except: 'type' | 'tag' | 'source' | null = null): void => {
       where.push(sql);
       if (except !== 'type') typeFacetWhere.push(sql);
       if (except !== 'tag') tagFacetWhere.push(sql);
+      if (except !== 'source') sourceFacetWhere.push(sql);
     };
     if (type) {
       addFilter('documents.type = @type', 'type');
@@ -107,6 +143,10 @@ export function createSearchRouter(db: LibsqlClient): Router {
     if (dateTo) {
       addFilter('documents.date <= @dateTo');
       filterParams.dateTo = dateTo;
+    }
+    if (source) {
+      addFilter('documents.source = @source', 'source');
+      filterParams.source = source;
     }
     if (recipient) {
       const recipientTerms = terms(recipient).map((term) => `recipient:${term}`);
@@ -124,10 +164,20 @@ export function createSearchRouter(db: LibsqlClient): Router {
     }
     const whereSql = `WHERE ${where.join(' AND ')}`;
 
+    // Phase 1: rank by BM25, no snippets (deferred to hydration so ranking never
+    // materializes transcriptions — the original 21s bug). bm25() must live in a
+    // SELECT that references documents_fts directly and can't share a SELECT with
+    // a window function, so it runs in the inner subquery; the outer SELECT adds
+    // COUNT(*) OVER () and pagination. For semantic/hybrid we pull a larger
+    // candidate pool (offset 0) and re-rank it by embedding similarity below.
+    const wantSemantic = mode !== 'lexical';
+    const rankLimit = wantSemantic ? SEMANTIC_CANDIDATE_CAP : limit;
+    const rankOffset = wantSemantic ? 0 : offset;
+
     // Only join `documents` in the ranking subquery when a structured filter
-    // actually references a documents.* column. The rowid we emit is identical
-    // to documents_fts.rowid, so on an unfiltered keyword search (the common
-    // case) the join is pure overhead: it forces a primary-key lookup into the
+    // actually references a documents.* column (or when semantic/hybrid needs documents.id).
+    // The rowid we emit is identical to documents_fts.rowid, so on an unfiltered keyword search
+    // (the common case) the join is pure overhead: it forces a primary-key lookup into the
     // documents table — whose rows carry ~1MB transcriptions — for every match,
     // which is what pushes broad terms past the function timeout (504). Without
     // it, ranking runs entirely on the FTS index.
@@ -136,7 +186,9 @@ export function createSearchRouter(db: LibsqlClient): Router {
       Boolean(type) ||
       Boolean(dateFrom) ||
       Boolean(dateTo) ||
-      tag !== undefined;
+      Boolean(source) ||
+      tag !== undefined ||
+      wantSemantic;
     const rankInnerFrom = hasDocFilter
       ? `FROM documents_fts
         JOIN documents ON documents.rowid = documents_fts.rowid
@@ -144,32 +196,27 @@ export function createSearchRouter(db: LibsqlClient): Router {
       : `FROM documents_fts
         ${whereSql}`;
     const rankInnerRowid = hasDocFilter ? 'documents.rowid' : 'documents_fts.rowid';
+    const rankInnerId = hasDocFilter ? 'documents.id' : "''";
 
-    // Phase 1: rank + page rowids + total, no snippets. Computing snippet() in
-    // the same SELECT as ORDER BY rank LIMIT forces FTS5 to read every matched
-    // row's transcription before truncating, which is what made this 21s.
-    //
-    // bm25() must live in a SELECT that references documents_fts directly and
-    // cannot share a SELECT with a window function (SQLite raises "unable to
-    // use function bm25 in the requested context"). So bm25() runs in the
-    // inner subquery; the outer SELECT adds COUNT(*) OVER () and pagination.
     const rankSql = `
-      SELECT inner_q.rowid AS rowid, inner_q.rank AS rank,
+      SELECT inner_q.rowid AS rowid, inner_q.id AS id, inner_q.rank AS rank,
              COUNT(*) OVER () AS total_count
       FROM (
-        SELECT ${rankInnerRowid} AS rowid, bm25(documents_fts) AS rank
+        SELECT ${rankInnerRowid} AS rowid, ${rankInnerId} AS id, bm25(documents_fts) AS rank
         ${rankInnerFrom}
       ) AS inner_q
       ORDER BY inner_q.rank
       LIMIT @limit OFFSET @offset
     `;
 
-    // Wave A: rank+count and both facet aggregates are mutually independent, so
-    // they run concurrently (one round-trip wave) rather than the facets
-    // running after rank+hydrate. Concurrency — not a serial batch — matters
-    // here: for a broad term these are three heavy full-match scans, so their
-    // wall time must overlap (max), not stack (sum). Phase-2 hydration (wave B)
-    // needs the rowids this produces, so it stays a separate execute below.
+    // Wave A: rank+count and facet aggregates are mutually independent, so
+    // they run concurrently (one round-trip wave) on offset 0 rather than the
+    // facets running after rank+hydrate. Concurrency — not a serial batch —
+    // matters here: for a broad term these are heavy full-match scans, so their
+    // wall time must overlap (max), not stack (sum). When offset > 0, facets
+    // are skipped entirely because the client retains the first page's facets.
+    // Phase-2 hydration (wave B) needs the rowids this produces, so it stays
+    // a separate execute below.
     const facetFromWhere = (facetWhere: readonly string[], includeTopics = false) => `FROM documents_fts
         JOIN documents ON documents.rowid = documents_fts.rowid
         ${includeTopics ? 'JOIN document_topic_assignments dta ON dta.document_id = documents.id' : ''}
@@ -183,50 +230,194 @@ export function createSearchRouter(db: LibsqlClient): Router {
                  GROUP BY dta.topic
                  ORDER BY count DESC, dta.topic ASC
                  LIMIT 50`;
+    const sourceFacetSql = `SELECT documents.source AS value, COUNT(*) AS count
+                  ${facetFromWhere(sourceFacetWhere)}
+                 GROUP BY documents.source
+                 ORDER BY count DESC, documents.source ASC
+                 LIMIT 50`;
 
     try {
-      const [rankResult, typeFacetResult, tagFacetResult] = await Promise.all([
-        db.execute({ sql: rankSql, args: { ...filterParams, limit, offset } }),
-        db.execute({ sql: typeFacetSql, args: filterParams }),
-        db.execute({ sql: tagFacetSql, args: filterParams }),
-      ]);
+      let rankResult;
+      let facets: { types: FacetCount[]; tags: FacetCount[]; sources: FacetCount[] } = {
+        types: [],
+        tags: [],
+        sources: [],
+      };
+
+      if (offset === 0) {
+        const [rResult, typeFacetResult, tagFacetResult, sourceFacetResult] = await Promise.all([
+          db.execute({
+            sql: rankSql,
+            args: { ...filterParams, limit: rankLimit, offset: rankOffset },
+          }),
+          db.execute({ sql: typeFacetSql, args: filterParams }),
+          db.execute({ sql: tagFacetSql, args: filterParams }),
+          db.execute({ sql: sourceFacetSql, args: filterParams }),
+        ]);
+        rankResult = rResult;
+        facets = rowsToFacets(
+          typeFacetResult.rows,
+          tagFacetResult.rows,
+          sourceFacetResult.rows,
+        );
+      } else {
+        rankResult = await db.execute({
+          sql: rankSql,
+          args: { ...filterParams, limit: rankLimit, offset: rankOffset },
+        });
+      }
 
       if (rankResult.rows.length === 0) {
         setPublicCache(res);
-        return res.json({ results: [], total: 0, facets: { types: [], tags: [] } });
+        return res.json({
+          results: [],
+          total: 0,
+          facets: { types: [], tags: [], sources: [] },
+        });
       }
 
       const total = asNumber(rankResult.rows[0]?.total_count);
-      const rowids = rankResult.rows.map((r) => asNumber(r.rowid));
+      const candidates = rankResult.rows.map((r) => ({
+        rowid: asNumber(r.rowid),
+        id: asString(r.id),
+        rank: Number(r.rank),
+      }));
 
-      // Phase 2: hydrate only the page. MATCH is required for snippet() to
-      // have positions to highlight; rowid IN (...) prunes to ≤limit rows.
-      // CASE preserves the rank order from phase 1 without re-scoring.
+      // Re-rank the candidate pool by embedding similarity for semantic/hybrid.
+      // Degrades to BM25 order if the model or embeddings are unavailable, so
+      // search always returns results regardless of the embedding backend.
+      let responseMode: 'lexical' | 'semantic' | 'hybrid' = 'lexical';
+      let ordered = candidates;
+      const scoreByRowid = new Map<number, number>();
+      if (wantSemantic) {
+        const queryVec = await embedQuery(q);
+        const embByDoc = new Map<string, Float32Array>();
+        if (queryVec) {
+          const ids = candidates.map((c) => c.id);
+          const ph = ids.map(() => '?').join(', ');
+          const embResult = await db.execute({
+            sql: `SELECT document_id, embedding FROM document_embeddings WHERE document_id IN (${ph})`,
+            args: ids,
+          });
+          for (const row of embResult.rows) {
+            embByDoc.set(
+              asString(row.document_id),
+              decodeEmbedding(row.embedding as unknown as ArrayBuffer | Uint8Array),
+            );
+          }
+        }
+        if (queryVec && embByDoc.size > 0) {
+          const withCosine = candidates.map((c) => {
+            const vec = embByDoc.get(c.id);
+            return { ...c, cosine: vec ? cosineSimilarity(queryVec, vec) : undefined };
+          });
+          const scores =
+            mode === 'semantic'
+              ? withCosine.map((c) => c.cosine ?? -1)
+              : hybridScores(
+                  withCosine.map((c) => ({ lexicalScore: c.rank, cosine: c.cosine })),
+                  alpha,
+                );
+          const scored = withCosine
+            .map((c, i) => ({ candidate: c, score: scores[i]! }))
+            .sort((a, b) => b.score - a.score);
+          ordered = scored.map((s) => s.candidate);
+          for (const s of scored) scoreByRowid.set(s.candidate.rowid, s.score);
+          responseMode = mode;
+        }
+      }
+
+      // Page slice. For lexical the rank query already returned the page.
+      const pageCandidates = wantSemantic ? ordered.slice(offset, offset + limit) : ordered;
+      const rowids = pageCandidates.map((c) => c.rowid);
+      if (rowids.length === 0) {
+        setPublicCache(res);
+        return res.json({ results: [], total, facets: { types: [], tags: [], sources: [] } });
+      }
+
+      // Phase 2: hydrate only the page's documents by rowid. No snippet() here —
+      // snippet() over the multi-MB `transcription` column cost up to ~18 s per
+      // page; snippets now come from the bounded chunk index below. CASE
+      // preserves the (re-)ranked order without re-scoring.
       const placeholders = rowids.map(() => '?').join(', ');
       const orderCase = rowids.map((_, i) => `WHEN ? THEN ${i}`).join(' ');
-      const hydrateSql = `
-        SELECT
-          ${DOCUMENT_SUMMARY_COLUMNS},
-          snippet(documents_fts, -1, '<mark>', '</mark>', '…', 16) AS snippet
-        FROM documents_fts
-        JOIN documents ON documents.rowid = documents_fts.rowid
-        WHERE documents_fts MATCH ?
-          AND documents.rowid IN (${placeholders})
-        ORDER BY CASE documents.rowid ${orderCase} END
-      `;
       const hydrateResult = await db.execute({
-        sql: hydrateSql,
-        args: [ftsQuery, ...rowids, ...rowids],
+        sql: `
+          SELECT documents.rowid AS rowid, ${DOCUMENT_SUMMARY_COLUMNS}
+          FROM documents
+          WHERE documents.rowid IN (${placeholders})
+          ORDER BY CASE documents.rowid ${orderCase} END
+        `,
+        args: [...rowids, ...rowids],
       });
+
+      // Snippets from the bounded chunk index: snippet() runs over a ~2 KB chunk
+      // instead of a full transcription. Two cheap queries — pick each page
+      // document's best-matching chunk by bm25 (bm25 can't share a SELECT with a
+      // window function, so it's isolated in the innermost query), then snippet()
+      // only those winning chunks. Documents whose match was in title/recipient/
+      // tags (no body hit) fall back to the title.
+      const snippetByDoc = new Map<string, string>();
+      const bodyQuery = parsedQuery.bodyTokens.join(' AND ');
+      if (bodyQuery) {
+        const pageIds = hydrateResult.rows.map((row) => asString(row.id));
+        const idPlaceholders = pageIds.map(() => '?').join(', ');
+        const bestChunks = await db.execute({
+          sql: `
+            SELECT document_id, rowid FROM (
+              SELECT document_id, rowid,
+                     ROW_NUMBER() OVER (PARTITION BY document_id ORDER BY rank) AS rn
+              FROM (
+                SELECT dc.document_id AS document_id,
+                       document_chunks_fts.rowid AS rowid,
+                       bm25(document_chunks_fts) AS rank
+                FROM document_chunks_fts
+                JOIN document_chunks dc ON dc.rowid = document_chunks_fts.rowid
+                WHERE document_chunks_fts MATCH ?
+                  AND dc.document_id IN (${idPlaceholders})
+              )
+            ) WHERE rn = 1
+          `,
+          args: [bodyQuery, ...pageIds],
+        });
+        const docByChunkRowid = new Map<number, string>();
+        for (const row of bestChunks.rows) {
+          docByChunkRowid.set(asNumber(row.rowid), asString(row.document_id));
+        }
+        if (docByChunkRowid.size > 0) {
+          const chunkRowids = [...docByChunkRowid.keys()];
+          const rowidPlaceholders = chunkRowids.map(() => '?').join(', ');
+          const snippets = await db.execute({
+            sql: `
+              SELECT document_chunks_fts.rowid AS rowid,
+                     snippet(document_chunks_fts, 0, '<mark>', '</mark>', '…', 16) AS snippet
+              FROM document_chunks_fts
+              WHERE document_chunks_fts MATCH ?
+                AND document_chunks_fts.rowid IN (${rowidPlaceholders})
+            `,
+            args: [bodyQuery, ...chunkRowids],
+          });
+          for (const row of snippets.rows) {
+            const docId = docByChunkRowid.get(asNumber(row.rowid));
+            if (docId) snippetByDoc.set(docId, asString(row.snippet));
+          }
+        }
+      }
 
       setPublicCache(res);
       return res.json({
-        results: hydrateResult.rows.map((row) => ({
-          document: rowToDocument(rowToDocumentRow(row)),
-          snippet: asString(row.snippet),
-        })),
+        results: hydrateResult.rows.map((row) => {
+          const score = scoreByRowid.get(asNumber(row.rowid));
+          const docId = asString(row.id);
+          const snippet = snippetByDoc.get(docId) ?? asString(row.title);
+          return {
+            document: rowToDocument(rowToDocumentRow(row)),
+            snippet,
+            ...(score !== undefined ? { score, mode: responseMode } : {}),
+          };
+        }),
         total,
-        facets: rowsToFacets(typeFacetResult.rows, tagFacetResult.rows),
+        facets,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -2,11 +2,16 @@ import {
   AnnotationCollectionSchema,
   AnnotationSchema,
   AuthMeResponseSchema,
+  CollectionDetailSchema,
+  CollectionSchema,
+  CollectionsListResponseSchema,
   CorrespondentGraphResponseSchema,
   CorrespondentItemsResponseSchema,
   DocumentListResponseSchema,
   DocumentSchema,
   DocumentSentimentSchema,
+  OnThisDayResponseSchema,
+  RelatedDocumentsResponseSchema,
   SearchResponseSchema,
   SentimentExtremesResponseSchema,
   SentimentRangeResponseSchema,
@@ -19,6 +24,11 @@ import {
   type AnnotationCreateInput,
   type AnnotationPatch,
   type AuthUser,
+  type Collection,
+  type CollectionDetail,
+  type CollectionCreateInput,
+  type CollectionItemInput,
+  type CollectionsListResponse,
   type CorrespondentGraphResponse,
   type CorrespondentGraphQuery,
   type CorrespondentItemsQuery,
@@ -27,6 +37,8 @@ import {
   type DocumentListQuery,
   type DocumentListResponse,
   type DocumentSentiment,
+  type OnThisDayResponse,
+  type RelatedDocumentsResponse,
   type SearchQuery,
   type SearchResponse,
   type SentimentBin,
@@ -95,12 +107,72 @@ export async function fetchDocuments(
     dateTo: query.dateTo,
     recipient: query.recipient,
     tag: query.tag,
+    source: query.source,
     sort: query.sort,
     order: query.order,
     limit: query.limit,
     offset: query.offset,
   });
   return getJson(`/api/documents${qs}`, (raw) => DocumentListResponseSchema.parse(raw));
+}
+
+export async function fetchOnThisDay(
+  query: { date?: string; limit?: number } = {},
+): Promise<OnThisDayResponse> {
+  const qs = buildQuery({ date: query.date, limit: query.limit });
+  return getJson(`/api/documents/on-this-day${qs}`, (raw) => OnThisDayResponseSchema.parse(raw));
+}
+
+export async function fetchRelatedDocuments(
+  id: string,
+  limit?: number,
+): Promise<RelatedDocumentsResponse> {
+  const qs = buildQuery({ limit });
+  return getJson(`/api/documents/${encodeURIComponent(id)}/related${qs}`, (raw) =>
+    RelatedDocumentsResponseSchema.parse(raw),
+  );
+}
+
+export async function fetchCollections(): Promise<CollectionsListResponse> {
+  return getJson('/api/collections', (raw) => CollectionsListResponseSchema.parse(raw));
+}
+
+export async function fetchCollection(id: string): Promise<CollectionDetail> {
+  return getJson(`/api/collections/${encodeURIComponent(id)}`, (raw) =>
+    CollectionDetailSchema.parse(raw),
+  );
+}
+
+export async function createCollection(
+  input: Partial<CollectionCreateInput> & { title: string },
+): Promise<Collection> {
+  const result = await sendJson('POST', '/api/collections', input, (raw) =>
+    CollectionSchema.parse(raw),
+  );
+  return result!;
+}
+
+export async function deleteCollection(id: string): Promise<void> {
+  await sendJson('DELETE', `/api/collections/${encodeURIComponent(id)}`, null, null);
+}
+
+export async function addCollectionItem(
+  collectionId: string,
+  input: CollectionItemInput,
+): Promise<void> {
+  await sendJson('POST', `/api/collections/${encodeURIComponent(collectionId)}/items`, input, null);
+}
+
+export async function removeCollectionItem(
+  collectionId: string,
+  documentId: string,
+): Promise<void> {
+  await sendJson(
+    'DELETE',
+    `/api/collections/${encodeURIComponent(collectionId)}/items/${encodeURIComponent(documentId)}`,
+    null,
+    null,
+  );
 }
 
 export async function fetchDocument(id: string): Promise<Document> {
@@ -211,7 +283,9 @@ export async function fetchDocumentSentiment(id: string): Promise<DocumentSentim
   return DocumentSentimentSchema.parse(await res.json());
 }
 
-export async function searchDocuments(query: SearchQuery): Promise<SearchResponse> {
+export async function searchDocuments(
+  query: Partial<SearchQuery> & { q: string },
+): Promise<SearchResponse> {
   const qs = buildQuery({
     q: query.q,
     type: query.type,
@@ -219,6 +293,9 @@ export async function searchDocuments(query: SearchQuery): Promise<SearchRespons
     dateTo: query.dateTo,
     recipient: query.recipient,
     tag: query.tag,
+    source: query.source,
+    mode: query.mode,
+    alpha: query.alpha,
     limit: query.limit,
     offset: query.offset,
   });

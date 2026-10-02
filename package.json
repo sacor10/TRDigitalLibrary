@@ -11,7 +11,8 @@
   ],
   "scripts": {
     "bootstrap": "node scripts/ensure-install.mjs",
-    "predev": "node scripts/ensure-install.mjs && npm run repair-topic-tags && node scripts/ensure-sentiment.mjs",
+    "predev": "node scripts/ensure-install.mjs && npm run repair-topic-tags && node scripts/ensure-sentiment.mjs && node scripts/ensure-embeddings.mjs",
+    "embeddings": "node scripts/ensure-embeddings.mjs",
     "dev": "concurrently -k -n server,client -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
     "prebuild": "node scripts/prebuild.mjs",
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",

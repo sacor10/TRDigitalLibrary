@@ -18,6 +18,13 @@ import {
   DocumentPatchSchema,
   DocumentSchema,
   ErrorResponseSchema,
+  CollectionSchema,
+  CollectionDetailSchema,
+  CollectionsListResponseSchema,
+  CollectionCreateInputSchema,
+  OnThisDayQuerySchema,
+  OnThisDayResponseSchema,
+  RelatedDocumentsResponseSchema,
   FieldProvenanceSchema,
   SearchQuerySchema,
   SearchResponseSchema,
@@ -43,6 +50,12 @@ export function buildOpenApiDocument(): object {
   registry.register('DocumentPatch', DocumentPatchSchema);
   registry.register('FieldProvenance', FieldProvenanceSchema);
   registry.register('SearchResponse', SearchResponseSchema);
+  registry.register('OnThisDayResponse', OnThisDayResponseSchema);
+  registry.register('RelatedDocumentsResponse', RelatedDocumentsResponseSchema);
+  registry.register('Collection', CollectionSchema);
+  registry.register('CollectionDetail', CollectionDetailSchema);
+  registry.register('CollectionsListResponse', CollectionsListResponseSchema);
+  registry.register('CollectionCreateInput', CollectionCreateInputSchema);
   registry.register('CorrespondentGraphResponse', CorrespondentGraphResponseSchema);
   registry.register('CorrespondentItemsResponse', CorrespondentItemsResponseSchema);
   registry.register('Topic', TopicSchema);
@@ -76,6 +89,85 @@ export function buildOpenApiDocument(): object {
       200: {
         description: 'List of documents',
         content: { 'application/json': { schema: DocumentListResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/documents/on-this-day',
+    summary: "Documents written on today's month-day (or a given MM-DD override).",
+    request: { query: OnThisDayQuerySchema },
+    responses: {
+      200: {
+        description: 'Documents matching the month-day',
+        content: { 'application/json': { schema: OnThisDayResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/documents/{id}/related',
+    summary: 'Documents related to the given document (embedding similarity or topic/recipient overlap).',
+    request: {
+      params: z.object({ id: z.string() }),
+      query: z.object({ limit: z.coerce.number().int().positive().max(50).optional() }),
+    },
+    responses: {
+      200: {
+        description: 'Related documents with scores and match reasons',
+        content: { 'application/json': { schema: RelatedDocumentsResponseSchema } },
+      },
+      404: {
+        description: 'Not found',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/collections',
+    summary: "List the signed-in user's research lists.",
+    responses: {
+      200: {
+        description: 'Collections owned by the authenticated user',
+        content: { 'application/json': { schema: CollectionsListResponseSchema } },
+      },
+      401: {
+        description: 'Authentication required',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/collections',
+    summary: 'Create a research list.',
+    request: { body: { content: { 'application/json': { schema: CollectionCreateInputSchema } } } },
+    responses: {
+      201: {
+        description: 'Created collection',
+        content: { 'application/json': { schema: CollectionSchema } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/collections/{id}',
+    summary: 'Get a collection with its saved documents (public lists are world-readable).',
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: {
+        description: 'Collection detail',
+        content: { 'application/json': { schema: CollectionDetailSchema } },
+      },
+      404: {
+        description: 'Not found or not accessible',
+        content: { 'application/json': { schema: ErrorResponseSchema } },
       },
     },
   });

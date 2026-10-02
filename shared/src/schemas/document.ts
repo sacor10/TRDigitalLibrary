@@ -121,26 +121,38 @@ export const DocumentSectionSchema = z.object({
 
 export type DocumentSection = z.infer<typeof DocumentSectionSchema>;
 
-export const DocumentListResponseSchema = z.object({
-  items: z.array(DocumentSchema),
-  total: z.number().int().nonnegative(),
-  availableTypes: z.array(DocumentTypeSchema).default([]),
-  facets: z
-    .object({
-      types: z.array(
-        z.object({
-          value: DocumentTypeSchema,
-          count: z.number().int().nonnegative(),
-        }),
-      ),
-      tags: z.array(
+export const FacetsSchema = z
+  .object({
+    types: z.array(
+      z.object({
+        value: DocumentTypeSchema,
+        count: z.number().int().nonnegative(),
+      }),
+    ),
+    tags: z.array(
+      z.object({
+        value: z.string().min(1),
+        count: z.number().int().nonnegative(),
+      }),
+    ),
+    sources: z
+      .array(
         z.object({
           value: z.string().min(1),
           count: z.number().int().nonnegative(),
         }),
-      ),
-    })
-    .default({ types: [], tags: [] }),
+      )
+      .default([]),
+  })
+  .default({ types: [], tags: [], sources: [] });
+
+export type Facets = z.infer<typeof FacetsSchema>;
+
+export const DocumentListResponseSchema = z.object({
+  items: z.array(DocumentSchema),
+  total: z.number().int().nonnegative(),
+  availableTypes: z.array(DocumentTypeSchema).default([]),
+  facets: FacetsSchema,
 });
 
 export type DocumentListResponse = z.infer<typeof DocumentListResponseSchema>;
@@ -151,6 +163,7 @@ export const DocumentListQuerySchema = z.object({
   dateTo: isoDate.optional(),
   recipient: z.string().optional(),
   tag: z.string().min(1).optional(),
+  source: z.string().min(1).optional(),
   sort: z.enum(['date', 'title']).default('date'),
   order: z.enum(['asc', 'desc']).default('asc'),
   limit: z.coerce.number().int().positive().max(100).default(10),
@@ -159,6 +172,10 @@ export const DocumentListQuerySchema = z.object({
 
 export type DocumentListQuery = z.infer<typeof DocumentListQuerySchema>;
 
+export const SearchModeSchema = z.enum(['lexical', 'semantic', 'hybrid']);
+
+export type SearchMode = z.infer<typeof SearchModeSchema>;
+
 export const SearchQuerySchema = z.object({
   q: z.string().min(1),
   type: DocumentTypeSchema.optional(),
@@ -166,6 +183,9 @@ export const SearchQuerySchema = z.object({
   dateTo: isoDate.optional(),
   recipient: z.string().optional(),
   tag: z.string().min(1).optional(),
+  source: z.string().min(1).optional(),
+  mode: SearchModeSchema.default('lexical'),
+  alpha: z.coerce.number().min(0).max(1).default(0.5),
   limit: z.coerce.number().int().positive().max(100).default(10),
   offset: z.coerce.number().int().nonnegative().default(0),
 });
@@ -175,6 +195,8 @@ export type SearchQuery = z.infer<typeof SearchQuerySchema>;
 export const SearchResultSchema = z.object({
   document: DocumentSchema,
   snippet: z.string(),
+  score: z.number().optional(),
+  mode: SearchModeSchema.optional(),
 });
 
 export type SearchResult = z.infer<typeof SearchResultSchema>;
@@ -182,25 +204,52 @@ export type SearchResult = z.infer<typeof SearchResultSchema>;
 export const SearchResponseSchema = z.object({
   results: z.array(SearchResultSchema),
   total: z.number().int().nonnegative(),
-  facets: z
-    .object({
-      types: z.array(
-        z.object({
-          value: DocumentTypeSchema,
-          count: z.number().int().nonnegative(),
-        }),
-      ),
-      tags: z.array(
-        z.object({
-          value: z.string().min(1),
-          count: z.number().int().nonnegative(),
-        }),
-      ),
-    })
-    .default({ types: [], tags: [] }),
+  facets: FacetsSchema,
 });
 
 export type SearchResponse = z.infer<typeof SearchResponseSchema>;
+
+export const RelatedReasonSchema = z.enum([
+  'embedding',
+  'shared-topic',
+  'same-recipient',
+  'temporal-proximity',
+]);
+
+export type RelatedReason = z.infer<typeof RelatedReasonSchema>;
+
+export const RelatedDocumentSchema = z.object({
+  document: DocumentSchema,
+  score: z.number(),
+  reasons: z.array(RelatedReasonSchema).default([]),
+});
+
+export type RelatedDocument = z.infer<typeof RelatedDocumentSchema>;
+
+export const RelatedDocumentsResponseSchema = z.object({
+  items: z.array(RelatedDocumentSchema),
+});
+
+export type RelatedDocumentsResponse = z.infer<typeof RelatedDocumentsResponseSchema>;
+
+export const OnThisDayQuerySchema = z.object({
+  // Optional MM-DD override for deterministic testing; otherwise the server
+  // uses today's month-day.
+  date: z
+    .string()
+    .regex(/^\d{2}-\d{2}$/, 'date must be in MM-DD format')
+    .optional(),
+  limit: z.coerce.number().int().positive().max(50).default(12),
+});
+
+export type OnThisDayQuery = z.infer<typeof OnThisDayQuerySchema>;
+
+export const OnThisDayResponseSchema = z.object({
+  monthDay: z.string().regex(/^\d{2}-\d{2}$/),
+  items: z.array(DocumentSchema),
+});
+
+export type OnThisDayResponse = z.infer<typeof OnThisDayResponseSchema>;
 
 export const ErrorResponseSchema = z.object({
   error: z.string(),

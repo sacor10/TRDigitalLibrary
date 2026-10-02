@@ -11,10 +11,17 @@
  *
  * The schema is applied automatically by openLibraryDb (it runs every
  * migration in server/src/migrations/), so you can point this at a brand-new
- * Turso database. FTS5 indexes (documents_fts, sections_fts) are not copied
- * directly — they are content tables backed by the regular tables, so the
- * triggers in 001_init.sql and 002_tei.sql rebuild them automatically as we
- * INSERT into documents and document_sections.
+ * Turso database. FTS5 indexes (documents_fts, sections_fts, document_chunks_fts)
+ * are not copied directly — they are content tables backed by the regular
+ * tables, so the triggers in 001_init.sql, 002_tei.sql and 019_document_chunks.sql
+ * rebuild them automatically as we INSERT into documents, document_sections and
+ * document_chunks.
+ *
+ * document_chunks is the bounded-text index that search snippets are sourced
+ * from; it is regenerated on the source from each document's transcription
+ * before copying (see ensureSourceChunks) so a single upload run leaves prod
+ * with working snippets regardless of whether the source DB predates the chunk
+ * index.
  */
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -23,7 +30,7 @@ import { parseArgs } from 'node:util';
 
 import type { Client as LibsqlClient, InStatement, InValue } from '@libsql/client';
 
-import { openLibraryDb } from './db.js';
+import { openLibraryDb, syncDocumentChunks } from './db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -133,6 +140,14 @@ const TABLES: TableSpec[] = [
     conflict: 'ON CONFLICT(id) DO NOTHING',
   },
   {
+    // Bounded-text chunk index that search snippets are sourced from. Must be
+    // copied after documents (FK -> documents.id); its INSERT triggers rebuild
+    // document_chunks_fts on the destination.
+    name: 'document_chunks',
+    columns: ['document_id', 'chunk_index', 'text'],
+    conflict: 'ON CONFLICT(document_id, chunk_index) DO NOTHING',
+  },
+  {
     name: 'document_field_provenance',
     columns: ['document_id', 'field', 'source_url', 'fetched_at', 'editor'],
     conflict: 'ON CONFLICT(document_id, field) DO NOTHING',
@@ -231,6 +246,28 @@ async function copyTable(
   return { scanned, written };
 }
 
+// Regenerate document_chunks on the source for any document that lacks them, so
+// the copy step has rows to propagate. Newly-ingested documents already have
+// chunks (upsertDocument writes them); this only fills documents whose data
+// predates the chunk index. Idempotent and cheap — onlyIfMissing skips
+// already-chunked documents without re-chunking their multi-MB transcription.
+async function ensureSourceChunks(source: LibsqlClient): Promise<number> {
+  const rows = await source.execute('SELECT id, transcription FROM documents ORDER BY id');
+  let filled = 0;
+  for (const row of rows.rows) {
+    const before = await source.execute({
+      sql: 'SELECT 1 FROM document_chunks WHERE document_id = ? LIMIT 1',
+      args: [String(row.id)],
+    });
+    if (before.rows.length > 0) continue;
+    await syncDocumentChunks(source, String(row.id), row.transcription == null ? '' : String(row.transcription), {
+      onlyIfMissing: true,
+    });
+    filled += 1;
+  }
+  return filled;
+}
+
 async function main(): Promise<void> {
   const opts = parseCliArgs(process.argv.slice(2));
 
@@ -264,6 +301,15 @@ async function main(): Promise<void> {
   const dest = opts.dryRun ? source : await openLibraryDb();
 
   try {
+    if (!opts.dryRun) {
+      const filled = await ensureSourceChunks(source);
+      if (filled > 0) {
+        console.log(
+          `[upload-library-to-turso] backfilled chunks for ${filled} document(s) on the source ` +
+            `before copy (predated the chunk index).`,
+        );
+      }
+    }
     const tables = opts.withHistory ? [...TABLES, HISTORY_TABLE] : TABLES;
     let totalScanned = 0;
     let totalWritten = 0;

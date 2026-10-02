@@ -15,6 +15,7 @@ import {
   createDocumentAnnotationsRouter,
 } from './routes/annotations.js';
 import { createAuthRouter } from './routes/auth.js';
+import { createCollectionsRouter } from './routes/collections.js';
 import { createCorrespondentsRouter } from './routes/correspondents.js';
 import { createDocumentsRouter } from './routes/documents.js';
 import { createSearchRouter } from './routes/search.js';
@@ -70,6 +71,13 @@ export function createApp(db: LibsqlClient, opts: CreateAppOptions = {}): Expres
     app.use(
       '/api/documents/:id/annotations',
       createDocumentAnnotationsRouter({
+        documentsDb: db,
+        annotationsDb: opts.annotationsDb,
+      }),
+    );
+    app.use(
+      '/api/collections',
+      createCollectionsRouter({
         documentsDb: db,
         annotationsDb: opts.annotationsDb,
       }),

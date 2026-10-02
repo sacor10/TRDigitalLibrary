@@ -290,6 +290,23 @@ if (analysisDecision.shouldRun) {
   console.log(
     '[build-ingest] Sentiment ran this build; deferring TRC metadata ingest to keep the build under Netlify time limits.',
   );
+  // Keep document_embeddings in sync when the corpus changed. The script is
+  // resilient: it skips (exit 0) if the embedding model can't be loaded, so a
+  // blocked model CDN never fails the deploy — semantic search just degrades
+  // to lexical until embeddings exist.
+  runStreaming(
+    process.execPath,
+    [join(repoRoot, 'scripts', 'ensure-embeddings.mjs')],
+    'embeddings',
+    {
+      ...process.env,
+      EMBEDDINGS_BOOTSTRAP_ALLOW_REMOTE: '1',
+      EMBEDDINGS_BOOTSTRAP_FORCE:
+        analysisDecision.reason === 'corpus-changed' || analysisDecision.reason === 'forced'
+          ? '1'
+          : '',
+    },
+  );
 } else {
   const elapsed = Date.now() - buildStart;
   if (topicRepairMs > 60_000 || elapsed > TRC_BUDGET_CUTOFF_MS) {

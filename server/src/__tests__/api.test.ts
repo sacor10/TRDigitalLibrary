@@ -188,10 +188,76 @@ describe('TR Digital Library API', () => {
       const res = await request(countingApp).get('/api/documents?sort=date&order=asc');
       expect(res.status).toBe(200);
       expect(res.body.items.length).toBeGreaterThan(0);
-      // Wave A (concurrent): COUNT + 2 facet aggregates + SELECT. Wave B: 1
-      // batched IN-clause provenance fetch. 5 queries, 2 round-trip waves —
+      // Wave A (concurrent): COUNT + 3 facet aggregates (type/tag/source) + SELECT.
+      // Wave B: 1 batched IN-clause provenance fetch. 6 queries, 2 round-trip waves —
       // anything close to N+1 still trips this.
-      expect(executeCount).toBeLessThanOrEqual(5);
+      expect(executeCount).toBeLessThanOrEqual(6);
+    });
+  });
+
+  describe('GET /api/documents source facet', () => {
+    it('returns a sources facet with counts', async () => {
+      const res = await request(app).get('/api/documents');
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.facets.sources)).toBe(true);
+      expect(res.body.facets.sources.length).toBeGreaterThan(0);
+      for (const facet of res.body.facets.sources) {
+        expect(typeof facet.value).toBe('string');
+        expect(facet.value.length).toBeGreaterThan(0);
+        expect(facet.count).toBeGreaterThan(0);
+      }
+    });
+
+    it('filters by source and narrows the result set', async () => {
+      const all = await request(app).get('/api/documents');
+      const source = all.body.facets.sources[0]?.value as string;
+      expect(source).toBeTruthy();
+      const res = await request(app).get(
+        `/api/documents?source=${encodeURIComponent(source)}&limit=100`,
+      );
+      expect(res.status).toBe(200);
+      for (const item of res.body.items) {
+        expect(item.source).toBe(source);
+      }
+    });
+  });
+
+  describe('GET /api/documents/on-this-day', () => {
+    it('returns documents matching a given month-day', async () => {
+      const target = TEST_DOCUMENTS[0]!;
+      const monthDay = target.date.slice(5, 10);
+      const res = await request(app).get(`/api/documents/on-this-day?date=${monthDay}`);
+      expect(res.status).toBe(200);
+      expect(res.body.monthDay).toBe(monthDay);
+      expect(res.body.items.length).toBeGreaterThan(0);
+      for (const item of res.body.items) {
+        expect(item.date.slice(5, 10)).toBe(monthDay);
+        expect(() => DocumentSchema.parse(item)).not.toThrow();
+      }
+    });
+
+    it('rejects a malformed date override', async () => {
+      const res = await request(app).get('/api/documents/on-this-day?date=2026-06-05');
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('GET /api/documents/:id/related', () => {
+    it('returns related documents excluding self with reasons', async () => {
+      const res = await request(app).get('/api/documents/man-in-the-arena/related');
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.items)).toBe(true);
+      for (const item of res.body.items) {
+        expect(item.document.id).not.toBe('man-in-the-arena');
+        expect(typeof item.score).toBe('number');
+        expect(Array.isArray(item.reasons)).toBe(true);
+        expect(() => DocumentSchema.parse(item.document)).not.toThrow();
+      }
+    });
+
+    it('returns 404 for an unknown document', async () => {
+      const res = await request(app).get('/api/documents/no-such-doc/related');
+      expect(res.status).toBe(404);
     });
   });
 
@@ -286,68 +352,72 @@ describe('TR Digital Library API', () => {
       expect(res.body.total).toBe(2);
     });
 
-    it('issues a ranking query (with COUNT OVER, no documents join) plus a rowid-scoped hydration query', async () => {
-      // Regression guard for the perf properties of the two-phase search:
+    it('keeps snippet() off the transcription column, skips facets when paginating, and drops documents join when unfiltered', async () => {
+      // Regression guards for the chunk-snippet architecture:
       //  1. The unbounded total piggybacks on the ranking query via COUNT(*)
-      //     OVER (), so there is no separate COUNT round-trip.
-      //  2. snippet()/transcription reads happen only in the hydration query
-      //     and only against the page rowids — never against the full match
-      //     set. If snippet() leaks into the ranking SELECT, every match
-      //     materializes its transcription before LIMIT (the original 21s bug).
+      //     OVER () — no separate COUNT round-trip.
+      //  2. snippet() never runs against documents_fts (the multi-MB
+      //     transcription column — the ~18 s bug). Snippets come from the
+      //     bounded document_chunks_fts index instead.
       //  3. On an unfiltered keyword search the ranking query must NOT join the
       //     documents table — the join forces a ~1MB-row PK lookup per match
       //     and is what pushed broad terms past the function timeout (504).
-      const executeCalls: Array<{ sql: string; args?: unknown }> = [];
-      const countingDb = new Proxy(db, {
-        get(target, prop, receiver) {
-          if (prop === 'execute') {
-            return async (stmt: Parameters<LibsqlClient['execute']>[0]) => {
-              if (typeof stmt === 'object' && stmt !== null && 'sql' in stmt) {
-                const s = stmt as { sql: unknown; args?: unknown };
-                executeCalls.push({ sql: String(s.sql), args: s.args });
-              }
-              return (target.execute as LibsqlClient['execute'])(stmt);
-            };
-          }
-          return Reflect.get(target, prop, receiver);
-        },
-      }) as LibsqlClient;
-      const countingApp = createApp(countingDb);
+      //  4. Facets describe the whole match set, so they are computed once on
+      //     the first page and skipped on "Load more" (offset > 0).
+      const run = async (path: string) => {
+        const executeCalls: Array<{ sql: string; args?: unknown }> = [];
+        const countingDb = new Proxy(db, {
+          get(target, prop, receiver) {
+            if (prop === 'execute') {
+              return async (stmt: Parameters<LibsqlClient['execute']>[0]) => {
+                if (typeof stmt === 'object' && stmt !== null && 'sql' in stmt) {
+                  const s = stmt as { sql: unknown; args?: unknown };
+                  executeCalls.push({ sql: String(s.sql), args: s.args });
+                }
+                return (target.execute as LibsqlClient['execute'])(stmt);
+              };
+            }
+            return Reflect.get(target, prop, receiver);
+          },
+        }) as LibsqlClient;
+        const res = await request(createApp(countingDb)).get(path);
+        expect(res.status).toBe(200);
+        return executeCalls;
+      };
 
-      const res = await request(countingApp).get('/api/search?q=alpenglow&limit=5&offset=2');
-      expect(res.status).toBe(200);
-
-      const ftsCalls = executeCalls.filter((c) => c.sql.includes('documents_fts'));
-      expect(ftsCalls).toHaveLength(4);
-
-      const rankingCall = ftsCalls.find((c) => c.sql.includes('COUNT(*) OVER'));
+      // First page: ranking + 3 facets, snippet sourced from chunks.
+      const firstPage = await run('/api/search?q=alpenglow&limit=5&offset=0');
+      const docsFtsCalls = firstPage.filter((c) => c.sql.includes('documents_fts'));
+      const rankingCall = docsFtsCalls.find((c) => c.sql.includes('COUNT(*) OVER'));
       expect(rankingCall, 'ranking query should carry COUNT(*) OVER ()').toBeDefined();
       // Ranking query must not compute snippets; that's the whole point.
       expect(rankingCall!.sql).not.toContain('snippet(');
       // Unfiltered search: ranking runs on the FTS index alone, no documents join.
       expect(rankingCall!.sql).not.toMatch(/JOIN\s+documents/);
 
-      const hydrateCall = ftsCalls.find((c) => c.sql.includes('snippet('));
-      expect(hydrateCall, 'hydration query should exist').toBeDefined();
-      expect(hydrateCall!.sql).toContain('documents.rowid IN');
-      // Hydration is rowid-bound: args are positional [ftsQuery, ...rowids, ...rowids],
-      // never @limit/@offset.
-      expect(Array.isArray(hydrateCall!.args)).toBe(true);
-      const hydrateArgs = hydrateCall!.args as unknown[];
-      expect(hydrateArgs[0]).toBe('"alpenglow"');
-      expect(hydrateArgs.length).toBeGreaterThan(1);
-
-      const facetCalls = ftsCalls.filter((c) => c !== rankingCall && c !== hydrateCall);
-      expect(facetCalls).toHaveLength(2);
-      for (const facetCall of facetCalls) {
-        expect(facetCall.sql).not.toContain('snippet(');
+      // No documents_fts query may compute a snippet — that is the whole fix.
+      for (const c of docsFtsCalls) {
+        expect(c.sql).not.toContain('snippet(');
       }
-
-      // Belt-and-braces: no separate COUNT(*) query survives.
-      const standaloneCount = executeCalls.find((c) =>
-        /\bSELECT\s+COUNT\(\*\)\s+as\s+c\b/i.test(c.sql),
+      // Snippets come from the bounded chunk index.
+      const chunkSnippet = firstPage.find(
+        (c) => c.sql.includes('document_chunks_fts') && c.sql.includes('snippet('),
       );
-      expect(standaloneCount).toBeUndefined();
+      expect(chunkSnippet, 'snippet should be sourced from document_chunks_fts').toBeDefined();
+      // Three facet aggregates (type/tag/source) on the first page.
+      const facetCalls = docsFtsCalls.filter((c) => c !== rankingCall);
+      expect(facetCalls).toHaveLength(3);
+      // Belt-and-braces: no separate COUNT(*) query survives.
+      expect(
+        firstPage.find((c) => /\bSELECT\s+COUNT\(\*\)\s+as\s+c\b/i.test(c.sql)),
+      ).toBeUndefined();
+
+      // Paginated request: facets are skipped entirely.
+      const secondPage = await run('/api/search?q=alpenglow&limit=5&offset=5');
+      const secondFacetCalls = secondPage
+        .filter((c) => c.sql.includes('documents_fts'))
+        .filter((c) => !c.sql.includes('COUNT(*) OVER'));
+      expect(secondFacetCalls, 'no facet scans on offset > 0').toHaveLength(0);
     });
 
     it('keeps the documents join in the ranking query when a documents.* filter is present', async () => {
