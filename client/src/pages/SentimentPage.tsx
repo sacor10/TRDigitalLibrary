@@ -12,7 +12,7 @@ import {
 import { LoadingModal } from '../components/LoadingModal';
 
 const CHART_W = 720;
-const CHART_H = 260;
+const CHART_H = 285;
 const EXTREMES_PAGE_SIZE = 5;
 
 interface SelectedSentimentPeriod {
@@ -37,6 +37,17 @@ function periodToDateRange(
   from: string,
   to: string,
 ): SelectedSentimentPeriod {
+  if (period.includes('–')) {
+    const parts = period.split('–');
+    const startRange = periodToDateRange(parts[0] ?? '', bin, from, to);
+    const endRange = periodToDateRange(parts[1] ?? '', bin, from, to);
+    return {
+      period,
+      bin,
+      from: startRange.from < from ? from : startRange.from,
+      to: endRange.to > to ? to : endRange.to,
+    };
+  }
   const [yearRaw, monthRaw] = period.split('-');
   const year = Number.parseInt(yearRaw ?? '', 10);
   const month = Number.parseInt(monthRaw ?? '', 10);
@@ -123,7 +134,7 @@ function MoodChart({
       </p>
     );
   }
-  const padding = { top: 16, right: 16, bottom: 32, left: 44 };
+  const padding = { top: 16, right: 28, bottom: 60, left: 44 };
   const innerW = CHART_W - padding.left - padding.right;
   const innerH = CHART_H - padding.top - padding.bottom;
   const stepX = points.length > 1 ? innerW / (points.length - 1) : 0;
@@ -140,7 +151,7 @@ function MoodChart({
     .join(' ');
 
   const yTicks = [-1, -0.5, 0, 0.5, 1];
-  const xTickEvery = Math.max(1, Math.ceil(points.length / 12));
+  const xTickEvery = Math.max(1, Math.ceil(points.length / 5));
   const zeroY = yToPx(0);
 
   return (
@@ -288,21 +299,25 @@ function MoodChart({
             </g>
           );
         })}
-        {points.map((p, i) =>
-          i % xTickEvery === 0 || i === points.length - 1 ? (
+        {points.map((p, i) => {
+          if (i % xTickEvery !== 0 && i !== points.length - 1) return null;
+          const x = padding.left + i * stepX;
+          const y = CHART_H - padding.bottom + 12;
+          return (
             <text
               key={`x-${p.period}`}
-              x={padding.left + i * stepX}
-              y={CHART_H - padding.bottom + 16}
-              textAnchor="middle"
+              x={x}
+              y={y}
+              transform={`rotate(-28 ${x} ${y})`}
+              textAnchor="end"
               fontSize={10}
               fill="currentColor"
-              fillOpacity={0.7}
+              fillOpacity={0.75}
             >
               {p.period}
             </text>
-          ) : null,
-        )}
+          );
+        })}
       </svg>
     </div>
   );
