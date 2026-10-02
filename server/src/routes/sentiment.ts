@@ -29,6 +29,8 @@ interface SentimentRow {
 interface TimelineRow {
   period: string;
   mean_polarity: number;
+  min_polarity: number;
+  max_polarity: number;
   document_count: number;
 }
 
@@ -102,6 +104,8 @@ export function createSentimentRouter(db: LibsqlClient): Router {
     const sql = `
       SELECT ${periodExpr}            AS period,
              AVG(s.polarity)          AS mean_polarity,
+             MIN(s.polarity)          AS min_polarity,
+             MAX(s.polarity)          AS max_polarity,
              COUNT(*)                 AS document_count
         FROM document_sentiment s
         JOIN documents d ON d.id = s.document_id
@@ -113,11 +117,15 @@ export function createSentimentRouter(db: LibsqlClient): Router {
     const rows: TimelineRow[] = result.rows.map((r) => ({
       period: asString(r.period),
       mean_polarity: asNumber(r.mean_polarity),
+      min_polarity: asNumber(r.min_polarity),
+      max_polarity: asNumber(r.max_polarity),
       document_count: asNumber(r.document_count),
     }));
     const points: SentimentTimelinePoint[] = rows.map((r) => ({
       period: r.period,
       meanPolarity: r.mean_polarity,
+      minPolarity: r.min_polarity,
+      maxPolarity: r.max_polarity,
       documentCount: r.document_count,
     }));
     const payload: SentimentTimelineResponse = { bin, from, to, points };

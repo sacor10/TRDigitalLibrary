@@ -55,8 +55,8 @@ describe('SentimentPage graph node filtering', () => {
       from: '1912-01-15',
       to: '1912-12-10',
       points: [
-        { period: '1912-01', meanPolarity: 0.25, documentCount: 1 },
-        { period: '1912-06', meanPolarity: 0.7, documentCount: 2 },
+        { period: '1912-01', meanPolarity: 0.25, minPolarity: 0.25, maxPolarity: 0.25, documentCount: 1 },
+        { period: '1912-06', meanPolarity: 0.7, minPolarity: 0.5, maxPolarity: 0.9, documentCount: 2 },
       ],
     });
     fetchSentimentExtremesMock.mockResolvedValue({
