@@ -52,6 +52,59 @@ function periodToDateRange(
   };
 }
 
+
+interface ClusteredTimelinePoint extends SentimentTimelinePoint {
+  rawStartPeriod?: string;
+  rawEndPeriod?: string;
+}
+
+function clusterTimelinePoints(
+  points: SentimentTimelinePoint[],
+  maxPoints = 25
+): ClusteredTimelinePoint[] {
+  if (points.length <= maxPoints) return points;
+  const bucketSize = Math.ceil(points.length / maxPoints);
+  const clustered: ClusteredTimelinePoint[] = [];
+
+  for (let i = 0; i < points.length; i += bucketSize) {
+    const chunk = points.slice(i, i + bucketSize);
+    const first = chunk[0];
+    const last = chunk[chunk.length - 1];
+    if (!first || !last) continue;
+    const startPeriod = first.period;
+    const endPeriod = last.period;
+    const periodLabel = startPeriod === endPeriod ? startPeriod : startPeriod + '–' + endPeriod;
+
+    let totalDocCount = 0;
+    let weightedPolaritySum = 0;
+    let minPolarity = Infinity;
+    let maxPolarity = -Infinity;
+
+    for (const p of chunk) {
+      totalDocCount += p.documentCount;
+      weightedPolaritySum += p.meanPolarity * p.documentCount;
+      const pMin = p.minPolarity !== undefined ? p.minPolarity : p.meanPolarity;
+      const pMax = p.maxPolarity !== undefined ? p.maxPolarity : p.meanPolarity;
+      if (pMin < minPolarity) minPolarity = pMin;
+      if (pMax > maxPolarity) maxPolarity = pMax;
+    }
+
+    const meanPolarity = totalDocCount > 0 ? weightedPolaritySum / totalDocCount : first.meanPolarity;
+
+    clustered.push({
+      period: periodLabel,
+      meanPolarity,
+      minPolarity: minPolarity === Infinity ? meanPolarity : minPolarity,
+      maxPolarity: maxPolarity === -Infinity ? meanPolarity : maxPolarity,
+      documentCount: totalDocCount,
+      rawStartPeriod: startPeriod,
+      rawEndPeriod: endPeriod,
+    });
+  }
+
+  return clustered;
+}
+
 function MoodChart({
   points,
   bin,
@@ -357,7 +410,8 @@ export function SentimentPage() {
 
   const isLoading = rangeQuery.isLoading || (datesReady && timelineQuery.isLoading);
   const error = rangeQuery.error ?? timelineQuery.error ?? extremesQuery.error;
-  const points = timelineQuery.data?.points ?? [];
+  const rawPoints = timelineQuery.data?.points ?? [];
+  const points = clusterTimelinePoints(rawPoints, 25);
   const togglePeriod = (period: string) => {
     if (!from || !to) return;
     setSelectedPeriod((current) =>
